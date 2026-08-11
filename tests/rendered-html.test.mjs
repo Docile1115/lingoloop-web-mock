@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const expectedTitle =
@@ -51,6 +52,15 @@ function assertMeta(meta, requestId) {
   assert.ok(Number.isFinite(Date.parse(meta.timestamp)), "meta.timestamp must be an ISO date");
 }
 
+function assertNonEmptyStringArray(value, label) {
+  assert.ok(Array.isArray(value), `${label} must be an array`);
+  assert.ok(value.length > 0, `${label} must not be empty`);
+  assert.ok(
+    value.every((item) => typeof item === "string" && item.length > 0),
+    `${label} must contain non-empty strings`,
+  );
+}
+
 test("server-renders the LingoLoop product metadata and responsive application shell", async () => {
   const response = await fetchApp("/", {
     headers: { accept: "text/html" },
@@ -73,17 +83,32 @@ test("server-renders the LingoLoop product metadata and responsive application s
   assert.match(html, /<a class="skip-link" href="#main-content">본문으로 건너뛰기<\/a>/);
   assert.match(html, /<aside class="desktop-sidebar" aria-label="주요 메뉴">/);
   assert.match(html, /<main id="main-content" class="main-content">/);
-  assert.match(html, /<aside class="right-rail" aria-label="학습 컨텍스트">/);
   assert.match(html, /<nav class="mobile-nav" aria-label="모바일 주요 메뉴">/);
-  assert.match(html, /aria-label="오늘의 매칭 요약"/);
-  assert.match(html, /aria-label="추천 언어 파트너"/);
-  assert.match(html, /배우는 만큼,/);
-  assert.match(html, /가르치며 가까워져요\./);
+  assert.match(html, /매칭 설정/);
+  assert.match(html, /오늘의 파트너/);
+  assert.doesNotMatch(
+    html,
+    /유료|Loop Plus|\bVIP\b|안전한 메시지 요청함|오늘 배운 표현/i,
+  );
   assert.match(
     html,
     /class="api-indicator api-(?:ready|checking|offline)" title="mock API 상태"/,
   );
   assert.match(html, /Mock API 연결됨|연결 확인 중|오프라인 데모/);
+});
+
+test("keeps conditional core entry points and removes paid or legacy product copy", async () => {
+  const source = await readFile(
+    new URL("../app/components/LingoLoopApp.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /보이스룸 만들기/);
+  assert.match(source, /프로필 설정/);
+  assert.doesNotMatch(
+    source,
+    /유료|Loop Plus|\bVIP\b|안전한 메시지 요청함|오늘 배운 표현/i,
+  );
 });
 
 test("removes every starter-preview marker from the rendered product", async () => {
@@ -140,9 +165,273 @@ test("mock API list endpoint paginates its stable partner collection", async () 
     cursor: 0,
     limit: 2,
     nextCursor: "2",
-    total: 5,
+    total: 6,
   });
   assertMeta(body.meta, requestId);
+});
+
+test("mock API exposes and updates matching preferences as a non-persistent mock", async (t) => {
+  await t.test("gets the current preferences", async () => {
+    const requestId = "matching-preferences-get-test";
+    const response = await fetchApp("/api/matching/preferences", {
+      headers: { "x-request-id": requestId },
+    });
+
+    assert.equal(response.status, 200);
+    assertCommonApiHeaders(response, requestId);
+
+    const body = await response.json();
+    assert.deepEqual(Object.keys(body.data).sort(), [
+      "nextRefreshAt",
+      "persisted",
+      "preferences",
+    ]);
+    assert.deepEqual(Object.keys(body.data.preferences).sort(), [
+      "availability",
+      "interests",
+      "onlineOnly",
+      "partnerLevel",
+      "preferredCountries",
+      "targetLanguages",
+    ]);
+    assertNonEmptyStringArray(
+      body.data.preferences.targetLanguages,
+      "preferences.targetLanguages",
+    );
+    assert.ok(Array.isArray(body.data.preferences.preferredCountries));
+    assert.ok(Array.isArray(body.data.preferences.interests));
+    assert.ok(Array.isArray(body.data.preferences.availability));
+    assert.ok(
+      body.data.preferences.availability.every((item) =>
+        /^(?:weekday|weekend)-(?:morning|evening)$/.test(item),
+      ),
+    );
+    assert.match(
+      body.data.preferences.partnerLevel,
+      /^(?:any|beginner|intermediate|advanced)$/,
+    );
+    assert.equal(typeof body.data.preferences.onlineOnly, "boolean");
+    assert.equal(body.data.persisted, false);
+    assert.ok(Number.isFinite(Date.parse(body.data.nextRefreshAt)));
+    assertMeta(body.meta, requestId);
+  });
+
+  await t.test("returns normalized preferences after an update", async () => {
+    const requestId = "matching-preferences-post-test";
+    const preferences = {
+      targetLanguages: ["en", "ja"],
+      preferredCountries: ["US", "JP"],
+      interests: ["travel", "music"],
+      availability: ["weekday-evening"],
+      partnerLevel: "intermediate",
+      onlineOnly: true,
+    };
+    const response = await fetchApp("/api/matching/preferences", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": requestId,
+      },
+      body: JSON.stringify(preferences),
+    });
+
+    assert.equal(response.status, 200);
+    assertCommonApiHeaders(response, requestId);
+
+    const body = await response.json();
+    assert.deepEqual(body.data.preferences, preferences);
+    assert.equal(body.data.persisted, false);
+    assert.ok(Number.isFinite(Date.parse(body.data.nextRefreshAt)));
+    assertMeta(body.meta, requestId);
+  });
+
+  await t.test("rejects an empty target language selection", async () => {
+    const requestId = "matching-preferences-validation-test";
+    const response = await fetchApp("/api/matching/preferences", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": requestId,
+      },
+      body: JSON.stringify({ targetLanguages: [] }),
+    });
+
+    assert.equal(response.status, 422);
+    assertCommonApiHeaders(response, requestId);
+    const body = await response.json();
+    assert.equal(body.error.code, "VALIDATION_ERROR");
+    assert.equal(body.error.details.field, "targetLanguages");
+    assertMeta(body.meta, requestId);
+  });
+});
+
+test("mock API returns one deterministic dated match and rejects invalid dates", async (t) => {
+  const conditions =
+    "targetLanguages=en,ja&preferredCountries=US,JP,CA&interests=design,coffee,travel&availability=weekday-evening,weekend-morning&partnerLevel=any&onlineOnly=false";
+  const dailyPath = (date) =>
+    `/api/matching/daily?date=${date}&${conditions}`;
+
+  await t.test("returns the same explained partner for the same date and conditions", async () => {
+    const requestIds = ["daily-matching-first-test", "daily-matching-repeat-test"];
+    const responses = await Promise.all(
+      requestIds.map((requestId) =>
+        fetchApp(dailyPath("2026-08-11"), {
+          headers: { "x-request-id": requestId },
+        }),
+      ),
+    );
+
+    const bodies = [];
+    for (const [index, response] of responses.entries()) {
+      assert.equal(response.status, 200);
+      assertCommonApiHeaders(response, requestIds[index]);
+      const body = await response.json();
+      assert.equal(body.data.date, "2026-08-11");
+      assert.equal(body.data.recommendations.length, 1);
+      const [recommendation] = body.data.recommendations;
+      assert.equal(typeof recommendation.partner?.id, "string");
+      assert.equal(typeof recommendation.partner?.name, "string");
+      assert.equal(typeof recommendation.score, "number");
+      assert.ok(recommendation.score >= 0 && recommendation.score <= 100);
+      assertNonEmptyStringArray(
+        recommendation.matchReasons,
+        "recommendation.matchReasons",
+      );
+      assert.equal(typeof recommendation.icebreaker, "string");
+      assert.ok(recommendation.icebreaker.length > 0);
+      assert.equal(typeof body.data.preferencesApplied, "object");
+      assertNonEmptyStringArray(
+        body.data.preferencesApplied.targetLanguages,
+        "preferencesApplied.targetLanguages",
+      );
+      assert.ok(Array.isArray(body.data.preferencesApplied.availability));
+      assert.ok(Number.isFinite(Date.parse(body.data.nextRefreshAt)));
+      assertMeta(body.meta, requestIds[index]);
+      bodies.push(body);
+    }
+
+    assert.deepEqual(
+      bodies[1].data.recommendations,
+      bodies[0].data.recommendations,
+    );
+    assert.deepEqual(
+      bodies[1].data.preferencesApplied,
+      bodies[0].data.preferencesApplied,
+    );
+  });
+
+  await t.test("rotates the deterministic partner across dates when candidates exist", async () => {
+    const dates = [
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-15",
+      "2026-08-16",
+      "2026-08-17",
+      "2026-08-18",
+    ];
+    const partnerIds = [];
+
+    for (const [index, date] of dates.entries()) {
+      const requestId = `daily-matching-rotation-${index}`;
+      const response = await fetchApp(dailyPath(date), {
+        headers: { "x-request-id": requestId },
+      });
+      assert.equal(response.status, 200);
+      assertCommonApiHeaders(response, requestId);
+      const body = await response.json();
+      assert.equal(body.data.date, date);
+      assert.equal(body.data.recommendations.length, 1);
+      partnerIds.push(body.data.recommendations[0].partner.id);
+      assertMeta(body.meta, requestId);
+    }
+
+    assert.ok(
+      new Set(partnerIds).size > 1,
+      "different dates should rotate among eligible deterministic partners",
+    );
+  });
+
+  await t.test("rejects a non-existent calendar date", async () => {
+    const requestId = "daily-matching-validation-test";
+    const response = await fetchApp("/api/matching/daily?date=2026-02-30", {
+      headers: { "x-request-id": requestId },
+    });
+
+    assert.equal(response.status, 400);
+    assertCommonApiHeaders(response, requestId);
+    const body = await response.json();
+    assert.equal(body.error.code, "INVALID_DATE");
+    assertMeta(body.meta, requestId);
+  });
+});
+
+test("mock API coaches a conversation and validates its stage", async (t) => {
+  await t.test("returns topics, openers, and follow-up questions", async () => {
+    const requestId = "conversation-support-post-test";
+    const response = await fetchApp("/api/conversation-support", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": requestId,
+      },
+      body: JSON.stringify({
+        partnerId: "user-maya",
+        stage: "first-message",
+        draft: "Nice to meet you. I like design too!",
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    assertCommonApiHeaders(response, requestId);
+    const body = await response.json();
+    assert.equal(body.data.partner.id, "user-maya");
+    assert.equal(body.data.stage, "first-message");
+    assert.equal(body.data.topics.length, 3);
+    assert.equal(body.data.suggestedOpeners.length, 3);
+    assert.equal(body.data.followUpQuestions.length, 3);
+    assertNonEmptyStringArray(body.data.topics, "conversation-support.topics");
+    assertNonEmptyStringArray(
+      body.data.suggestedOpeners,
+      "conversation-support.suggestedOpeners",
+    );
+    assertNonEmptyStringArray(
+      body.data.followUpQuestions,
+      "conversation-support.followUpQuestions",
+    );
+    assert.equal(typeof body.data.improvedDraft, "string");
+    assert.ok(body.data.improvedDraft.length > 0);
+    if (body.data.translation !== undefined) {
+      assert.equal(typeof body.data.translation.language, "string");
+      assert.equal(typeof body.data.translation.text, "string");
+    }
+    assert.equal(typeof body.data.tip, "string");
+    assert.ok(body.data.tip.length > 0);
+    assertMeta(body.meta, requestId);
+  });
+
+  await t.test("rejects an unknown conversation stage", async () => {
+    const requestId = "conversation-support-validation-test";
+    const response = await fetchApp("/api/conversation-support", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": requestId,
+      },
+      body: JSON.stringify({
+        partnerId: "user-maya",
+        stage: "awkward-silence",
+      }),
+    });
+
+    assert.equal(response.status, 422);
+    assertCommonApiHeaders(response, requestId);
+    const body = await response.json();
+    assert.equal(body.error.code, "VALIDATION_ERROR");
+    assert.equal(body.error.details.field, "stage");
+    assertMeta(body.meta, requestId);
+  });
 });
 
 test("mock API creates a normalized chat message without persistence", async () => {

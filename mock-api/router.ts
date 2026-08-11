@@ -1,15 +1,22 @@
 import {
   bootstrap,
+  conversationGuides,
   conversations,
   corrections,
   currentUser,
+  defaultMatchingPreferences,
   languages,
   notifications,
+  partnerMatchingSignals,
   partners,
   posts,
   voiceRooms,
+  type AvailabilitySlot,
   type ChatMessage,
   type Correction,
+  type MatchingPreferences,
+  type PreferredPartnerLevel,
+  type UserProfile,
 } from "./data";
 
 const API_VERSION = "0.1.0";
@@ -173,6 +180,151 @@ function optionalString(body: JsonObject, key: string, maxLength = 2_000): strin
     throw new ApiError(422, "VALIDATION_ERROR", `\`${key}\` 필드는 ${maxLength}자를 넘을 수 없습니다.`, { field: key, maxLength });
   }
   return normalized;
+}
+
+const availabilitySlots: AvailabilitySlot[] = [
+  "weekday-morning",
+  "weekday-evening",
+  "weekend-morning",
+  "weekend-evening",
+];
+const partnerLevels: PreferredPartnerLevel[] = ["any", "beginner", "intermediate", "advanced"];
+
+function normalizedStringArray(
+  body: JsonObject,
+  key: string,
+  options: {
+    fallback: string[];
+    required?: boolean;
+    maxItems: number;
+    maxItemLength?: number;
+    allowSingleString?: boolean;
+    transform?: (value: string) => string;
+  },
+): string[] {
+  const rawValue = body[key];
+  if (rawValue === undefined) {
+    if (options.required) {
+      throw new ApiError(422, "VALIDATION_ERROR", `\`${key}\` 필드는 필수입니다.`, { field: key });
+    }
+    return [...options.fallback];
+  }
+
+  const rawItems = options.allowSingleString && typeof rawValue === "string" ? [rawValue] : rawValue;
+  if (!Array.isArray(rawItems)) {
+    throw new ApiError(422, "VALIDATION_ERROR", `\`${key}\` 필드는 문자열 배열이어야 합니다.`, { field: key });
+  }
+  if (rawItems.length === 0 && options.required) {
+    throw new ApiError(422, "VALIDATION_ERROR", `\`${key}\` 필드는 한 개 이상의 값을 포함해야 합니다.`, { field: key });
+  }
+  if (rawItems.length > options.maxItems) {
+    throw new ApiError(422, "VALIDATION_ERROR", `\`${key}\` 필드는 최대 ${options.maxItems}개까지 선택할 수 있습니다.`, {
+      field: key,
+      maxItems: options.maxItems,
+    });
+  }
+
+  const maxItemLength = options.maxItemLength ?? 40;
+  const normalized = rawItems.map((item) => {
+    if (typeof item !== "string" || !item.trim() || item.trim().length > maxItemLength) {
+      throw new ApiError(422, "VALIDATION_ERROR", `\`${key}\`의 각 값은 1~${maxItemLength}자의 문자열이어야 합니다.`, {
+        field: key,
+      });
+    }
+    const value = item.trim();
+    return options.transform ? options.transform(value) : value;
+  });
+  return [...new Set(normalized)];
+}
+
+function normalizeMatchingPreferences(body: JsonObject, requireTargetLanguages: boolean): MatchingPreferences {
+  const targetLanguages = normalizedStringArray(body, "targetLanguages", {
+    fallback: defaultMatchingPreferences.targetLanguages,
+    required: requireTargetLanguages,
+    maxItems: 3,
+    maxItemLength: 10,
+    transform: (value) => value.toLocaleLowerCase(),
+  });
+  const unsupportedLanguages = targetLanguages.filter((code) => !languageExists(code));
+  if (unsupportedLanguages.length > 0) {
+    throw new ApiError(422, "UNSUPPORTED_LANGUAGE", "지원하지 않는 매칭 언어가 포함되어 있습니다.", {
+      field: "targetLanguages",
+      unsupported: unsupportedLanguages,
+    });
+  }
+
+  const preferredCountries = normalizedStringArray(body, "preferredCountries", {
+    fallback: defaultMatchingPreferences.preferredCountries,
+    maxItems: 5,
+    maxItemLength: 2,
+    transform: (value) => value.toLocaleUpperCase(),
+  });
+  if (preferredCountries.some((code) => !/^[A-Z]{2}$/.test(code))) {
+    throw new ApiError(422, "VALIDATION_ERROR", "preferredCountries에는 ISO 2자리 국가 코드를 입력해 주세요.", {
+      field: "preferredCountries",
+    });
+  }
+
+  const interests = normalizedStringArray(body, "interests", {
+    fallback: defaultMatchingPreferences.interests,
+    maxItems: 8,
+    maxItemLength: 30,
+    transform: (value) => value.toLocaleLowerCase().replace(/\s+/g, " "),
+  });
+  const availability = normalizedStringArray(body, "availability", {
+    fallback: defaultMatchingPreferences.availability,
+    maxItems: availabilitySlots.length,
+    maxItemLength: 24,
+    allowSingleString: true,
+    transform: (value) => value.toLocaleLowerCase(),
+  });
+  if (availability.some((slot) => !availabilitySlots.includes(slot as AvailabilitySlot))) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 availability 값입니다.", {
+      field: "availability",
+      allowed: availabilitySlots,
+    });
+  }
+
+  const rawPartnerLevel = body.partnerLevel ?? defaultMatchingPreferences.partnerLevel;
+  if (typeof rawPartnerLevel !== "string" || !partnerLevels.includes(rawPartnerLevel as PreferredPartnerLevel)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 partnerLevel 값입니다.", {
+      field: "partnerLevel",
+      allowed: partnerLevels,
+    });
+  }
+  const rawOnlineOnly = body.onlineOnly ?? defaultMatchingPreferences.onlineOnly;
+  if (typeof rawOnlineOnly !== "boolean") {
+    throw new ApiError(422, "VALIDATION_ERROR", "onlineOnly은 boolean 값이어야 합니다.", { field: "onlineOnly" });
+  }
+
+  return {
+    targetLanguages,
+    preferredCountries,
+    interests,
+    availability: availability as AvailabilitySlot[],
+    partnerLevel: rawPartnerLevel as PreferredPartnerLevel,
+    onlineOnly: rawOnlineOnly,
+  };
+}
+
+function todayInSeoul(): string {
+  return new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+}
+
+function nextRefreshAt(date: string): string {
+  const startOfDayInSeoul = Date.parse(`${date}T00:00:00+09:00`);
+  return new Date(startOfDayInSeoul + 24 * 60 * 60 * 1_000).toISOString();
+}
+
+function validatedDate(value: string | null): string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new ApiError(400, "INVALID_DATE", "date는 YYYY-MM-DD 형식의 필수 값입니다.", { field: "date" });
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new ApiError(400, "INVALID_DATE", "실제 달력에 존재하는 날짜를 입력해 주세요.", { field: "date" });
+  }
+  return value;
 }
 
 function parsePagination(url: URL, total: number): { cursor: number; limit: number; nextCursor: string | null; total: number } {
@@ -417,6 +569,246 @@ function search(context: ApiContext): Response {
   return jsonResponse(context, { partners: partnerResults, posts: postResults }, { meta: { total: partnerResults.length + postResults.length } });
 }
 
+async function handleMatchingPreferences(context: ApiContext): Promise<Response> {
+  if (context.request.method === "GET") {
+    return jsonResponse(context, {
+      preferences: normalizeMatchingPreferences({}, false),
+      persisted: false,
+      nextRefreshAt: nextRefreshAt(todayInSeoul()),
+    });
+  }
+
+  assertMethod(context.request, ["GET", "POST"]);
+  const body = await readJsonBody(context.request);
+  const preferences = normalizeMatchingPreferences(body, true);
+  return jsonResponse(context, {
+    preferences,
+    persisted: false,
+    nextRefreshAt: nextRefreshAt(todayInSeoul()),
+  });
+}
+
+function matchingPreferencesFromQuery(url: URL): MatchingPreferences {
+  const body: JsonObject = {};
+  for (const key of ["targetLanguages", "preferredCountries", "interests", "availability"] as const) {
+    const value = url.searchParams.get(key);
+    if (value !== null) body[key] = value.split(",");
+  }
+
+  const partnerLevel = url.searchParams.get("partnerLevel");
+  if (partnerLevel !== null) body.partnerLevel = partnerLevel;
+  const onlineOnly = url.searchParams.get("onlineOnly");
+  if (onlineOnly !== null) {
+    if (onlineOnly !== "true" && onlineOnly !== "false") {
+      throw new ApiError(422, "VALIDATION_ERROR", "onlineOnly query는 true 또는 false여야 합니다.", { field: "onlineOnly" });
+    }
+    body.onlineOnly = onlineOnly === "true";
+  }
+  return normalizeMatchingPreferences(body, false);
+}
+
+function stableHash(value: string): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+function partnerLevelMatches(partner: UserProfile, preferredLevel: PreferredPartnerLevel): boolean {
+  if (preferredLevel === "any") return true;
+  const koreanLevel = partner.learningLanguages.find((item) => item.code === "ko")?.level;
+  if (preferredLevel === "beginner") return koreanLevel === "beginner" || koreanLevel === "elementary";
+  return koreanLevel === preferredLevel;
+}
+
+function scorePartner(partner: UserProfile, preferences: MatchingPreferences, date: string) {
+  const signal = partnerMatchingSignals.find((item) => item.partnerId === partner.id);
+  const matchedLanguages = partner.nativeLanguages.filter((code) => preferences.targetLanguages.includes(code));
+  const matchedInterests = partner.interests.filter((interest) => preferences.interests.includes(interest.toLocaleLowerCase()));
+  const matchedAvailability = signal?.availability.filter((slot) => preferences.availability.includes(slot)) ?? [];
+  const reasons: string[] = [];
+  let score = 30;
+
+  if (matchedLanguages.length > 0) {
+    score += 22;
+    const names = matchedLanguages.map((code) => languages.find((language) => language.code === code)?.nativeName ?? code);
+    reasons.push(`${names.join(" · ")} 원어민 파트너예요`);
+  }
+  if (preferences.preferredCountries.includes(partner.country.code)) {
+    score += 12;
+    reasons.push(`희망 지역인 ${partner.country.flag} ${partner.country.name}에 있어요`);
+  }
+  if (matchedInterests.length > 0) {
+    score += Math.min(10, matchedInterests.length * 5);
+    reasons.push(`${matchedInterests.slice(0, 2).join(" · ")} 관심사가 같아요`);
+  }
+  if (matchedAvailability.length > 0) {
+    score += 8;
+    reasons.push("선호하는 학습 시간대가 겹쳐요");
+  }
+  if (partnerLevelMatches(partner, preferences.partnerLevel)) {
+    score += preferences.partnerLevel === "any" ? 2 : 7;
+    if (preferences.partnerLevel !== "any") reasons.push("원하는 대화 난이도와 잘 맞아요");
+  }
+  if (partner.status === "online") {
+    score += 5;
+    reasons.push("지금 바로 대화를 시작할 수 있어요");
+  } else if (partner.status === "recently") {
+    score += 2;
+  }
+  if (partner.verified) score += 3;
+  score += Math.round(partner.exchangeScore / 14);
+  score += stableHash(`${date}:${partner.id}`) % 5;
+
+  if (reasons.length < 2) reasons.push(`언어교환 신뢰 점수 ${partner.exchangeScore}점이에요`);
+  if (reasons.length < 2) reasons.push(`응답률이 ${partner.responseRate}%로 꾸준해요`);
+
+  const icebreakers = signal?.icebreakers ?? [`${partner.name}에게 ${partner.interests[0]}에 관해 물어보세요.`];
+  return {
+    partner,
+    score: Math.min(99, score),
+    matchReasons: reasons.slice(0, 4),
+    icebreaker: icebreakers[stableHash(`${partner.id}:${date}:icebreaker`) % icebreakers.length],
+  };
+}
+
+function satisfiesMatchingPreferences(partner: UserProfile, preferences: MatchingPreferences): boolean {
+  const signal = partnerMatchingSignals.find((item) => item.partnerId === partner.id);
+  const matchesTargetLanguage = partner.nativeLanguages.some((code) => preferences.targetLanguages.includes(code));
+  const matchesCountry =
+    preferences.preferredCountries.length === 0 || preferences.preferredCountries.includes(partner.country.code);
+  const matchesInterest =
+    preferences.interests.length === 0 ||
+    partner.interests.some((interest) => preferences.interests.includes(interest.toLocaleLowerCase()));
+  const matchesAvailability =
+    preferences.availability.length === 0 ||
+    Boolean(signal?.availability.some((slot) => preferences.availability.includes(slot)));
+
+  return (
+    matchesTargetLanguage &&
+    matchesCountry &&
+    matchesInterest &&
+    matchesAvailability &&
+    partnerLevelMatches(partner, preferences.partnerLevel) &&
+    (!preferences.onlineOnly || partner.status === "online")
+  );
+}
+
+function matchingSelectionSeed(date: string, preferences: MatchingPreferences): string {
+  return JSON.stringify({
+    date,
+    targetLanguages: [...preferences.targetLanguages].sort(),
+    preferredCountries: [...preferences.preferredCountries].sort(),
+    interests: [...preferences.interests].sort(),
+    availability: [...preferences.availability].sort(),
+    partnerLevel: preferences.partnerLevel,
+    onlineOnly: preferences.onlineOnly,
+  });
+}
+
+function handleDailyMatching(context: ApiContext): Response {
+  assertMethod(context.request, ["GET"]);
+  const date = validatedDate(context.url.searchParams.get("date"));
+  const preferences = matchingPreferencesFromQuery(context.url);
+  const matchingPartners = partners.filter((partner) => satisfiesMatchingPreferences(partner, preferences));
+  const fallbackUsed = matchingPartners.length === 0;
+  const candidatePool = fallbackUsed ? partners : matchingPartners;
+  const seed = matchingSelectionSeed(date, preferences);
+  const selected = candidatePool
+    .map((partner) => scorePartner(partner, preferences, date))
+    .sort(
+      (left, right) =>
+        stableHash(`${seed}:${left.partner.id}`) - stableHash(`${seed}:${right.partner.id}`) ||
+        right.score - left.score ||
+        left.partner.id.localeCompare(right.partner.id),
+    )[0];
+
+  const recommendation = fallbackUsed
+    ? {
+        ...selected,
+        matchReasons: ["희망 조건과 가장 가까운 파트너예요", ...selected.matchReasons].slice(0, 4),
+      }
+    : selected;
+
+  return jsonResponse(context, {
+    date,
+    recommendations: [recommendation],
+    preferencesApplied: preferences,
+    nextRefreshAt: nextRefreshAt(date),
+  });
+}
+
+const conversationStages = ["first-message", "getting-to-know", "ongoing", "reconnect"] as const;
+type ConversationStage = (typeof conversationStages)[number];
+
+function polishDraft(draft: string, partner: UserProfile, stage: ConversationStage): string {
+  const compact = draft.replace(/\s+/g, " ").trim();
+  const language = detectLanguage(compact);
+  const punctuation = /[.!?。！？]$/.test(compact) ? compact : `${compact}.`;
+
+  if (stage === "first-message" && !compact.toLocaleLowerCase().includes(partner.name.toLocaleLowerCase())) {
+    if (language === "ko") return `${partner.name}님, 안녕하세요! ${punctuation}`;
+    if (language === "ja") return `${partner.name}さん、こんにちは！${punctuation}`;
+    return `Hi ${partner.name}! ${punctuation.charAt(0).toLocaleUpperCase()}${punctuation.slice(1)}`;
+  }
+  if (stage === "reconnect" && language === "ko" && !compact.includes("오랜만")) {
+    return `${partner.name}님, 오랜만이에요! ${punctuation}`;
+  }
+  if (stage === "reconnect" && language === "en" && !/long time|been a while/i.test(compact)) {
+    return `Hi ${partner.name}, it's been a while! ${punctuation.charAt(0).toLocaleUpperCase()}${punctuation.slice(1)}`;
+  }
+  return punctuation;
+}
+
+async function handleConversationSupport(context: ApiContext): Promise<Response> {
+  assertMethod(context.request, ["POST"]);
+  const body = await readJsonBody(context.request);
+  const partnerId = requiredString(body, "partnerId", 128);
+  const partner = partners.find((item) => item.id === partnerId);
+  if (!partner) throw new ApiError(404, "PARTNER_NOT_FOUND", "대화 상대를 찾을 수 없습니다.", { field: "partnerId" });
+
+  const rawStage = optionalString(body, "stage", 32) ?? "first-message";
+  if (!conversationStages.includes(rawStage as ConversationStage)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 대화 단계입니다.", {
+      field: "stage",
+      allowed: conversationStages,
+    });
+  }
+  const stage = rawStage as ConversationStage;
+  const draft = optionalString(body, "draft", 1_000);
+  const guide = conversationGuides.find((item) => item.partnerId === partnerId);
+  if (!guide) throw new ApiError(500, "GUIDE_NOT_CONFIGURED", "대화 지원 데이터를 불러올 수 없습니다.");
+
+  const improvedDraft = draft ? polishDraft(draft, partner, stage) : undefined;
+  const sourceLanguage = improvedDraft ? detectLanguage(improvedDraft) : undefined;
+  const partnerLanguage = partner.nativeLanguages[0];
+  const translationLanguage = sourceLanguage === partnerLanguage ? currentUser.nativeLanguages[0] : partnerLanguage;
+  const translation = improvedDraft
+    ? { language: translationLanguage, text: translateSample(improvedDraft, translationLanguage).translatedText }
+    : undefined;
+
+  return jsonResponse(context, {
+    partner: {
+      id: partner.id,
+      name: partner.name,
+      avatar: partner.avatar,
+      avatarColor: partner.avatarColor,
+      status: partner.status,
+      nativeLanguages: partner.nativeLanguages,
+      learningLanguages: partner.learningLanguages,
+      interests: partner.interests,
+    },
+    stage,
+    topics: guide.topics.slice(0, 3),
+    suggestedOpeners: guide.suggestedOpeners.slice(0, 3),
+    followUpQuestions: guide.followUpQuestions.slice(0, 3),
+    ...(improvedDraft ? { improvedDraft, translation } : {}),
+    tip: guide.tip,
+  });
+}
+
 async function route(context: ApiContext): Promise<Response> {
   const normalizedPath = context.url.pathname.replace(/\/+$/, "") || "/";
   const segments = normalizedPath.replace(/^\/api\/?/, "").split("/").filter(Boolean);
@@ -464,6 +856,15 @@ async function route(context: ApiContext): Promise<Response> {
     return jsonResponse(context, languages);
   }
   if (resource === "search" && segments.length === 1) return search(context);
+  if (resource === "matching" && segments[1] === "preferences" && segments.length === 2) {
+    return handleMatchingPreferences(context);
+  }
+  if (resource === "matching" && segments[1] === "daily" && segments.length === 2) {
+    return handleDailyMatching(context);
+  }
+  if (resource === "conversation-support" && segments.length === 1) {
+    return handleConversationSupport(context);
+  }
 
   throw new ApiError(404, "NOT_FOUND", `API 경로를 찾을 수 없습니다: ${context.url.pathname}`);
 }

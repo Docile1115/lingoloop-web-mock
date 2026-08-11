@@ -6,26 +6,24 @@ import {
   Bell,
   BookOpenCheck,
   Bookmark,
+  CalendarClock,
   CalendarDays,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CircleHelp,
   Clock3,
   Compass,
-  Crown,
   Ellipsis,
   Eye,
   Flame,
   Flag,
-  Gift,
   Globe2,
   GraduationCap,
-  Headphones,
   Heart,
   Image as ImageIcon,
   Languages,
+  Lightbulb,
   LockKeyhole,
   MessageCircle,
   Mic,
@@ -37,6 +35,7 @@ import {
   Play,
   Plus,
   Radio,
+  RefreshCw,
   RotateCcw,
   Search,
   Send,
@@ -47,6 +46,7 @@ import {
   Sparkles,
   Star,
   Timer,
+  Target,
   Trophy,
   UserPlus,
   Users,
@@ -71,23 +71,185 @@ import {
   type PracticeRoom,
 } from "@/app/lib/demo-data";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Section = "discover" | "community" | "chats" | "practice" | "learn";
 type ApiState = "checking" | "ready" | "fallback";
+
+type MatchAvailability = "weekday-morning" | "weekday-evening" | "weekend-morning" | "weekend-evening";
+type PartnerLevel = "any" | "beginner" | "intermediate" | "advanced";
+
+type MatchPreferences = {
+  targetLanguages: string[];
+  preferredCountries: string[];
+  interests: string[];
+  availability: MatchAvailability[];
+  partnerLevel: PartnerLevel;
+  onlineOnly: boolean;
+};
+
+type ConversationSupport = {
+  partner?: { id?: string; name?: string };
+  stage: string;
+  topics: string[];
+  suggestedOpeners: string[];
+  followUpQuestions: string[];
+  improvedDraft?: string;
+  translation?: { language: string; text: string };
+  tip: string;
+};
+
+type DailyMatchRecommendation = {
+  partner: Partner;
+  score: number;
+  matchReasons: string[];
+  icebreaker: string;
+};
+
+type MatchingApiPartner = {
+  id: string;
+  name: string;
+  handle: string;
+  country: { code: string; name: string; flag: string };
+  nativeLanguages: string[];
+  learningLanguages: Array<{ code: string; level: string; goal: string }>;
+  bio: string;
+  interests: string[];
+  status: string;
+  verified?: boolean;
+  responseRate?: number;
+};
 
 type ModalState =
   | { type: "profile"; partner: Partner }
   | { type: "filters" }
   | { type: "compose" }
   | { type: "search" }
-  | { type: "notifications" }
-  | { type: "premium" }
   | { type: "room"; room: PracticeRoom }
+  | { type: "create-room" }
   | { type: "exchange" }
   | { type: "report"; target: string }
   | { type: "onboarding" }
   | null;
+
+const defaultMatchPreferences: MatchPreferences = {
+  targetLanguages: ["en"],
+  preferredCountries: ["CA", "US"],
+  interests: ["travel", "movies", "coffee"],
+  availability: ["weekday-evening", "weekend-morning"],
+  partnerLevel: "intermediate",
+  onlineOnly: false,
+};
+
+const languageLabels: Record<string, string> = { en: "영어", es: "스페인어", ja: "일본어" };
+const countryLabels: Record<string, string> = { CA: "캐나다", US: "미국", GB: "영국", AU: "호주", ES: "스페인", JP: "일본" };
+const interestLabels: Record<string, string> = { movies: "영화", travel: "여행", coffee: "카페", music: "음악", technology: "기술", cooking: "요리", books: "독서", running: "운동" };
+
+function normalizeMatchPreferences(preferences: MatchPreferences): MatchPreferences {
+  const languageAliases: Record<string, string> = { 영어: "en", 스페인어: "es", 일본어: "ja" };
+  const countryAliases: Record<string, string> = { 캐나다: "CA", 미국: "US", 영국: "GB", 호주: "AU", 스페인: "ES", 일본: "JP" };
+  const interestAliases: Record<string, string> = { 영화: "movies", 여행: "travel", 카페: "coffee", 음악: "music", 기술: "technology", 요리: "cooking", 독서: "books", 운동: "running" };
+  return {
+    ...preferences,
+    targetLanguages: preferences.targetLanguages.map((item) => languageAliases[item] ?? item),
+    preferredCountries: preferences.preferredCountries.map((item) => countryAliases[item] ?? item),
+    interests: preferences.interests.map((item) => interestAliases[item] ?? item),
+  };
+}
+
+const availabilityLabels: Record<MatchAvailability, string> = {
+  "weekday-morning": "평일 아침",
+  "weekday-evening": "평일 저녁",
+  "weekend-morning": "주말 오전",
+  "weekend-evening": "주말 저녁",
+};
+
+const levelLabels: Record<PartnerLevel, string> = {
+  any: "레벨 무관",
+  beginner: "초급",
+  intermediate: "중급",
+  advanced: "고급",
+};
+
+const dailyMatchDetails: Record<string, { reasons: string[]; icebreaker: string }> = {
+  maya: {
+    reasons: ["영어 원어민", "평일 저녁 활동", "영화·카페 관심사"],
+    icebreaker: "Hi Maya! What is the best movie you watched at a café lately?",
+  },
+  omar: {
+    reasons: ["영어 원어민", "짧은 음성 연습", "기술 관심사"],
+    icebreaker: "Hi Omar! What kind of game are you working on these days?",
+  },
+  lucas: {
+    reasons: ["여행 목표 일치", "한국어 B1", "저녁 활동"],
+    icebreaker: "Hi Lucas! Which Korean city is at the top of your travel list?",
+  },
+  aiko: {
+    reasons: ["학습 리듬 일치", "디자인 관심사", "꼼꼼한 교정"],
+    icebreaker: "Hi Aiko! What design detail inspired you this week?",
+  },
+  clara: {
+    reasons: ["주말 활동", "문장 교정 선호", "문화 관심사"],
+    icebreaker: "Hi Clara! Which museum would you recommend to a first-time visitor?",
+  },
+};
+
+function fallbackConversationSupport(name: string): ConversationSupport {
+  return {
+    stage: "ongoing",
+    topics: ["이번 주 가장 좋았던 순간", "서로의 도시에서 꼭 해볼 일", "최근 새로 배운 표현"],
+    suggestedOpeners: [`Hi ${name}! What was the highlight of your week?`],
+    followUpQuestions: ["What made it memorable?", "How would you say that in Korean?", "Would you recommend it to a friend?"],
+    tip: "한 번에 질문 하나만 보내고, 상대 답변의 단어를 이어서 물으면 대화가 자연스러워져요.",
+  };
+}
+
+function displayPartnerFromApi(partner: MatchingApiPartner, score: number, index: number): Partner {
+  const localId = partner.id.replace(/^user-/, "");
+  const existing = partners.find((item) => item.id === localId || item.name === partner.name);
+  if (existing) {
+    return {
+      ...existing,
+      flag: partner.country.flag,
+      city: `${partner.country.name} · 오늘 활동`,
+      compatibility: score,
+    };
+  }
+
+  const accents: Accent[] = ["violet", "coral", "mint", "amber", "blue", "rose"];
+  const learning = partner.learningLanguages[0];
+  const languageNames: Record<string, string> = { ...languageLabels, ko: "한국어", fr: "프랑스어", de: "독일어" };
+  const levelNames: Record<string, string> = { beginner: "A1–A2", intermediate: "B1–B2", advanced: "C1+" };
+
+  return {
+    id: localId,
+    name: partner.name,
+    handle: partner.handle,
+    flag: partner.country.flag,
+    city: `${partner.country.name} · 오늘 활동`,
+    native: partner.nativeLanguages.map((code) => languageNames[code] ?? code.toUpperCase()).join(" · "),
+    learning: languageNames[learning?.code ?? "ko"] ?? "한국어",
+    level: levelNames[learning?.level ?? "intermediate"] ?? learning?.level ?? "B1",
+    interests: partner.interests.slice(0, 3).map((item) => interestLabels[item] ?? item),
+    bio: partner.bio,
+    online: partner.status === "online",
+    compatibility: score,
+    accent: accents[index % accents.length],
+    goal: learning?.goal ?? "부담 없는 일상 대화",
+    activeTime: "내가 선택한 시간대와 겹쳐요",
+    balance: `응답률 ${partner.responseRate ?? 90}%`,
+    verified: partner.verified,
+  };
+}
+
+function fallbackDailyRecommendations(): DailyMatchRecommendation[] {
+  return [partners[0]].map((partner) => ({
+    partner,
+    score: partner.compatibility,
+    matchReasons: dailyMatchDetails[partner.id]?.reasons ?? ["학습 목표 일치", "비슷한 활동 시간"],
+    icebreaker: dailyMatchDetails[partner.id]?.icebreaker ?? `Hi ${partner.name}! What would you like to practice today?`,
+  }));
+}
 
 const navItems: Array<{
   id: Section;
@@ -97,9 +259,9 @@ const navItems: Array<{
   description: string;
 }> = [
   { id: "discover", label: "파트너", shortLabel: "파트너", icon: Compass, description: "나와 잘 맞는 언어 파트너를 찾아보세요" },
-  { id: "community", label: "커뮤니티", shortLabel: "피드", icon: UsersRound, description: "오늘 배운 표현과 문화를 나눠보세요" },
+  { id: "community", label: "커뮤니티", shortLabel: "피드", icon: UsersRound, description: "짧은 글과 교정을 빠르게 확인하세요" },
   { id: "chats", label: "대화", shortLabel: "대화", icon: MessageCircle, description: "대화 속에서 바로 배우고 복습하세요" },
-  { id: "practice", label: "연습 라운지", shortLabel: "연습", icon: Radio, description: "실시간 음성방과 라이브 수업에 참여하세요" },
+  { id: "practice", label: "보이스룸", shortLabel: "연습", icon: Radio, description: "보이스룸을 만들거나 바로 참여하세요" },
   { id: "learn", label: "내 학습", shortLabel: "내 학습", icon: GraduationCap, description: "쌓인 표현과 학습 리듬을 확인하세요" },
 ];
 
@@ -161,29 +323,6 @@ function IconButton({
   );
 }
 
-function SectionHeading({
-  eyebrow,
-  title,
-  description,
-  action,
-}: {
-  eyebrow?: string;
-  title: string;
-  description?: string;
-  action?: ReactNode;
-}) {
-  return (
-    <header className="section-heading">
-      <div>
-        {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
-        <h1>{title}</h1>
-        {description ? <p>{description}</p> : null}
-      </div>
-      {action ? <div className="heading-action">{action}</div> : null}
-    </header>
-  );
-}
-
 export default function LingoLoopApp() {
   const [section, setSection] = useState<Section>("discover");
   const [modal, setModal] = useState<ModalState>(null);
@@ -193,7 +332,6 @@ export default function LingoLoopApp() {
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [feedTab, setFeedTab] = useState<"recommended" | "learning" | "following">("recommended");
-  const [discoverTab, setDiscoverTab] = useState<"recommended" | "online" | "new">("recommended");
   const [translatedPosts, setTranslatedPosts] = useState<Set<string>>(new Set());
   const [openCorrections, setOpenCorrections] = useState<Set<string>>(new Set(["post-1"]));
   const [toast, setToast] = useState<string | null>(null);
@@ -202,12 +340,13 @@ export default function LingoLoopApp() {
   const [roomMicOn, setRoomMicOn] = useState(false);
   const [exchangeLength, setExchangeLength] = useState(15);
   const [settings, setSettings] = useState({ dmRequests: true, hideLocation: true, correctionAlerts: true });
+  const [matchPreferences, setMatchPreferences] = useState<MatchPreferences>(defaultMatchPreferences);
+  const [dailyRecommendations, setDailyRecommendations] = useState<DailyMatchRecommendation[]>(fallbackDailyRecommendations);
+  const [practiceRooms, setPracticeRooms] = useState<PracticeRoom[]>(rooms);
   const toastTimer = useRef<number | null>(null);
 
   const currentNav = navItems.find((item) => item.id === section) ?? navItems[0];
   const selectedConversation = conversations.find((item) => item.id === selectedChatId) ?? conversations[0];
-
-  const onlinePartners = useMemo(() => partners.filter((partner) => partner.online), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -217,6 +356,8 @@ export default function LingoLoopApp() {
       fetch("/api/partners"),
       fetch("/api/posts"),
       fetch("/api/conversations"),
+      fetch("/api/matching/preferences"),
+      fetch("/api/matching/daily"),
     ])
       .then((responses) => {
         if (!cancelled) setApiState(responses.every((response) => response.ok) ? "ready" : "fallback");
@@ -229,10 +370,80 @@ export default function LingoLoopApp() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const query = new URLSearchParams({
+      targetLanguages: matchPreferences.targetLanguages.join(","),
+      preferredCountries: matchPreferences.preferredCountries.join(","),
+      interests: matchPreferences.interests.join(","),
+      availability: matchPreferences.availability.join(","),
+      partnerLevel: matchPreferences.partnerLevel,
+      onlineOnly: String(matchPreferences.onlineOnly),
+    });
+
+    fetch(`/api/matching/daily?${query.toString()}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
+        return response.json() as Promise<{ data?: { recommendations?: Array<{ partner: MatchingApiPartner; score: number; matchReasons: string[]; icebreaker: string }> } }>;
+      })
+      .then((body) => {
+        if (cancelled || !body.data?.recommendations?.length) return;
+        setDailyRecommendations(body.data.recommendations.map((item, index) => ({
+          partner: displayPartnerFromApi(item.partner, item.score, index),
+          score: item.score,
+          matchReasons: item.matchReasons,
+          icebreaker: item.icebreaker,
+        })));
+      })
+      .catch(() => {
+        // Keep the deterministic local fallback when the mock API is unavailable.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [matchPreferences]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const saved = window.localStorage.getItem("lingoloop-match-preferences");
+        if (!saved) return;
+        const parsed = JSON.parse(saved) as Partial<MatchPreferences>;
+        setMatchPreferences(normalizeMatchPreferences({ ...defaultMatchPreferences, ...parsed }));
+      } catch {
+        // Device-local preferences are optional in this mock.
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
   const showToast = (message: string) => {
     setToast(message);
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2800);
+  };
+
+  const saveMatchPreferences = async (preferences: MatchPreferences) => {
+    const normalized = normalizeMatchPreferences(preferences);
+    setMatchPreferences(normalized);
+    try {
+      window.localStorage.setItem("lingoloop-match-preferences", JSON.stringify(normalized));
+    } catch {
+      // Continue with in-memory state if browser storage is unavailable.
+    }
+
+    try {
+      const response = await fetch("/api/matching/preferences", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(normalized),
+      });
+      if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
+      showToast("매칭 설정을 저장했어요 · 오늘의 파트너에 바로 반영돼요");
+    } catch {
+      showToast("매칭 설정을 이 기기에 저장했어요 · 오프라인 데모");
+    }
   };
 
   const goToSection = (next: Section) => {
@@ -290,6 +501,7 @@ export default function LingoLoopApp() {
       };
       setConversations((items) => [next, ...items]);
       setSelectedChatId(next.id);
+      setDraft(dailyRecommendations.find((item) => item.partner.id === partner.id)?.icebreaker ?? dailyMatchDetails[partner.id]?.icebreaker ?? `Hi ${partner.name}! Nice to meet you.`);
     }
     setSection("chats");
     setMobileThreadOpen(true);
@@ -355,6 +567,25 @@ export default function LingoLoopApp() {
     showToast("커뮤니티에 게시했어요");
   };
 
+  const createVoiceRoom = (details: { title: string; topic: string; language: string; level: string }) => {
+    const room: PracticeRoom = {
+      id: `room-${Date.now()}`,
+      title: details.title,
+      topic: details.topic,
+      language: details.language,
+      level: details.level,
+      host: currentUser.name,
+      hostFlag: currentUser.flag,
+      listeners: 1,
+      speakers: [currentUser.name],
+      accent: "violet",
+    };
+    setPracticeRooms((items) => [room, ...items]);
+    setModal(null);
+    setSection("practice");
+    showToast("보이스룸을 만들었어요 · mock room");
+  };
+
   const reportTarget = async (target: string) => {
     try {
       const response = await fetch("/api/reports", {
@@ -406,16 +637,7 @@ export default function LingoLoopApp() {
           })}
         </nav>
 
-        <button className="new-post-button" type="button" onClick={() => setModal({ type: "compose" })}>
-          <PenLine size={18} /> 새 게시물
-        </button>
-
         <div className="sidebar-spacer" />
-        <button className="sidebar-upgrade" type="button" onClick={() => setModal({ type: "premium" })}>
-          <span className="upgrade-icon"><Sparkles size={18} /></span>
-          <span><strong>Loop Plus</strong><small>무제한 번역 · 고급 필터</small></span>
-          <ChevronRight size={16} />
-        </button>
         <button className="sidebar-profile" type="button" onClick={() => goToSection("learn")}>
           <Avatar name={currentUser.name} flag={currentUser.flag} accent="violet" size="sm" online />
           <span><strong>{currentUser.name}</strong><small>{currentUser.native} → {currentUser.learning}</small></span>
@@ -437,8 +659,7 @@ export default function LingoLoopApp() {
             <span className={`api-indicator api-${apiState}`} title="mock API 상태">
               <span />{apiState === "ready" ? "Mock API 연결됨" : apiState === "checking" ? "연결 확인 중" : "오프라인 데모"}
             </span>
-            <IconButton label="통합 검색" icon={Search} onClick={() => setModal({ type: "search" })} />
-            <IconButton label="알림 3개" icon={Bell} badge={3} onClick={() => setModal({ type: "notifications" })} />
+            {section === "community" ? <button className="top-compose-button" type="button" onClick={() => setModal({ type: "compose" })}><PenLine size={16} /> 글쓰기</button> : <IconButton label="통합 검색" icon={Search} onClick={() => setModal({ type: "search" })} />}
             <button className="top-profile" type="button" onClick={() => goToSection("learn")} aria-label="내 학습 프로필">
               <Avatar name={currentUser.name} flag={currentUser.flag} accent="violet" size="xs" />
               <ChevronDown size={15} />
@@ -450,13 +671,11 @@ export default function LingoLoopApp() {
           <main id="main-content" className="main-content">
             {section === "discover" ? (
               <DiscoverView
-                tab={discoverTab}
-                setTab={setDiscoverTab}
+                preferences={matchPreferences}
+                dailyRecommendations={dailyRecommendations}
                 onProfile={(partner) => setModal({ type: "profile", partner })}
                 onChat={startChat}
                 onFilters={() => setModal({ type: "filters" })}
-                onSearch={() => setModal({ type: "search" })}
-                onToast={showToast}
               />
             ) : null}
             {section === "community" ? (
@@ -469,7 +688,6 @@ export default function LingoLoopApp() {
                 onTranslate={(id) => toggleSetValue(setTranslatedPosts, id)}
                 onCorrection={(id) => toggleSetValue(setOpenCorrections, id)}
                 onToggle={togglePost}
-                onCompose={() => setModal({ type: "compose" })}
                 onProfile={(id) => {
                   const partner = partners.find((item) => item.id === id);
                   if (partner) setModal({ type: "profile", partner });
@@ -503,13 +721,13 @@ export default function LingoLoopApp() {
             ) : null}
             {section === "practice" ? (
               <PracticeView
+                rooms={practiceRooms}
                 onJoin={(room) => {
                   setRoomHandRaised(false);
                   setRoomMicOn(false);
                   setModal({ type: "room", room });
                 }}
-                onPremium={() => setModal({ type: "premium" })}
-                onToast={showToast}
+                onCreate={() => setModal({ type: "create-room" })}
               />
             ) : null}
             {section === "learn" ? (
@@ -517,20 +735,11 @@ export default function LingoLoopApp() {
                 settings={settings}
                 setSettings={setSettings}
                 onOnboarding={() => setModal({ type: "onboarding" })}
-                onPremium={() => setModal({ type: "premium" })}
                 onToast={showToast}
               />
             ) : null}
           </main>
 
-          <RightRail
-            section={section}
-            onlinePartners={onlinePartners}
-            onProfile={(partner) => setModal({ type: "profile", partner })}
-            onRoom={(room) => setModal({ type: "room", room })}
-            onPremium={() => setModal({ type: "premium" })}
-            onToast={showToast}
-          />
         </div>
       </div>
 
@@ -558,6 +767,7 @@ export default function LingoLoopApp() {
           onClose={() => setModal(null)}
           onStartChat={startChat}
           onPublish={publishPost}
+          onCreateRoom={createVoiceRoom}
           onReport={reportTarget}
           onToast={showToast}
           roomHandRaised={roomHandRaised}
@@ -566,6 +776,8 @@ export default function LingoLoopApp() {
           setRoomMicOn={setRoomMicOn}
           exchangeLength={exchangeLength}
           setExchangeLength={setExchangeLength}
+          matchPreferences={matchPreferences}
+          onSaveMatchPreferences={saveMatchPreferences}
         />
       ) : null}
 
@@ -579,93 +791,64 @@ export default function LingoLoopApp() {
 }
 
 function DiscoverView({
-  tab,
-  setTab,
+  preferences,
+  dailyRecommendations,
   onProfile,
   onChat,
   onFilters,
-  onSearch,
-  onToast,
 }: {
-  tab: "recommended" | "online" | "new";
-  setTab: (value: "recommended" | "online" | "new") => void;
+  preferences: MatchPreferences;
+  dailyRecommendations: DailyMatchRecommendation[];
   onProfile: (partner: Partner) => void;
   onChat: (partner: Partner) => void;
   onFilters: () => void;
-  onSearch: () => void;
-  onToast: (message: string) => void;
 }) {
-  const visiblePartners = tab === "online" ? partners.filter((partner) => partner.online) : tab === "new" ? [...partners].reverse() : partners;
+  const match = dailyRecommendations[0] ?? fallbackDailyRecommendations()[0];
+  const partner = match.partner;
+  const targetLanguage = languageLabels[preferences.targetLanguages[0] ?? "en"] ?? "영어";
+  const preferenceSummary = [
+    targetLanguage,
+    preferences.interests.slice(0, 2).map((item) => interestLabels[item] ?? item).join(" · "),
+    availabilityLabels[preferences.availability[0] ?? "weekday-evening"],
+  ].filter(Boolean);
 
   return (
-    <div className="view discover-view">
-      <section className="discover-hero">
-        <div className="hero-copy">
-          <Pill tone="soft"><Sparkles size={13} /> 오늘의 매칭</Pill>
-          <h1>배우는 만큼,<br /><em>가르치며 가까워져요.</em></h1>
-          <p>언어 목표와 관심사, 활동 시간이 맞는 파트너를 찾았어요.</p>
-          <div className="hero-actions">
-            <button className="primary-button" type="button" onClick={onSearch}><Search size={17} /> 파트너 검색</button>
-            <button className="secondary-button" type="button" onClick={onFilters}><SlidersHorizontal size={17} /> 추천 조정</button>
-          </div>
+    <div className="view discover-view compact-discover">
+      <header className="simple-view-header partner-view-header">
+        <div>
+          <span><CalendarClock size={14} /> 매일 오전 9시 자동 매칭</span>
+          <h1>오늘의 파트너</h1>
+          <p>설정한 조건에 가장 가까운 한 사람만 추천해요.</p>
         </div>
-        <div className="hero-visual" aria-hidden="true">
-          <div className="orbit orbit-one" />
-          <div className="orbit orbit-two" />
-          <div className="floating-avatar avatar-a"><Avatar name="Maya" flag="🇨🇦" accent="coral" size="lg" online /><span>Hello!</span></div>
-          <div className="floating-avatar avatar-b"><Avatar name="Lucas" flag="🇪🇸" accent="amber" size="md" online /><span>¡Hola!</span></div>
-          <div className="floating-avatar avatar-c"><Avatar name="Aiko" flag="🇯🇵" accent="rose" size="md" /><span>こんにちは</span></div>
-          <div className="hero-center"><Languages size={27} /><strong>96%</strong><small>언어 교환 궁합</small></div>
+        <button className="secondary-button" type="button" onClick={onFilters}><SlidersHorizontal size={16} /> 매칭 설정</button>
+      </header>
+
+      <article className="single-match-card">
+        <div className="single-match-person">
+          <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} />
+          <div><span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={17} className="verified" aria-label="인증됨" /> : null}</span><p>{partner.handle} · {partner.city}</p><small>{partner.online ? "지금 대화 가능" : "오늘 활동"}</small></div>
+          <span className="match-score"><strong>{match.score}</strong><small>% 일치</small></span>
         </div>
-      </section>
 
-      <section className="match-summary" aria-label="오늘의 매칭 요약">
-        <div><span className="summary-icon violet"><UserPlus size={18} /></span><span><strong>18명</strong><small>새 추천 파트너</small></span></div>
-        <div><span className="summary-icon coral"><MessageCircle size={18} /></span><span><strong>4개의 답장</strong><small>내 차례인 대화</small></span></div>
-        <div><span className="summary-icon mint"><Timer size={18} /></span><span><strong>35분</strong><small>오늘의 연습</small></span></div>
-        <button type="button" onClick={() => onToast("이번 주 학습 리포트를 열었어요")}>주간 리포트 <ChevronRight size={16} /></button>
-      </section>
-
-      <div className="content-toolbar">
-        <div className="segmented-tabs" role="tablist" aria-label="파트너 필터">
-          <button type="button" role="tab" aria-selected={tab === "recommended"} className={tab === "recommended" ? "active" : ""} onClick={() => setTab("recommended")}>나를 위한 추천</button>
-          <button type="button" role="tab" aria-selected={tab === "online"} className={tab === "online" ? "active" : ""} onClick={() => setTab("online")}>지금 온라인</button>
-          <button type="button" role="tab" aria-selected={tab === "new"} className={tab === "new" ? "active" : ""} onClick={() => setTab("new")}>새로 온 사람</button>
+        <div className="single-match-facts">
+          <span><Languages size={15} /><small>언어 교환</small><strong>{partner.native} ⇄ {partner.learning}</strong></span>
+          <span><Clock3 size={15} /><small>활동 시간</small><strong>{partner.activeTime}</strong></span>
+          <span><Target size={15} /><small>학습 목표</small><strong>{partner.goal}</strong></span>
         </div>
-        <button className="filter-button" type="button" onClick={onFilters}><SlidersHorizontal size={16} /><span>필터</span><i>3</i></button>
-      </div>
 
-      <section className="partner-grid" aria-label="추천 언어 파트너">
-        {visiblePartners.slice(0, 4).map((partner, index) => (
-          <article className="partner-card" key={partner.id}>
-            <div className="partner-card-top">
-              <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="lg" online={partner.online} />
-              <div className="compatibility-ring" style={{ "--score": `${partner.compatibility * 3.6}deg` } as CSSProperties}>
-                <span>{partner.compatibility}%</span>
-              </div>
-            </div>
-            <div className="partner-name-row">
-              <h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={16} className="verified" aria-label="인증됨" /> : null}
-              <span>{partner.online ? "온라인" : "최근 활동"}</span>
-            </div>
-            <p className="partner-location">{partner.city}</p>
-            <div className="language-exchange">
-              <span><small>모국어</small><strong>{partner.native}</strong></span>
-              <span className="language-arrows">⇄</span>
-              <span><small>학습어 · {partner.level}</small><strong>{partner.learning}</strong></span>
-            </div>
-            <p className="partner-bio">{partner.bio}</p>
-            <div className="interest-row">{partner.interests.map((interest) => <span key={interest}>{interest}</span>)}</div>
-            <div className="partner-card-actions">
-              <button className="card-secondary" type="button" onClick={() => onProfile(partner)}>프로필</button>
-              <button className="card-primary" type="button" onClick={() => onChat(partner)}><MessageCircle size={16} /> 인사하기</button>
-            </div>
-            {index === 0 ? <span className="best-match"><Sparkles size={12} /> BEST MATCH</span> : null}
-          </article>
-        ))}
-      </section>
+        <p className="single-match-bio">{partner.bio}</p>
+        <div className="preference-summary compact">{preferenceSummary.map((item) => <span key={item}><Check size={11} /> {item}</span>)}</div>
 
-      <button className="load-more" type="button" onClick={() => onToast("추천 파트너 8명을 더 불러왔어요")}>추천 더 보기 <ChevronDown size={17} /></button>
+        <div className="single-match-reasons">
+          <strong><Sparkles size={14} /> 자동 매칭된 이유</strong>
+          <div>{match.matchReasons.slice(0, 3).map((reason) => <span key={reason}><Check size={11} /> {reason}</span>)}</div>
+        </div>
+
+        <button className="single-match-opener" type="button" onClick={() => onChat(partner)}><MessageCircle size={16} /><span><small>추천 첫 질문</small><strong>{match.icebreaker}</strong></span><ChevronRight size={16} /></button>
+        <footer><button type="button" onClick={() => onProfile(partner)}>프로필 보기</button><button type="button" onClick={() => onChat(partner)}><MessageCircle size={16} /> 대화 시작</button></footer>
+      </article>
+
+      <div className="next-match-note"><CalendarDays size={16} /><span><strong>다음 자동 매칭은 내일 오전 9시</strong><small>조건을 바꾸면 오늘의 추천도 바로 다시 계산돼요.</small></span><button type="button" onClick={onFilters}>조건 변경</button></div>
     </div>
   );
 }
@@ -679,7 +862,6 @@ function CommunityView({
   onTranslate,
   onCorrection,
   onToggle,
-  onCompose,
   onProfile,
   onReport,
   onToast,
@@ -692,38 +874,23 @@ function CommunityView({
   onTranslate: (id: string) => void;
   onCorrection: (id: string) => void;
   onToggle: (id: string, key: "liked" | "saved") => void;
-  onCompose: () => void;
   onProfile: (id: string) => void;
   onReport: (target: string) => void;
   onToast: (message: string) => void;
 }) {
   return (
     <div className="view community-view">
-      <SectionHeading
-        eyebrow="GLOBAL NOTEBOOK"
-        title="오늘은 어떤 말을 배웠나요?"
-        description="완벽하지 않아도 괜찮아요. 서로의 문장을 다정하게 고쳐주는 공간이에요."
-        action={<button className="primary-button" type="button" onClick={onCompose}><PenLine size={17} /> 새 글 쓰기</button>}
-      />
+      <div className="community-toolbar">
+        <div className="segmented-tabs" role="tablist" aria-label="커뮤니티 피드">
+          <button type="button" role="tab" aria-selected={tab === "recommended"} className={tab === "recommended" ? "active" : ""} onClick={() => setTab("recommended")}>추천</button>
+          <button type="button" role="tab" aria-selected={tab === "learning"} className={tab === "learning" ? "active" : ""} onClick={() => setTab("learning")}>영어</button>
+          <button type="button" role="tab" aria-selected={tab === "following"} className={tab === "following" ? "active" : ""} onClick={() => setTab("following")}>팔로잉</button>
+        </div>
+        <span>{posts.length}개의 새 글</span>
+      </div>
 
-      <button className="composer-card" type="button" onClick={onCompose}>
-        <Avatar name={currentUser.name} flag={currentUser.flag} accent="violet" size="sm" />
-        <span>오늘 배운 표현이나 궁금한 문장을 공유해보세요…</span>
-        <span className="composer-tools"><ImageIcon size={17} /><Mic size={17} /><CircleHelp size={17} /></span>
-      </button>
-
-      <div className="feed-layout">
-        <div className="feed-column">
-          <div className="content-toolbar feed-toolbar">
-            <div className="segmented-tabs" role="tablist" aria-label="커뮤니티 피드">
-              <button type="button" role="tab" aria-selected={tab === "recommended"} className={tab === "recommended" ? "active" : ""} onClick={() => setTab("recommended")}>추천</button>
-              <button type="button" role="tab" aria-selected={tab === "learning"} className={tab === "learning" ? "active" : ""} onClick={() => setTab("learning")}>영어 학습</button>
-              <button type="button" role="tab" aria-selected={tab === "following"} className={tab === "following" ? "active" : ""} onClick={() => setTab("following")}>팔로잉</button>
-            </div>
-            <button className="quiet-button" type="button" onClick={() => onToast("최신 게시물 순으로 정렬했어요")}><SlidersHorizontal size={16} /> 최신순</button>
-          </div>
-
-          {posts.map((post) => (
+      <div className="feed-grid">
+        {posts.map((post) => (
             <article className="feed-post" key={post.id}>
               <header className="post-header">
                 <button className="post-author" type="button" onClick={() => onProfile(post.authorId)}>
@@ -761,22 +928,8 @@ function CommunityView({
                 <button className={translated.has(post.id) ? "active" : ""} type="button" onClick={() => onTranslate(post.id)}><Languages size={18} /> 번역</button>
                 <button className={post.saved ? "active save" : "post-save"} type="button" aria-label="저장" onClick={() => onToggle(post.id, "saved")}><Bookmark size={18} fill={post.saved ? "currentColor" : "none"} /></button>
               </footer>
-            </article>
-          ))}
-        </div>
-
-        <aside className="feed-side-card">
-          <div className="side-card-header"><span className="summary-icon violet"><Flame size={18} /></span><span><strong>이번 주 함께 쓴 문장</strong><small>커뮤니티 학습 리포트</small></span></div>
-          <strong className="big-number">142<span>개</span></strong>
-          <div className="mini-progress"><span style={{ width: "72%" }} /></div>
-          <p>지난주보다 <b>18개</b> 더 많은 문장이 교정되었어요.</p>
-          <div className="top-helpers">
-            <span><Avatar name="Jisoo" accent="mint" size="xs" /><b>Jisoo</b><small>교정 32</small></span>
-            <span><Avatar name="Maya" accent="coral" size="xs" /><b>Maya</b><small>교정 27</small></span>
-            <span><Avatar name="Ken" accent="blue" size="xs" /><b>Ken</b><small>교정 21</small></span>
-          </div>
-          <button type="button" onClick={() => onToast("이번 주 도움 기록을 열었어요")}>기여 리포트 보기 <ChevronRight size={15} /></button>
-        </aside>
+          </article>
+        ))}
       </div>
     </div>
   );
@@ -811,7 +964,46 @@ function ChatsView({
 }) {
   const [listTab, setListTab] = useState<"all" | "turn" | "requests">("all");
   const [translatedMessages, setTranslatedMessages] = useState<Set<string>>(new Set(["m1"]));
+  const [coachOpen, setCoachOpen] = useState(true);
+  const [coachLoading, setCoachLoading] = useState(false);
+  const [supportResult, setSupportResult] = useState<{ conversationId: string; data: ConversationSupport } | null>(null);
+  const conversationSupport = supportResult?.conversationId === selected.id ? supportResult.data : fallbackConversationSupport(selected.name);
   const filtered = conversations.filter((item) => listTab === "turn" ? item.myTurn : listTab === "requests" ? item.id === "chat-aiko" : true);
+
+  const requestConversationSupport = async (polishDraft = false) => {
+    setCoachLoading(true);
+    const partnerId = {
+      maya: "user-maya",
+      aiko: "user-ren",
+      lucas: "user-sofia",
+    }[selected.partnerId ?? ""] ?? (selected.partnerId ? `user-${selected.partnerId}` : "user-maya");
+
+    try {
+      const response = await fetch("/api/conversation-support", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ partnerId, draft: draft.trim() || undefined, stage: selected.messages.length > 2 ? "ongoing" : "first-message" }),
+      });
+      if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
+      const body = await response.json() as { data?: ConversationSupport };
+      if (!body.data) throw new Error("Missing mock support data");
+      setSupportResult({ conversationId: selected.id, data: body.data });
+      if (polishDraft && body.data.improvedDraft) {
+        setDraft(body.data.improvedDraft);
+        onToast("대화 코치가 문장을 자연스럽게 다듬었어요");
+      } else {
+        onToast("지금 대화에 맞는 주제를 새로 추천했어요");
+      }
+    } catch {
+      const fallback = fallbackConversationSupport(selected.name);
+      const improvedDraft = draft.trim() ? `${draft.trim()} I’d love to hear more about it!` : undefined;
+      setSupportResult({ conversationId: selected.id, data: { ...fallback, improvedDraft } });
+      if (polishDraft && improvedDraft) setDraft(improvedDraft);
+      onToast("준비된 대화 코칭 예시를 보여드려요 · 오프라인 데모");
+    } finally {
+      setCoachLoading(false);
+    }
+  };
 
   return (
     <div className={`chat-shell ${mobileThreadOpen ? "mobile-thread-open" : ""}`}>
@@ -848,7 +1040,6 @@ function ChatsView({
             </button>
           ))}
         </div>
-        <div className="safe-inbox"><ShieldCheck size={16} /><span><strong>안전한 메시지 요청함</strong><small>처음 온 메시지는 먼저 검토할 수 있어요.</small></span><ChevronRight size={16} /></div>
       </section>
 
       <section className="chat-thread" aria-label={`${selected.name}님과의 대화`}>
@@ -859,6 +1050,7 @@ function ChatsView({
             <span><strong>{selected.name}</strong><small>{selected.online ? "온라인 · 영어 ⇄ 한국어" : "최근 활동 어제"}</small></span>
           </button>
           <div className="thread-actions">
+            <button className={`coach-cta ${coachOpen ? "active" : ""}`} type="button" onClick={() => setCoachOpen(!coachOpen)}><WandSparkles size={16} /><span>대화 코치</span></button>
             <button className="exchange-cta" type="button" onClick={onExchange}><Timer size={16} /><span>교환 세션</span></button>
             <IconButton label="음성 통화" icon={Phone} onClick={() => onToast("음성 통화 데모를 시작했어요")} />
             <IconButton label="영상 통화" icon={Video} onClick={() => onToast("영상 통화 데모를 시작했어요")} />
@@ -872,6 +1064,37 @@ function ChatsView({
           <div className="balance-bar"><i style={{ width: "53%" }} /></div>
           <button type="button" onClick={onExchange}>15분 이어하기 <ChevronRight size={15} /></button>
         </div>
+
+        {coachOpen ? (
+          <section className="conversation-coach" aria-label="대화 코치">
+            <header>
+              <span className="coach-title-icon"><WandSparkles size={18} /></span>
+              <span><strong>대화 코치</strong><small>{selected.name}님과의 공통점과 지금까지의 흐름을 바탕으로 준비했어요.</small></span>
+              <button type="button" onClick={() => void requestConversationSupport(false)} disabled={coachLoading}><RefreshCw size={14} className={coachLoading ? "spinning" : ""} /> 새로 추천</button>
+              <button type="button" className="coach-close" aria-label="대화 코치 닫기" onClick={() => setCoachOpen(false)}><X size={15} /></button>
+            </header>
+            <div className="coach-grid">
+              <div className="coach-topic-list">
+                <span className="coach-label"><Lightbulb size={13} /> 대화 주제</span>
+                {conversationSupport.topics.slice(0, 3).map((topic, index) => (
+                  <button type="button" key={topic} onClick={() => setDraft(index === 0 ? conversationSupport.suggestedOpeners[0] ?? `Hi ${selected.name}! What was the highlight of your week?` : `Hi ${selected.name}! Can we talk about “${topic}” today?`)}>
+                    <span>{index + 1}</span>{topic}<ChevronRight size={13} />
+                  </button>
+                ))}
+              </div>
+              <div className="coach-response-card">
+                <span className="coach-label"><MessageCircle size={13} /> 추천 오프너</span>
+                <p>{conversationSupport.suggestedOpeners[0]}</p>
+                <div className="coach-followups">{conversationSupport.followUpQuestions.slice(0, 2).map((question) => <button type="button" key={question} onClick={() => setDraft(question)}>{question}</button>)}</div>
+                <div className="coach-actions">
+                  <button type="button" onClick={() => setDraft(conversationSupport.suggestedOpeners[0] ?? "")}>입력창에 넣기</button>
+                  <button type="button" onClick={() => void requestConversationSupport(true)} disabled={!draft.trim() || coachLoading}><WandSparkles size={13} /> 작성 문장 다듬기</button>
+                </div>
+              </div>
+            </div>
+            <footer><Sparkles size={12} /><span>{conversationSupport.tip}</span><small>DEMO COACH</small></footer>
+          </section>
+        ) : null}
 
         <div className="message-area">
           <div className="day-divider"><span>오늘</span></div>
@@ -944,138 +1167,76 @@ function toggleLocalSet(setter: React.Dispatch<React.SetStateAction<Set<string>>
 }
 
 function PracticeView({
+  rooms: availableRooms,
   onJoin,
-  onPremium,
-  onToast,
+  onCreate,
 }: {
+  rooms: PracticeRoom[];
   onJoin: (room: PracticeRoom) => void;
-  onPremium: () => void;
-  onToast: (message: string) => void;
+  onCreate: () => void;
 }) {
-  const [tab, setTab] = useState<"rooms" | "live" | "classes">("rooms");
-
   return (
-    <div className="view practice-view">
-      <SectionHeading eyebrow="PRACTICE LOUNGE" title="듣다가, 준비되면 말해요." description="작은 음성방부터 라이브 수업까지 내 속도에 맞춰 참여하세요." action={<button className="secondary-button" type="button" onClick={() => onToast("방 만들기 설정을 열었어요")}><Plus size={17} /> 방 만들기</button>} />
+    <div className="view practice-view simple-practice">
+      <header className="simple-view-header">
+        <div><span>VOICE ROOMS</span><h1>보이스룸</h1><p>관심 있는 주제의 방을 골라 듣거나 직접 만들어보세요.</p></div>
+        <button className="primary-button" type="button" onClick={onCreate}><Plus size={17} /> 보이스룸 만들기</button>
+      </header>
 
-      <div className="practice-tabs" role="tablist" aria-label="연습 콘텐츠">
-        <button role="tab" type="button" aria-selected={tab === "rooms"} className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Headphones size={18} /> 음성 라운지 <span>24</span></button>
-        <button role="tab" type="button" aria-selected={tab === "live"} className={tab === "live" ? "active" : ""} onClick={() => setTab("live")}><Radio size={18} /> 라이브</button>
-        <button role="tab" type="button" aria-selected={tab === "classes"} className={tab === "classes" ? "active" : ""} onClick={() => setTab("classes")}><GraduationCap size={18} /> 클래스</button>
+      <div className="voice-room-toolbar"><strong>열려 있는 방</strong><span>{availableRooms.length}개</span></div>
+      <div className="voice-room-list">
+        {availableRooms.map((room) => (
+          <article className={`voice-room-list-card room-${room.accent}`} key={room.id}>
+            <div className="room-card-head">
+              <span className="room-language"><Globe2 size={14} /> {room.language}</span>
+              {room.scheduled ? <Pill tone="neutral"><CalendarDays size={12} /> {room.scheduled}</Pill> : <span className="room-live"><i /> LIVE</span>}
+            </div>
+            <div className="voice-room-main">
+              <span className="voice-room-host"><Avatar name={room.host} flag={room.hostFlag} accent={room.accent} size="sm" online={!room.scheduled} /></span>
+              <span><h2>{room.title}</h2><p>{room.topic} · {room.level}</p><small>{room.host} · {room.listeners ?? 1}명 참여 중</small></span>
+              <button type="button" onClick={() => onJoin(room)}>{room.scheduled ? "미리보기" : "입장"}<ChevronRight size={16} /></button>
+            </div>
+          </article>
+        ))}
       </div>
-
-      {tab === "rooms" ? (
-        <>
-          <article className="featured-room">
-            <div className="featured-room-copy">
-              <Pill tone="live"><span className="live-dot" /> LIVE · 42명 듣는 중</Pill>
-              <h2>영어로 말하는<br />오늘의 <em>작은 성공</em></h2>
-              <p>말하기 전에는 듣기만 해도 좋아요. 손을 들면 호스트가 차례를 안내해요.</p>
-              <div className="featured-speakers">
-                <span className="stacked-avatars"><Avatar name="Nina" accent="coral" size="sm" /><Avatar name="Joon" accent="mint" size="sm" /><Avatar name="Sofia" accent="amber" size="sm" /></span>
-                <span><strong>Nina 외 3명</strong><small>영어 · A2–B2</small></span>
-              </div>
-              <button className="room-join-button" type="button" onClick={() => onJoin(rooms[0])}><Headphones size={17} /> 조용히 입장하기</button>
-            </div>
-            <div className="sound-stage" aria-hidden="true">
-              <span className="sound-ring ring-a" /><span className="sound-ring ring-b" /><span className="sound-ring ring-c" />
-              <div className="stage-host"><Avatar name="Nina" flag="🇦🇺" accent="coral" size="xl" online /><span><Mic size={14} /> speaking</span></div>
-              <span className="sound-caption">“What is one small win<br />you had today?”</span>
-            </div>
-          </article>
-
-          <div className="content-toolbar">
-            <div><strong className="toolbar-title">지금 열려 있는 라운지</strong><Pill tone="soft">24 rooms</Pill></div>
-            <button className="filter-button" type="button" onClick={() => onToast("언어와 레벨 필터를 열었어요")}><SlidersHorizontal size={16} /> 필터</button>
-          </div>
-          <div className="room-grid">
-            {rooms.slice(1).map((room) => (
-              <article className={`room-card room-${room.accent}`} key={room.id}>
-                <div className="room-card-head"><span className="room-language"><Globe2 size={14} /> {room.language}</span>{room.scheduled ? <Pill tone="neutral"><CalendarDays size={12} /> 예정</Pill> : <span className="room-live"><i /> LIVE</span>}</div>
-                <h3>{room.title}</h3>
-                <p>{room.topic} · {room.level}</p>
-                <div className="room-speakers">
-                  <Avatar name={room.host} flag={room.hostFlag} accent={room.accent} size="sm" />
-                  <span><strong>{room.host}</strong><small>{room.scheduled ?? `${room.listeners}명 참여 중`}</small></span>
-                  <span className="mini-wave"><i /><i /><i /><i /><i /></span>
-                </div>
-                <button type="button" onClick={() => onJoin(room)}>{room.scheduled ? "알림 받기" : "입장하기"}<ChevronRight size={16} /></button>
-              </article>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {tab === "live" ? (
-        <div className="catalog-grid">
-          <CatalogCard accent="coral" icon="🎙️" label="LIVE NOW" title="뉴스로 배우는 오늘의 영어" meta="Emma 선생님 · 318명 시청" button="라이브 보기" onClick={() => onToast("라이브 플레이어 데모를 열었어요")} />
-          <CatalogCard accent="blue" icon="🗺️" label="TODAY · 8 PM" title="여행에서 바로 쓰는 스페인어" meta="Diego · 초급" button="알림 받기" onClick={() => onToast("라이브 시작 알림을 설정했어요")} />
-          <CatalogCard accent="mint" icon="☕" label="REPLAY" title="카페에서 자연스럽게 주문하기" meta="Yuki · 일본어 A1" button="다시 보기" onClick={() => onToast("다시보기 플레이어 데모를 열었어요")} />
-        </div>
-      ) : null}
-
-      {tab === "classes" ? (
-        <div className="class-layout">
-          <article className="class-banner">
-            <div><Pill tone="soft"><Crown size={13} /> LOOP CLASS</Pill><h2>대화에서 막혔던 순간을<br />다음 수업의 재료로.</h2><p>저장한 문장과 교정 기록으로 구성된 맞춤 미니 클래스예요.</p><button className="primary-button" type="button" onClick={onPremium}>7일 체험 시작</button></div>
-            <span className="class-illustration"><BookOpenCheck size={50} /><i>12</i><small>review cards</small></span>
-          </article>
-          <div className="catalog-grid compact">
-            <CatalogCard accent="violet" icon="💼" label="B1 · 6 LESSONS" title="면접에서 나를 설명하는 법" meta="진행률 2/6" button="이어보기" onClick={() => onToast("코스 플레이어 데모를 열었어요")} />
-            <CatalogCard accent="amber" icon="🗣️" label="A2 · 8 LESSONS" title="발음이 가벼워지는 리듬 훈련" meta="새 코스" button="살펴보기" onClick={() => onToast("코스 소개를 열었어요")} />
-          </div>
-        </div>
-      ) : null}
     </div>
   );
-}
-
-function CatalogCard({ accent, icon, label, title, meta, button, onClick }: { accent: Accent; icon: string; label: string; title: string; meta: string; button: string; onClick: () => void }) {
-  return <article className={`catalog-card catalog-${accent}`}><span className="catalog-art">{icon}</span><small>{label}</small><h3>{title}</h3><p>{meta}</p><button type="button" onClick={onClick}>{button}<ChevronRight size={16} /></button></article>;
 }
 
 function LearnView({
   settings,
   setSettings,
   onOnboarding,
-  onPremium,
   onToast,
 }: {
   settings: { dmRequests: boolean; hideLocation: boolean; correctionAlerts: boolean };
   setSettings: React.Dispatch<React.SetStateAction<{ dmRequests: boolean; hideLocation: boolean; correctionAlerts: boolean }>>;
   onOnboarding: () => void;
-  onPremium: () => void;
   onToast: (message: string) => void;
 }) {
   const toggle = (key: keyof typeof settings) => setSettings((current) => ({ ...current, [key]: !current[key] }));
   return (
-    <div className="view learn-view">
-      <SectionHeading eyebrow="MY LEARNING" title="꾸준함이 실력이 되는 중이에요." description="대화에서 배운 표현과 서로 도운 시간을 한눈에 확인하세요." action={<button className="secondary-button" type="button" onClick={onOnboarding}><RotateCcw size={16} /> 학습 목표 다시 설정</button>} />
+    <div className="view learn-view compact-learn">
+      <header className="simple-view-header">
+        <div><span>MY LEARNING</span><h1>내 학습</h1><p>프로필, 학습 기록과 주요 설정을 한 화면에서 관리하세요.</p></div>
+        <button className="secondary-button profile-settings-link" type="button" onClick={() => onToast("프로필 설정을 열었어요")}><Settings size={16} /> 프로필 설정</button>
+      </header>
 
-      <section className="profile-dashboard">
-        <div className="profile-summary-card">
-          <Avatar name={currentUser.name} flag={currentUser.flag} accent="violet" size="xl" online />
-          <div className="profile-summary-copy"><span><h2>{currentUser.name}</h2><BadgeCheck size={17} className="verified" /></span><p>{currentUser.handle}</p><div className="profile-languages"><strong>한국어 <small>모국어</small></strong><span>⇄</span><strong>English <small>{currentUser.level}</small></strong></div></div>
-          <button type="button" onClick={() => onToast("프로필 편집 폼을 열었어요")}><PenLine size={16} /> 프로필 편집</button>
-        </div>
-        <div className="learning-stats-grid">
-          <article><span className="summary-icon coral"><Flame size={19} /></span><small>연속 학습</small><strong>{currentUser.streak}<em>일</em></strong><p>최고 기록 19일</p></article>
-          <article><span className="summary-icon violet"><Trophy size={19} /></span><small>학습 포인트</small><strong>{currentUser.points.toLocaleString()}<em>XP</em></strong><p>이번 주 +240</p></article>
-          <article><span className="summary-icon mint"><Timer size={19} /></span><small>상호 기여 균형</small><strong>92<em>%</em></strong><p>도움 4h 20m · 배움 4h 05m</p></article>
-        </div>
+      <section className="compact-profile-card">
+        <Avatar name={currentUser.name} flag={currentUser.flag} accent="violet" size="lg" online />
+        <div><span><h2>{currentUser.name}</h2><BadgeCheck size={16} className="verified" /></span><p>{currentUser.handle}</p><small>한국어 원어민 · 영어 {currentUser.level}</small></div>
+        <button type="button" onClick={() => onToast("프로필 설정을 열었어요")}><PenLine size={15} /> 수정</button>
       </section>
 
-      <section className="weekly-card">
-        <header><span><strong>이번 주 학습 리듬</strong><small>8월 5일 – 11일</small></span><Pill tone="success">목표의 86%</Pill></header>
-        <div className="weekly-chart" aria-label="요일별 학습 시간 막대 그래프">
-          {[34, 62, 48, 80, 57, 92, 70].map((value, index) => <div key={value + index}><span style={{ height: `${value}%` }}><i>{Math.round(value * 0.55)}m</i></span><small>{["월", "화", "수", "목", "금", "토", "일"][index]}</small></div>)}
-        </div>
-        <div className="weekly-insight"><Sparkles size={17} /><span><strong>목요일 저녁에 가장 집중이 잘 됐어요.</strong><small>다음 주에도 같은 시간에 20분 교환 세션을 잡아볼까요?</small></span><button type="button" onClick={() => onToast("다음 목요일 오후 8시에 학습 알림을 만들었어요")}>알림 만들기</button></div>
+      <section className="learn-overview-grid" aria-label="학습 요약">
+        <article><span className="summary-icon coral"><Flame size={18} /></span><small>연속 학습</small><strong>{currentUser.streak}<em>일</em></strong></article>
+        <article><span className="summary-icon violet"><Timer size={18} /></span><small>이번 주 대화</small><strong>145<em>분</em></strong></article>
+        <article><span className="summary-icon mint"><Bookmark size={18} /></span><small>저장한 표현</small><strong>{savedPhrases.length}<em>개</em></strong></article>
+        <article><span className="summary-icon amber"><PenLine size={18} /></span><small>받은 교정</small><strong>18<em>개</em></strong></article>
       </section>
 
-      <div className="learn-columns">
+      <div className="learn-compact-columns">
         <section className="saved-phrases-card">
-          <header><span><strong>오늘 복습할 표현</strong><small>{savedPhrases.length}개 · 약 4분</small></span><button type="button" onClick={() => onToast("전체 저장 표현을 열었어요")}>전체 보기 <ChevronRight size={15} /></button></header>
+          <header><span><strong>저장한 표현</strong><small>{savedPhrases.length}개 · 약 4분</small></span><button type="button" onClick={() => onToast("전체 저장 표현을 열었어요")}>전체 <ChevronRight size={15} /></button></header>
           <div className="phrase-list">
             {savedPhrases.map((item, index) => <article key={item.phrase}><button type="button" className="phrase-play" onClick={() => onToast("표현을 재생했어요")}><Volume2 size={16} /></button><span><strong>{item.phrase}</strong><small>{item.meaning}</small><em>{item.source}</em></span><span className={index === 0 ? "due-now" : ""}>{item.due}</span></article>)}
           </div>
@@ -1083,15 +1244,15 @@ function LearnView({
         </section>
 
         <section className="settings-card">
-          <header><span><strong>안전과 학습 설정</strong><small>언제든 바꿀 수 있어요</small></span><Settings size={18} /></header>
-          <SettingRow icon={ShieldCheck} title="메시지 요청함" description="처음 온 메시지를 먼저 검토" checked={settings.dmRequests} onChange={() => toggle("dmRequests")} />
+          <header><span><strong>계정 및 학습 설정</strong><small>변경 내용은 이 기기에 반영돼요</small></span><Settings size={18} /></header>
+          <button className="profile-settings-link" type="button" onClick={() => onToast("프로필 설정을 열었어요")}><span className="setting-icon"><PenLine size={17} /></span><span><strong>프로필 설정</strong><small>사진, 자기소개, 관심사 수정</small></span><ChevronRight size={15} /></button>
+          <button className="profile-settings-link" type="button" onClick={onOnboarding}><span className="setting-icon"><Target size={17} /></span><span><strong>언어 및 목표</strong><small>학습 언어와 목표 다시 설정</small></span><ChevronRight size={15} /></button>
+          <SettingRow icon={Bell} title="메시지 알림" description="새 메시지가 오면 알려주기" checked={settings.dmRequests} onChange={() => toggle("dmRequests")} />
           <SettingRow icon={LockKeyhole} title="정밀 위치 숨기기" description="도시 수준만 프로필에 표시" checked={settings.hideLocation} onChange={() => toggle("hideLocation")} />
           <SettingRow icon={PenLine} title="교정 알림" description="내 문장이 교정되면 알려주기" checked={settings.correctionAlerts} onChange={() => toggle("correctionAlerts")} />
           <button className="blocked-link" type="button" onClick={() => onToast("차단 사용자 목록을 열었어요")}><Flag size={16} /> 신고 및 차단 관리 <ChevronRight size={15} /></button>
         </section>
       </div>
-
-      <section className="upgrade-strip"><span className="upgrade-spark"><Crown size={22} /></span><span><strong>Loop Plus로 학습 흐름을 끊김 없이</strong><small>무제한 번역 · 실시간 자막 · 고급 파트너 필터 · 광고 없음</small></span><button type="button" onClick={onPremium}>혜택 보기</button></section>
     </div>
   );
 }
@@ -1100,63 +1261,12 @@ function SettingRow({ icon: Icon, title, description, checked, onChange }: { ico
   return <label className="setting-row"><span className="setting-icon"><Icon size={17} /></span><span><strong>{title}</strong><small>{description}</small></span><input type="checkbox" checked={checked} onChange={onChange} /><i className="toggle" aria-hidden="true" /></label>;
 }
 
-function RightRail({
-  section,
-  onlinePartners,
-  onProfile,
-  onRoom,
-  onPremium,
-  onToast,
-}: {
-  section: Section;
-  onlinePartners: Partner[];
-  onProfile: (partner: Partner) => void;
-  onRoom: (room: PracticeRoom) => void;
-  onPremium: () => void;
-  onToast: (message: string) => void;
-}) {
-  return (
-    <aside className="right-rail" aria-label="학습 컨텍스트">
-      <section className="daily-goal-card">
-        <header><span><small>TODAY</small><strong>오늘의 루프</strong></span><span className="goal-ring"><b>72</b>%</span></header>
-        <div className="goal-list">
-          <button type="button" className="done" onClick={() => onToast("파트너에게 답장하기 완료")}><span><Check size={13} /></span><p><strong>파트너에게 답장하기</strong><small>4개의 대화</small></p><b>+20</b></button>
-          <button type="button" onClick={() => onToast("10분 말하기 타이머를 시작했어요")}><span><Mic size={13} /></span><p><strong>10분 말하기</strong><small>현재 7분</small></p><b>+40</b></button>
-          <button type="button" onClick={() => onToast("복습 카드 6개를 열었어요")}><span><BookOpenCheck size={13} /></span><p><strong>표현 6개 복습</strong><small>오늘 마감</small></p><b>+30</b></button>
-        </div>
-        <div className="goal-streak"><Flame size={17} /><span><strong>12일 연속 학습 중</strong><small>내일도 5분이면 이어져요</small></span></div>
-      </section>
-
-      {section !== "practice" ? (
-        <section className="rail-card online-card">
-          <header><span><strong>지금 연습 가능한 사람</strong><small>{onlinePartners.length}명 온라인</small></span><button type="button" onClick={() => onToast("온라인 파트너 전체를 열었어요")}>전체</button></header>
-          {onlinePartners.map((partner) => <button className="online-person" type="button" key={partner.id} onClick={() => onProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning}</small></span><MessageCircle size={16} /></button>)}
-        </section>
-      ) : (
-        <section className="rail-card upcoming-card">
-          <header><span><strong>곧 시작해요</strong><small>내 관심 언어 기준</small></span><CalendarDays size={17} /></header>
-          <button type="button" onClick={() => onRoom(rooms[3])}><span className="time-block"><b>21:00</b><small>오늘</small></span><span><strong>면접 영어 30초 소개</strong><small>Alex · B1–C1</small></span><ChevronRight size={15} /></button>
-          <button type="button" onClick={() => onToast("내일 라이브 알림을 설정했어요")}><span className="time-block"><b>08:30</b><small>내일</small></span><span><strong>Slow morning English</strong><small>Emma · 모든 레벨</small></span><ChevronRight size={15} /></button>
-        </section>
-      )}
-
-      <section className="rail-card phrase-card">
-        <header><span><strong>오늘의 자연스러운 표현</strong><small>대화에서 바로 써보세요</small></span><button type="button" onClick={() => onToast("표현을 저장했어요")} aria-label="표현 저장"><Bookmark size={16} /></button></header>
-        <blockquote>“That sounds like a plan.”</blockquote>
-        <p>좋아요, 그렇게 하죠.</p>
-        <div><button type="button" onClick={() => onToast("원어민 발음을 재생했어요")}><Volume2 size={15} /> 듣기</button><button type="button" onClick={() => onToast("연습 문장 입력창을 열었어요")}><PenLine size={15} /> 써보기</button></div>
-      </section>
-
-      <button className="rail-upgrade" type="button" onClick={onPremium}><span><Crown size={18} /></span><p><strong>Loop Plus</strong><small>번역 횟수 제한 없이</small></p><ChevronRight size={17} /></button>
-    </aside>
-  );
-}
-
 function ModalLayer({
   modal,
   onClose,
   onStartChat,
   onPublish,
+  onCreateRoom,
   onReport,
   onToast,
   roomHandRaised,
@@ -1165,11 +1275,14 @@ function ModalLayer({
   setRoomMicOn,
   exchangeLength,
   setExchangeLength,
+  matchPreferences,
+  onSaveMatchPreferences,
 }: {
   modal: Exclude<ModalState, null>;
   onClose: () => void;
   onStartChat: (partner: Partner) => void;
   onPublish: (text: string) => void;
+  onCreateRoom: (details: { title: string; topic: string; language: string; level: string }) => void;
   onReport: (target: string) => void;
   onToast: (message: string) => void;
   roomHandRaised: boolean;
@@ -1178,17 +1291,18 @@ function ModalLayer({
   setRoomMicOn: (value: boolean) => void;
   exchangeLength: number;
   setExchangeLength: (value: number) => void;
+  matchPreferences: MatchPreferences;
+  onSaveMatchPreferences: (preferences: MatchPreferences) => Promise<void>;
 }) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className={`modal modal-${modal.type}`} role="dialog" aria-modal="true" aria-label={modalLabel(modal.type)}>
         <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={20} /></button>
         {modal.type === "profile" ? <ProfileModal partner={modal.partner} onStartChat={onStartChat} onReport={() => onReport(modal.partner.name)} onToast={onToast} /> : null}
-        {modal.type === "filters" ? <FiltersModal onClose={onClose} onToast={onToast} /> : null}
+        {modal.type === "filters" ? <MatchingPreferencesModal initial={matchPreferences} onClose={onClose} onSave={onSaveMatchPreferences} onToast={onToast} /> : null}
         {modal.type === "compose" ? <ComposeModal onPublish={onPublish} onToast={onToast} /> : null}
         {modal.type === "search" ? <SearchModal onStartChat={onStartChat} onToast={onToast} /> : null}
-        {modal.type === "notifications" ? <NotificationsModal onToast={onToast} /> : null}
-        {modal.type === "premium" ? <PremiumModal onClose={onClose} onToast={onToast} /> : null}
+        {modal.type === "create-room" ? <CreateRoomModal onCreate={onCreateRoom} /> : null}
         {modal.type === "room" ? <RoomModal room={modal.room} handRaised={roomHandRaised} setHandRaised={setRoomHandRaised} micOn={roomMicOn} setMicOn={setRoomMicOn} onClose={onClose} onReport={() => onReport(modal.room.title)} onToast={onToast} /> : null}
         {modal.type === "exchange" ? <ExchangeModal length={exchangeLength} setLength={setExchangeLength} onClose={onClose} onToast={onToast} /> : null}
         {modal.type === "report" ? <ReportModal target={modal.target} onCancel={onClose} onConfirm={() => onReport(modal.target)} /> : null}
@@ -1199,7 +1313,7 @@ function ModalLayer({
 }
 
 function modalLabel(type: Exclude<ModalState, null>["type"]) {
-  const labels: Record<Exclude<ModalState, null>["type"], string> = { profile: "파트너 프로필", filters: "파트너 필터", compose: "새 게시물", search: "통합 검색", notifications: "알림", premium: "Loop Plus", room: "음성 라운지", exchange: "언어 교환 세션", report: "신고 및 차단", onboarding: "학습 목표 설정" };
+  const labels: Record<Exclude<ModalState, null>["type"], string> = { profile: "파트너 프로필", filters: "매칭 설정", compose: "새 게시물", search: "통합 검색", "create-room": "보이스룸 만들기", room: "보이스룸", exchange: "언어 교환 세션", report: "신고 및 차단", onboarding: "학습 목표 설정" };
   return labels[type];
 }
 
@@ -1225,45 +1339,105 @@ function ProfileModal({ partner, onStartChat, onReport, onToast }: { partner: Pa
   );
 }
 
-function FiltersModal({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
-  const [onlineOnly, setOnlineOnly] = useState(true);
-  const [level, setLevel] = useState("모든 레벨");
+function MatchingPreferencesModal({
+  initial,
+  onClose,
+  onSave,
+  onToast,
+}: {
+  initial: MatchPreferences;
+  onClose: () => void;
+  onSave: (preferences: MatchPreferences) => Promise<void>;
+  onToast: (message: string) => void;
+}) {
+  const [preferences, setPreferences] = useState<MatchPreferences>(initial);
+  const [saving, setSaving] = useState(false);
+  const availabilityOptions: Array<[MatchAvailability, string]> = [
+    ["weekday-morning", "평일 아침"],
+    ["weekday-evening", "평일 저녁"],
+    ["weekend-morning", "주말 오전"],
+    ["weekend-evening", "주말 저녁"],
+  ];
+
+  const toggleCountry = (country: string) => setPreferences((current) => ({
+    ...current,
+    preferredCountries: current.preferredCountries.includes(country) ? current.preferredCountries.filter((item) => item !== country) : [...current.preferredCountries, country],
+  }));
+  const toggleInterest = (interest: string) => setPreferences((current) => ({
+    ...current,
+    interests: current.interests.includes(interest) ? current.interests.filter((item) => item !== interest) : [...current.interests, interest],
+  }));
+  const toggleAvailability = (availability: MatchAvailability) => setPreferences((current) => ({
+    ...current,
+    availability: current.availability.includes(availability) ? current.availability.filter((item) => item !== availability) : [...current.availability, availability],
+  }));
+
+  const save = async () => {
+    setSaving(true);
+    await onSave(preferences);
+    setSaving(false);
+    onClose();
+  };
+
   return (
     <div className="form-modal">
       <header>
-        <Pill tone="soft"><SlidersHorizontal size={13} /> SMART MATCH</Pill>
-        <h2>어떤 파트너를 찾고 있나요?</h2>
-        <p>모국어와 학습 목표가 서로 맞는 사람부터 추천해요.</p>
+        <Pill tone="soft"><Target size={13} /> DAILY MATCH</Pill>
+        <h2>매일 만나고 싶은 상대를 설정해요</h2>
+        <p>언어, 지역, 관심사와 활동 시간이 가까운 한 사람을 매일 오전 9시에 자동으로 연결해요.</p>
       </header>
       <div className="form-section">
         <span className="field-label">배우고 싶은 언어</span>
-        <button className="select-control" type="button">🇺🇸 영어 <ChevronDown size={16} /></button>
+        <div className="choice-row three-columns">
+          {[{ value: "en", label: "영어", flag: "🇺🇸" }, { value: "es", label: "스페인어", flag: "🇪🇸" }, { value: "ja", label: "일본어", flag: "🇯🇵" }].map((item) => (
+            <button type="button" className={preferences.targetLanguages.includes(item.value) ? "active" : ""} key={item.value} onClick={() => setPreferences((current) => ({ ...current, targetLanguages: [item.value] }))}>{item.flag} {item.label}</button>
+          ))}
+        </div>
       </div>
       <div className="form-section">
         <span className="field-label">파트너의 한국어 수준</span>
         <div className="choice-row">
-          {["모든 레벨", "입문", "초급", "중급+"].map((item) => (
-            <button type="button" className={level === item ? "active" : ""} key={item} onClick={() => setLevel(item)}>{item}</button>
+          {(Object.entries(levelLabels) as Array<[PartnerLevel, string]>).map(([value, label]) => (
+            <button type="button" className={preferences.partnerLevel === value ? "active" : ""} key={value} onClick={() => setPreferences((current) => ({ ...current, partnerLevel: value }))}>{label}</button>
           ))}
+        </div>
+      </div>
+      <div className="form-section">
+        <span className="field-label">선호 지역 <small>복수 선택</small></span>
+        <div className="chip-options">
+          {Object.entries(countryLabels).map(([country, label]) => {
+            const active = preferences.preferredCountries.includes(country);
+            return <button type="button" className={active ? "active" : ""} key={country} onClick={() => toggleCountry(country)}>{active ? <Check size={13} /> : <Plus size={13} />}{label}</button>;
+          })}
         </div>
       </div>
       <div className="form-section">
         <span className="field-label">공통 관심사</span>
         <div className="chip-options">
-          {["영화", "여행", "음악", "기술", "요리", "독서"].map((item, index) => (
-            <button type="button" className={index < 3 ? "active" : ""} key={item}>{index < 3 ? <Check size={13} /> : <Plus size={13} />}{item}</button>
+          {Object.entries(interestLabels).map(([interest, label]) => {
+            const active = preferences.interests.includes(interest);
+            return <button type="button" className={active ? "active" : ""} key={interest} onClick={() => toggleInterest(interest)}>{active ? <Check size={13} /> : <Plus size={13} />}{label}</button>;
+          })}
+        </div>
+      </div>
+      <div className="form-section">
+        <span className="field-label">주로 대화 가능한 시간</span>
+        <div className="choice-row">
+          {availabilityOptions.map(([value, label]) => (
+            <button type="button" className={preferences.availability.includes(value) ? "active" : ""} key={value} onClick={() => toggleAvailability(value)}>{preferences.availability.includes(value) ? <Check size={13} /> : null}{label}</button>
           ))}
         </div>
       </div>
       <label className="setting-row standalone">
         <span className="setting-icon"><Eye size={17} /></span>
         <span><strong>현재 온라인인 사람만</strong><small>바로 답장할 가능성이 높아요</small></span>
-        <input aria-label="현재 온라인인 사람만 보기" type="checkbox" checked={onlineOnly} onChange={() => setOnlineOnly(!onlineOnly)} />
+        <input aria-label="현재 온라인인 사람만 보기" type="checkbox" checked={preferences.onlineOnly} onChange={() => setPreferences((current) => ({ ...current, onlineOnly: !current.onlineOnly }))} />
         <i className="toggle" />
       </label>
+      <div className="matching-schedule-note"><CalendarClock size={18} /><span><strong>다음 매칭 · 내일 오전 9시</strong><small>설정은 이 기기에 저장되며 오늘의 mock 추천에도 즉시 반영됩니다.</small></span><Pill tone="success">1명</Pill></div>
       <div className="modal-footer">
-        <button className="text-button" type="button" onClick={() => onToast("필터를 초기화했어요")}><RotateCcw size={15} /> 초기화</button>
-        <button className="primary-button" type="button" onClick={() => { onClose(); onToast("조건에 맞는 파트너 18명을 찾았어요"); }}>18명 보기</button>
+        <button className="text-button" type="button" onClick={() => { setPreferences(defaultMatchPreferences); onToast("기본 매칭 조건으로 되돌렸어요"); }}><RotateCcw size={15} /> 초기화</button>
+        <button className="primary-button" type="button" disabled={saving || !preferences.targetLanguages.length || !preferences.availability.length} onClick={() => void save()}>{saving ? "저장 중…" : "설정 저장하고 오늘의 매칭 보기"}</button>
       </div>
     </div>
   );
@@ -1282,7 +1456,7 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string) => voi
       </div>
       <label className="compose-text">
         <span className="sr-only">게시물 내용</span>
-        <textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="틀려도 괜찮아요. 오늘 배운 문장, 궁금한 표현, 문화 이야기를 나눠보세요…" rows={7} />
+        <textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="연습하고 싶은 문장, 궁금한 표현, 문화 이야기를 짧게 나눠보세요…" rows={7} />
         <small>{text.length}/700</small>
       </label>
       <div className="compose-attachments">
@@ -1310,23 +1484,28 @@ function SearchModal({ onStartChat, onToast }: { onStartChat: (partner: Partner)
   return <div className="search-modal-content"><header><Search size={21} /><input aria-label="통합 검색" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="사람, 언어, 주제, 저장한 표현 검색" /><kbd>ESC</kbd></header><div className="search-chips"><span>빠른 검색</span>{["영어 원어민", "지금 온라인", "#여행", "저장한 표현"].map((item) => <button type="button" key={item} onClick={() => setQuery(item.replace("#", ""))}>{item}</button>)}</div><section><h3>{query ? `“${query}” 검색 결과` : "추천 파트너"}</h3>{results.length ? results.map((partner) => <button className="search-result" type="button" key={partner.id} onClick={() => onStartChat(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning} · {partner.interests.join(" · ")}</small></span><Pill tone="success">{partner.compatibility}%</Pill><ChevronRight size={16} /></button>) : <div className="empty-search"><Search size={28} /><strong>검색 결과가 없어요</strong><p>언어나 관심사를 더 짧게 입력해보세요.</p></div>}</section><footer><span><Monitor size={14} /> 어디서든 <kbd>Ctrl</kbd> + <kbd>K</kbd></span><button type="button" onClick={() => onToast("전체 검색 결과 화면을 열었어요")}>전체 검색 보기</button></footer></div>;
 }
 
-function NotificationsModal({ onToast }: { onToast: (message: string) => void }) {
-  const notifications = [
-    { icon: PenLine, accent: "mint" as Accent, title: "Jisoo님이 문장을 교정했어요", body: "‘I was nervous…’를 더 자연스럽게 고쳐줬어요.", time: "2분 전" },
-    { icon: MessageCircle, accent: "coral" as Accent, title: "Maya님의 답장이 도착했어요", body: "오늘 저녁에 15분 연습 어때요?", time: "8분 전" },
-    { icon: Radio, accent: "violet" as Accent, title: "팔로우한 라운지가 곧 시작해요", body: "영어로 말하는 오늘의 작은 성공 · 오후 8시", time: "1시간 전" },
-    { icon: Trophy, accent: "amber" as Accent, title: "12일 연속 학습을 달성했어요!", body: "이번 주에 240 XP를 모았어요.", time: "오늘" },
-  ];
-  return <div className="notifications-content"><header><div><Pill tone="soft"><Bell size={13} /> UPDATES</Pill><h2>알림</h2></div><button type="button" onClick={() => onToast("모든 알림을 읽음 처리했어요")}>모두 읽음</button></header><div className="notification-tabs"><button className="active" type="button">전체 <span>3</span></button><button type="button">대화</button><button type="button">학습</button></div><div className="notification-list">{notifications.map((item, index) => { const Icon = item.icon; return <button className={index < 3 ? "unread" : ""} type="button" key={item.title} onClick={() => onToast(`${item.title} 상세를 열었어요`)}><span className={`notification-icon accent-${item.accent}`}><Icon size={17} /></span><span><strong>{item.title}</strong><small>{item.body}</small><em>{item.time}</em></span>{index < 3 ? <i /> : null}</button>; })}</div><footer><button type="button" onClick={() => onToast("알림 설정을 열었어요")}><Settings size={15} /> 알림 설정</button></footer></div>;
-}
+function CreateRoomModal({ onCreate }: { onCreate: (details: { title: string; topic: string; language: string; level: string }) => void }) {
+  const [title, setTitle] = useState("");
+  const [topic, setTopic] = useState("");
+  const [language, setLanguage] = useState("영어");
+  const [level, setLevel] = useState("모든 레벨");
 
-function PremiumModal({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
-  const features = [[Languages, "무제한 번역", "채팅·게시물·음성 전사까지"], [SlidersHorizontal, "고급 파트너 필터", "활동 시간·목표·교정 스타일"], [Radio, "실시간 자막", "음성 라운지와 통화에서"], [Bookmark, "무제한 복습 컬렉션", "배운 표현을 놓치지 않도록"]] as const;
-  return <div className="premium-content"><div className="premium-hero"><span className="premium-orb"><Crown size={34} /></span><Pill tone="premium">LOOP PLUS</Pill><h2>대화의 흐름은 그대로,<br />배움은 더 선명하게.</h2><p>결제는 연결되지 않은 데모 화면입니다.</p></div><div className="premium-features">{features.map(([Icon, title, text]) => <div key={title}><span><Icon size={19} /></span><p><strong>{title}</strong><small>{text}</small></p><CheckCircle2 size={17} /></div>)}</div><div className="plan-options"><button type="button"><span><small>월간</small><strong>₩8,900 <em>/월</em></strong></span></button><button className="selected" type="button"><i>BEST</i><span><small>연간</small><strong>₩59,000 <em>/년</em></strong><b>월 ₩4,917</b></span><CheckCircle2 size={19} /></button></div><button className="premium-cta" type="button" onClick={() => { onClose(); onToast("7일 무료 체험 데모를 시작했어요 · 실제 결제 없음"); }}>7일 무료로 체험하기</button><small className="premium-legal">목업 전용 · 실제 구독 또는 결제가 발생하지 않습니다.</small></div>;
+  return (
+    <form className="create-room-form" onSubmit={(event) => { event.preventDefault(); if (title.trim() && topic.trim()) onCreate({ title: title.trim(), topic: topic.trim(), language, level }); }}>
+      <header><span className="summary-icon violet"><Mic size={20} /></span><div><h2>보이스룸 만들기</h2><p>제목과 대화 주제만 정하면 바로 목록에 추가돼요.</p></div></header>
+      <label><span className="field-label">방 제목</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 퇴근 후 15분 영어" maxLength={48} /></label>
+      <label><span className="field-label">대화 주제</span><input value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="예: 여행에서 기억에 남는 순간" maxLength={64} /></label>
+      <div className="create-room-options">
+        <label><span className="field-label">사용 언어</span><select value={language} onChange={(event) => setLanguage(event.target.value)}><option>영어</option><option>한국어</option><option>일본어</option><option>스페인어</option></select></label>
+        <label><span className="field-label">참여 레벨</span><select value={level} onChange={(event) => setLevel(event.target.value)}><option>모든 레벨</option><option>초급</option><option>중급</option><option>고급</option></select></label>
+      </div>
+      <div className="modal-footer"><small>생성 결과는 현재 브라우저에서만 유지되는 mock입니다.</small><button className="primary-button" type="submit" disabled={!title.trim() || !topic.trim()}><Plus size={16} /> 방 만들기</button></div>
+    </form>
+  );
 }
 
 function RoomModal({ room, handRaised, setHandRaised, micOn, setMicOn, onClose, onReport, onToast }: { room: PracticeRoom; handRaised: boolean; setHandRaised: (value: boolean) => void; micOn: boolean; setMicOn: (value: boolean) => void; onClose: () => void; onReport: () => void; onToast: (message: string) => void }) {
-  return <div className={`room-modal-content room-state-${room.accent}`}><header><div><Pill tone="live"><span className="live-dot" /> LIVE · {room.listeners || 1}명</Pill><h2>{room.title}</h2><p>{room.language} · {room.level} · 호스트 {room.hostFlag} {room.host}</p></div><IconButton label="방 신고" icon={Flag} onClick={onReport} /></header><div className="room-stage"><div className="stage-seat speaking"><Avatar name={room.host} flag={room.hostFlag} accent={room.accent} size="lg" online /><strong>{room.host}</strong><small>호스트 · 말하는 중</small><span><Mic size={13} /></span></div>{room.speakers.slice(1).map((speaker, index) => <div className="stage-seat" key={speaker}><Avatar name={speaker} accent={(["mint", "amber", "blue"] as Accent[])[index % 3]} size="md" /><strong>{speaker}</strong><small>{index === 0 ? "모더레이터" : "스피커"}</small><span><Mic size={13} /></span></div>)}<button className={`stage-seat empty ${handRaised ? "waiting" : ""}`} type="button" onClick={() => setHandRaised(!handRaised)}><span><Plus size={20} /></span><strong>{handRaised ? "승인 대기 중" : "빈 자리"}</strong><small>{handRaised ? "호스트가 확인하고 있어요" : "눌러서 발언 요청"}</small></button></div><div className="live-caption"><span><Volume2 size={15} /> 실시간 자막 · 데모</span><p>“What is one small win you had today?”</p><button type="button" onClick={() => onToast("선택한 문장을 번역했어요")}>문장 번역</button></div><div className="room-chat"><span><b>Nina</b> Welcome! Listening only is totally okay 👋</span><span><b>Joon</b> My small win was finishing a book!</span></div><footer><button className={micOn ? "mic-active" : ""} type="button" onClick={() => { setMicOn(!micOn); onToast(micOn ? "마이크를 껐어요" : "마이크를 켰어요 · 데모"); }} disabled={!handRaised}><Mic size={19} />{micOn ? "마이크 켜짐" : handRaised ? "마이크 켜기" : "먼저 손들기"}</button><button type="button" onClick={() => { setHandRaised(!handRaised); onToast(handRaised ? "발언 요청을 취소했어요" : "손을 들었어요. 호스트 승인을 기다려요"); }}><UserPlus size={19} />{handRaised ? "손 내리기" : "손들기"}</button><button type="button" onClick={() => onToast("선물 보내기 데모를 열었어요")}><Gift size={19} />응원</button><button className="leave-room" type="button" onClick={onClose}>나가기</button></footer></div>;
+  return <div className={`room-modal-content room-state-${room.accent}`}><header><div><Pill tone="live"><span className="live-dot" /> LIVE · {room.listeners || 1}명</Pill><h2>{room.title}</h2><p>{room.language} · {room.level} · 호스트 {room.hostFlag} {room.host}</p></div><IconButton label="방 신고" icon={Flag} onClick={onReport} /></header><div className="room-stage"><div className="stage-seat speaking"><Avatar name={room.host} flag={room.hostFlag} accent={room.accent} size="lg" online /><strong>{room.host}</strong><small>호스트 · 말하는 중</small><span><Mic size={13} /></span></div>{room.speakers.slice(1).map((speaker, index) => <div className="stage-seat" key={speaker}><Avatar name={speaker} accent={(["mint", "amber", "blue"] as Accent[])[index % 3]} size="md" /><strong>{speaker}</strong><small>{index === 0 ? "모더레이터" : "스피커"}</small><span><Mic size={13} /></span></div>)}<button className={`stage-seat empty ${handRaised ? "waiting" : ""}`} type="button" onClick={() => setHandRaised(!handRaised)}><span><Plus size={20} /></span><strong>{handRaised ? "승인 대기 중" : "빈 자리"}</strong><small>{handRaised ? "호스트가 확인하고 있어요" : "눌러서 발언 요청"}</small></button></div><div className="live-caption"><span><Volume2 size={15} /> 실시간 자막 · 데모</span><p>“What is one small win you had today?”</p><button type="button" onClick={() => onToast("선택한 문장을 번역했어요")}>문장 번역</button></div><div className="room-chat"><span><b>Nina</b> Welcome! Listening only is totally okay 👋</span><span><b>Joon</b> My small win was finishing a book!</span></div><footer><button className={micOn ? "mic-active" : ""} type="button" onClick={() => { setMicOn(!micOn); onToast(micOn ? "마이크를 껐어요" : "마이크를 켰어요 · 데모"); }} disabled={!handRaised}><Mic size={19} />{micOn ? "마이크 켜짐" : handRaised ? "마이크 켜기" : "먼저 손들기"}</button><button type="button" onClick={() => { setHandRaised(!handRaised); onToast(handRaised ? "발언 요청을 취소했어요" : "손을 들었어요. 호스트 승인을 기다려요"); }}><UserPlus size={19} />{handRaised ? "손 내리기" : "손들기"}</button><button className="leave-room" type="button" onClick={onClose}>나가기</button></footer></div>;
 }
 
 function ExchangeModal({ length, setLength, onClose, onToast }: { length: number; setLength: (value: number) => void; onClose: () => void; onToast: (message: string) => void }) {
@@ -1437,7 +1616,7 @@ function OnboardingModal({ onClose, onToast }: { onClose: () => void; onToast: (
           <div className="rhythm-options">
             <button type="button"><Clock3 size={18} /><span><strong>주 활동 시간</strong><small>평일 저녁 7–10시</small></span><ChevronDown size={16} /></button>
             <button type="button"><PenLine size={18} /><span><strong>교정 선호</strong><small>대화 후 중요한 오류만</small></span><ChevronDown size={16} /></button>
-            <label><ShieldCheck size={18} /><span><strong>안전한 DM 요청함</strong><small>모르는 사람의 메시지를 먼저 검토</small></span><input aria-label="안전한 DM 요청함 사용" type="checkbox" defaultChecked /><i className="toggle" /></label>
+            <label><ShieldCheck size={18} /><span><strong>프로필 공개 범위</strong><small>위치는 도시 수준까지만 공개</small></span><input aria-label="정밀 위치 숨기기" type="checkbox" defaultChecked /><i className="toggle" /></label>
           </div>
         </section>
       ) : null}

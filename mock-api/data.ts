@@ -100,6 +100,38 @@ export interface VoiceRoom {
   startsAt: string;
 }
 
+export type AvailabilitySlot =
+  | "weekday-morning"
+  | "weekday-evening"
+  | "weekend-morning"
+  | "weekend-evening";
+
+export type PreferredPartnerLevel = "any" | "beginner" | "intermediate" | "advanced";
+
+export interface MatchingPreferences {
+  targetLanguages: string[];
+  preferredCountries: string[];
+  interests: string[];
+  availability: AvailabilitySlot[];
+  partnerLevel: PreferredPartnerLevel;
+  onlineOnly: boolean;
+}
+
+export interface PartnerMatchingSignal {
+  partnerId: string;
+  availability: AvailabilitySlot[];
+  learningStyle: "casual-chat" | "structured" | "voice-first" | "correction-focused";
+  icebreakers: string[];
+}
+
+export interface ConversationGuide {
+  partnerId: string;
+  topics: string[];
+  suggestedOpeners: string[];
+  followUpQuestions: string[];
+  tip: string;
+}
+
 export const languages: Language[] = [
   { code: "ko", name: "Korean", nativeName: "한국어", flag: "🇰🇷" },
   { code: "en", name: "English", nativeName: "English", flag: "🇺🇸" },
@@ -164,7 +196,7 @@ export const partners: UserProfile[] = [
     nativeLanguages: ["ja"],
     learningLanguages: [{ code: "ko", level: "elementary", goal: "드라마를 자막 없이 보기" }],
     bio: "도쿄의 사진가입니다. 천천히 이야기해도 괜찮아요!",
-    interests: ["photography", "music", "city walks", "baseball"],
+    interests: ["photography", "music", "city walks", "baseball", "travel"],
     status: "recently",
     lastActive: "2026-08-11T12:54:00.000Z",
     verified: true,
@@ -205,7 +237,7 @@ export const partners: UserProfile[] = [
     nativeLanguages: ["en", "fr"],
     learningLanguages: [{ code: "ko", level: "beginner", goal: "동료와 간단히 대화하기" }],
     bio: "Developer in Toronto. Happy to talk about tech, games, or Montréal food.",
-    interests: ["technology", "games", "cycling", "food"],
+    interests: ["technology", "games", "cycling", "food", "coffee"],
     status: "offline",
     lastActive: "2026-08-10T23:14:00.000Z",
     verified: true,
@@ -231,6 +263,25 @@ export const partners: UserProfile[] = [
     exchangeScore: 86,
     responseRate: 87,
     correctionsGiven: 95,
+  },
+  {
+    id: "user-amelie",
+    name: "Amélie",
+    handle: "@amelie.paris",
+    avatar: "AM",
+    avatarColor: "#D65A8D",
+    country: { code: "FR", name: "France", flag: "🇫🇷" },
+    timezone: "Europe/Paris",
+    nativeLanguages: ["fr", "en"],
+    learningLanguages: [{ code: "ko", level: "elementary", goal: "한국인 동료와 점심 대화하기" }],
+    bio: "Editorial illustrator in Paris. I love museum weekends, coffee, and learning through short voice notes.",
+    interests: ["illustration", "coffee", "museums", "travel"],
+    status: "online",
+    lastActive: "2026-08-11T13:21:00.000Z",
+    verified: true,
+    exchangeScore: 90,
+    responseRate: 94,
+    correctionsGiven: 163,
   },
 ];
 
@@ -406,6 +457,141 @@ export const notifications = [
   { id: "notification-2", type: "partner", title: "새 파트너 추천", body: "학습 시간대와 관심사가 비슷한 파트너 4명을 찾았어요.", read: false, createdAt: "2026-08-11T09:05:00.000Z" },
   { id: "notification-3", type: "streak", title: "7일 연속 학습 중", body: "오늘 5분만 더 연습하면 기록을 이어갈 수 있어요.", read: true, createdAt: "2026-08-10T23:00:00.000Z" },
 ] as const;
+
+export const defaultMatchingPreferences: MatchingPreferences = {
+  targetLanguages: ["en", "ja"],
+  preferredCountries: ["US", "JP", "CA"],
+  interests: ["design", "coffee", "travel"],
+  availability: ["weekday-evening", "weekend-morning"],
+  partnerLevel: "any",
+  onlineOnly: false,
+};
+
+export const partnerMatchingSignals: PartnerMatchingSignal[] = [
+  {
+    partnerId: "user-maya",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "casual-chat",
+    icebreakers: [
+      "Maya에게 최근 인상 깊었던 디자인 이야기를 물어보세요.",
+      "서로 좋아하는 주말 산책 코스를 한 문장씩 소개해 보세요.",
+    ],
+  },
+  {
+    partnerId: "user-ren",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "voice-first",
+    icebreakers: [
+      "Ren에게 서울에서 가장 다시 찍고 싶은 장소를 물어보세요.",
+      "좋아하는 사진 한 장을 골라 한국어와 일본어로 묘사해 보세요.",
+    ],
+  },
+  {
+    partnerId: "user-sofia",
+    availability: ["weekday-morning", "weekend-evening"],
+    learningStyle: "structured",
+    icebreakers: [
+      "Sofía에게 마드리드에서 좋아하는 건축물을 추천해 달라고 해보세요.",
+      "서로의 여행 버킷리스트에서 도시 하나씩 골라 이야기해 보세요.",
+    ],
+  },
+  {
+    partnerId: "user-noah",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "correction-focused",
+    icebreakers: [
+      "Noah와 최근 써 본 유용한 앱 하나를 서로 소개해 보세요.",
+      "토론토와 서울의 출퇴근 문화를 비교해 보세요.",
+    ],
+  },
+  {
+    partnerId: "user-lina",
+    availability: ["weekday-evening", "weekend-evening"],
+    learningStyle: "structured",
+    icebreakers: [
+      "Lina에게 가장 자신 있는 베이킹 메뉴를 물어보세요.",
+      "교환학생으로 꼭 해보고 싶은 일을 세 가지씩 나눠 보세요.",
+    ],
+  },
+  {
+    partnerId: "user-amelie",
+    availability: ["weekday-morning", "weekend-morning"],
+    learningStyle: "voice-first",
+    icebreakers: [
+      "Amélie에게 파리에서 조용히 그림 보기 좋은 미술관을 물어보세요.",
+      "서로의 동네에서 좋아하는 카페를 한 곳씩 소개해 보세요.",
+    ],
+  },
+];
+
+export const conversationGuides: ConversationGuide[] = [
+  {
+    partnerId: "user-maya",
+    topics: ["최근 진행한 디자인 프로젝트", "주말 하이킹 코스", "좋아하는 한국 음식"],
+    suggestedOpeners: [
+      "Hi Maya! Your hiking photos sound fun. Where did you go most recently?",
+      "프로필에 디자인을 좋아한다고 봤어요. 요즘 가장 흥미로운 프로젝트가 뭐예요?",
+      "떡볶이 말고 새로 도전해 보고 싶은 한국 음식이 있어요?",
+    ],
+    followUpQuestions: ["What made it memorable?", "한국과 미국에서는 어떤 점이 달라요?", "다음에는 무엇을 해보고 싶어요?"],
+    tip: "Maya는 편안한 일상 대화를 선호해요. 짧은 자기 경험을 먼저 나누고 열린 질문을 덧붙여 보세요.",
+  },
+  {
+    partnerId: "user-ren",
+    topics: ["도시 사진", "일본 인디 음악", "서울과 도쿄의 동네 산책"],
+    suggestedOpeners: [
+      "Renさん、最近撮った写真の中で一番気に入っている一枚は何ですか？",
+      "서울에서 사진 찍기 좋았던 동네가 어디였어요?",
+      "요즘 자주 듣는 일본 밴드를 하나 추천해 줄 수 있어요?",
+    ],
+    followUpQuestions: ["その写真を選んだ理由は何ですか？", "다음에는 어디를 걷고 싶어요?", "초보자에게도 추천할 만해요?"],
+    tip: "Ren은 사진처럼 구체적인 소재와 짧은 음성 메시지에 반응이 좋아요. 한 번에 질문 하나만 보내보세요.",
+  },
+  {
+    partnerId: "user-sofia",
+    topics: ["마드리드 건축", "한국 여행 계획", "스페인 가정식"],
+    suggestedOpeners: [
+      "Hola Sofía! Which building in Madrid would you show an architecture fan first?",
+      "한국 여행에서 가장 기대하는 장소가 어디예요?",
+      "스페인에서 평일 저녁에 자주 먹는 음식이 궁금해요.",
+    ],
+    followUpQuestions: ["Why is that place special to you?", "여행 전에 연습하고 싶은 표현이 있어요?", "직접 만들어 본 적도 있어요?"],
+    tip: "Sofía는 구체적인 목표를 둔 대화를 좋아해요. 이번 대화에서 서로 연습할 언어 비율을 먼저 제안해 보세요.",
+  },
+  {
+    partnerId: "user-noah",
+    topics: ["최근 만든 사이드 프로젝트", "토론토 자전거 생활", "몬트리올 음식"],
+    suggestedOpeners: [
+      "Hey Noah! What side project have you enjoyed working on lately?",
+      "토론토에서 자전거 타기 좋은 계절은 언제예요?",
+      "몬트리올에 처음 간다면 꼭 먹어야 할 메뉴가 뭐예요?",
+    ],
+    followUpQuestions: ["What was the hardest part?", "서울과 비교하면 어떤가요?", "현지인처럼 주문하려면 뭐라고 해야 해요?"],
+    tip: "Noah는 서로 문장을 고쳐주는 방식에 익숙해요. 교정을 원한다는 표시와 함께 짧은 문장을 보내보세요.",
+  },
+  {
+    partnerId: "user-lina",
+    topics: ["독일식 베이킹", "베를린 전시", "교환학생 준비"],
+    suggestedOpeners: [
+      "Hi Lina! What is your favorite thing to bake for friends?",
+      "최근 베를린에서 본 전시 중에 추천하고 싶은 게 있어요?",
+      "교환학생으로 한국에 오면 가장 먼저 해보고 싶은 일이 뭐예요?",
+    ],
+    followUpQuestions: ["처음 만든 건 언제였어요?", "What did you like most about it?", "준비하면서 궁금한 점이 있어요?"],
+    tip: "Lina는 생각할 시간을 두고 정리해서 말하는 편이에요. 여러 질문을 한꺼번에 보내기보다 한 주제씩 이어가세요.",
+  },
+  {
+    partnerId: "user-amelie",
+    topics: ["파리의 작은 미술관", "일러스트 작업", "동네 카페"],
+    suggestedOpeners: [
+      "Bonjour Amélie! Which small museum in Paris do you keep returning to?",
+      "요즘 어떤 일러스트를 그리고 있어요?",
+      "파리에서 그림 그리기 좋은 조용한 카페를 추천해 줄 수 있어요?",
+    ],
+    followUpQuestions: ["What keeps inspiring you there?", "작업할 때 어떤 음악을 들어요?", "언젠가 서울에서도 그리고 싶은 장소가 있어요?"],
+    tip: "Amélie는 짧은 음성 메시지로 배우는 것을 좋아해요. 텍스트로 먼저 인사한 뒤 10초 정도의 음성을 제안해 보세요.",
+  },
+];
 
 export const bootstrap = {
   currentUser,
