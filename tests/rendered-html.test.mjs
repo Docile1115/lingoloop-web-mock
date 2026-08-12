@@ -165,7 +165,7 @@ test("mock API list endpoint paginates its stable partner collection", async () 
     cursor: 0,
     limit: 2,
     nextCursor: "2",
-    total: 6,
+    total: 15,
   });
   assertMeta(body.meta, requestId);
 });
@@ -187,12 +187,17 @@ test("mock API exposes and updates matching preferences as a non-persistent mock
       "preferences",
     ]);
     assert.deepEqual(Object.keys(body.data.preferences).sort(), [
+      "ageMax",
+      "ageMin",
       "availability",
+      "intents",
       "interests",
       "onlineOnly",
+      "partnerGender",
       "partnerLevel",
       "preferredCountries",
       "targetLanguages",
+      "verifiedOnly",
     ]);
     assertNonEmptyStringArray(
       body.data.preferences.targetLanguages,
@@ -225,6 +230,11 @@ test("mock API exposes and updates matching preferences as a non-persistent mock
       availability: ["weekday-evening"],
       partnerLevel: "intermediate",
       onlineOnly: true,
+      partnerGender: "same",
+      ageMin: 24,
+      ageMax: 36,
+      verifiedOnly: true,
+      intents: ["language-exchange", "friendship"],
     };
     const response = await fetchApp("/api/matching/preferences", {
       method: "POST",
@@ -265,13 +275,13 @@ test("mock API exposes and updates matching preferences as a non-persistent mock
   });
 });
 
-test("mock API returns one deterministic dated match and rejects invalid dates", async (t) => {
+test("mock API returns 12 deterministic dated matches and rejects invalid dates", async (t) => {
   const conditions =
     "targetLanguages=en,ja&preferredCountries=US,JP,CA&interests=design,coffee,travel&availability=weekday-evening,weekend-morning&partnerLevel=any&onlineOnly=false";
   const dailyPath = (date) =>
     `/api/matching/daily?date=${date}&${conditions}`;
 
-  await t.test("returns the same explained partner for the same date and conditions", async () => {
+  await t.test("returns the same explained partners for the same date and conditions", async () => {
     const requestIds = ["daily-matching-first-test", "daily-matching-repeat-test"];
     const responses = await Promise.all(
       requestIds.map((requestId) =>
@@ -287,18 +297,23 @@ test("mock API returns one deterministic dated match and rejects invalid dates",
       assertCommonApiHeaders(response, requestIds[index]);
       const body = await response.json();
       assert.equal(body.data.date, "2026-08-11");
-      assert.equal(body.data.recommendations.length, 1);
-      const [recommendation] = body.data.recommendations;
-      assert.equal(typeof recommendation.partner?.id, "string");
-      assert.equal(typeof recommendation.partner?.name, "string");
-      assert.equal(typeof recommendation.score, "number");
-      assert.ok(recommendation.score >= 0 && recommendation.score <= 100);
-      assertNonEmptyStringArray(
-        recommendation.matchReasons,
-        "recommendation.matchReasons",
-      );
-      assert.equal(typeof recommendation.icebreaker, "string");
-      assert.ok(recommendation.icebreaker.length > 0);
+      assert.equal(body.data.recommendations.length, 12);
+      assert.equal(new Set(body.data.recommendations.map((item) => item.partner.id)).size, 12);
+      for (const recommendation of body.data.recommendations) {
+        assert.equal(typeof recommendation.partner?.id, "string");
+        assert.equal(typeof recommendation.partner?.name, "string");
+        assert.equal(typeof recommendation.score, "number");
+        assert.ok(recommendation.score >= 0 && recommendation.score <= 100);
+        assert.equal(typeof recommendation.meetsAllPreferences, "boolean");
+        assertNonEmptyStringArray(
+          recommendation.matchReasons,
+          "recommendation.matchReasons",
+        );
+        assert.equal(typeof recommendation.icebreaker, "string");
+        assert.ok(recommendation.icebreaker.length > 0);
+      }
+      assert.equal(body.data.discovery.includedToday, 12);
+      assert.equal(body.data.discovery.additionalViewsAvailable, false);
       assert.equal(typeof body.data.preferencesApplied, "object");
       assertNonEmptyStringArray(
         body.data.preferencesApplied.targetLanguages,
@@ -342,8 +357,8 @@ test("mock API returns one deterministic dated match and rejects invalid dates",
       assertCommonApiHeaders(response, requestId);
       const body = await response.json();
       assert.equal(body.data.date, date);
-      assert.equal(body.data.recommendations.length, 1);
-      partnerIds.push(body.data.recommendations[0].partner.id);
+      assert.equal(body.data.recommendations.length, 12);
+      partnerIds.push(body.data.recommendations.map((item) => item.partner.id).join(","));
       assertMeta(body.meta, requestId);
     }
 
@@ -363,6 +378,25 @@ test("mock API returns one deterministic dated match and rejects invalid dates",
     assertCommonApiHeaders(response, requestId);
     const body = await response.json();
     assert.equal(body.error.code, "INVALID_DATE");
+    assertMeta(body.meta, requestId);
+  });
+
+  await t.test("defaults an omitted date to the current Seoul calendar day", async () => {
+    const requestId = "daily-matching-default-date-test";
+    const response = await fetchApp(`/api/matching/daily?${conditions}`, {
+      headers: { "x-request-id": requestId },
+    });
+    assert.equal(response.status, 200);
+    assertCommonApiHeaders(response, requestId);
+    const body = await response.json();
+    assert.match(body.data.date, /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(body.data.recommendations.length, 12);
+    assert.deepEqual(body.data.discovery.hardConstraints, ["targetLanguages"]);
+    assert.ok(
+      body.data.recommendations.every((item) =>
+        item.partner.nativeLanguages.some((language) => ["en", "ja"].includes(language)),
+      ),
+    );
     assertMeta(body.meta, requestId);
   });
 });
@@ -472,6 +506,91 @@ test("mock API creates a normalized chat message without persistence", async () 
   assertMeta(body.meta, requestId);
 });
 
+test("mock API keeps translation available as an unmetered free capability", async () => {
+  const requestId = "free-translation-contract-test";
+  const response = await fetchApp("/api/translate", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-request-id": requestId },
+    body: JSON.stringify({ text: "안녕하세요", targetLanguage: "en" }),
+  });
+
+  assert.equal(response.status, 200);
+  assertCommonApiHeaders(response, requestId);
+  const body = await response.json();
+  assert.equal(body.data.translatedText, "Hello");
+  assert.deepEqual(
+    {
+      tier: body.data.entitlement.tier,
+      charged: body.data.entitlement.charged,
+      metered: body.data.entitlement.metered,
+      paywall: body.data.entitlement.paywall,
+    },
+    { tier: "free", charged: false, metered: false, paywall: false },
+  );
+  assertMeta(body.meta, requestId);
+});
+
+test("mock API exposes DM privacy, request inbox actions, and reinstall-safe sync policy", async (t) => {
+  await t.test("reads and updates who may message", async () => {
+    const update = await fetchApp("/api/dm/privacy", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "dm-privacy-test" },
+      body: JSON.stringify({ whoCanMessage: "matches", routeOthersToRequests: true }),
+    });
+    assert.equal(update.status, 200);
+    const body = await update.json();
+    assert.equal(body.data.settings.whoCanMessage, "matches");
+    assert.equal(body.data.settings.routeOthersToRequests, true);
+    assert.equal(body.data.persisted, false);
+  });
+
+  await t.test("lists pending requests and accepts one explicitly", async () => {
+    const list = await fetchApp("/api/dm/requests?status=pending", {
+      headers: { "x-request-id": "dm-requests-list-test" },
+    });
+    assert.equal(list.status, 200);
+    const listBody = await list.json();
+    assert.ok(listBody.data.length >= 2);
+    assert.ok(listBody.data.some((item) => item.risk.level === "high"));
+
+    const accepted = await fetchApp("/api/dm/requests", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "dm-request-action-test" },
+      body: JSON.stringify({ requestId: "dm-request-chloe", action: "accept" }),
+    });
+    assert.equal(accepted.status, 200);
+    const acceptedBody = await accepted.json();
+    assert.equal(acceptedBody.data.request.status, "accepted");
+    assert.equal(acceptedBody.data.conversationCreated, true);
+  });
+
+  await t.test("documents automatic server sync and reinstall recovery", async () => {
+    const response = await fetchApp("/api/dm/sync", {
+      headers: { "x-request-id": "dm-sync-test" },
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.data.storage, "server");
+    assert.equal(body.data.automaticSync, true);
+    assert.equal(body.data.reinstallRecovery, true);
+  });
+});
+
+test("mock API exposes activation verification and re-signup protection state", async () => {
+  const requestId = "verification-contract-test";
+  const response = await fetchApp("/api/account/verification", {
+    headers: { "x-request-id": requestId },
+  });
+  assert.equal(response.status, 200);
+  assertCommonApiHeaders(response, requestId);
+  const body = await response.json();
+  assert.equal(body.data.accountStatus, "active");
+  assert.equal(body.data.assuranceLevel, "phone");
+  assert.deepEqual(body.data.requiredForActivation, ["email", "phone"]);
+  assert.equal(body.data.reSignupProtection.enabled, true);
+  assertMeta(body.meta, requestId);
+});
+
 test("mock API accepts a safety report with the documented receipt", async () => {
   const requestId = "report-contract-test";
   const response = await fetchApp("/api/reports", {
@@ -498,8 +617,22 @@ test("mock API accepts a safety report with the documented receipt", async () =>
   assert.equal(body.data.reason, "spam");
   assert.equal(body.data.details, "반복 홍보 메시지");
   assert.equal(body.data.status, "received");
+  assert.equal(body.data.reporterAccountStatus, "active");
+  assert.ok(Number.isFinite(Date.parse(body.data.nextUpdateBy)));
   assert.match(body.data.safetyMessage, /신고가 접수되었습니다/);
   assertMeta(body.meta, requestId);
+
+  const statusRequestId = "report-status-contract-test";
+  const statusResponse = await fetchApp(`/api/reports/${body.data.id}`, {
+    headers: { "x-request-id": statusRequestId },
+  });
+  assert.equal(statusResponse.status, 200);
+  assertCommonApiHeaders(statusResponse, statusRequestId);
+  const statusBody = await statusResponse.json();
+  assert.equal(statusBody.data.id, body.data.id);
+  assert.equal(statusBody.data.reporterAccountStatus, "active");
+  assert.equal(statusBody.data.statusHistory[0].status, "received");
+  assertMeta(statusBody.meta, statusRequestId);
 });
 
 test("mock API returns structured errors for invalid routes, methods, and payloads", async (t) => {

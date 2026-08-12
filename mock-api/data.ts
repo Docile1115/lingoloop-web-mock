@@ -1,5 +1,8 @@
 export type Presence = "online" | "recently" | "offline";
 export type LanguageLevel = "beginner" | "elementary" | "intermediate" | "advanced" | "native";
+export type GenderIdentity = "woman" | "man" | "nonbinary";
+export type ConnectionGoal = "friendship" | "language-exchange" | "voice-practice" | "culture";
+export type PartnerGenderPreference = "any" | "same" | "women" | "men";
 
 export interface Language {
   code: string;
@@ -22,6 +25,9 @@ export interface UserProfile {
   avatarColor: string;
   country: { code: string; name: string; flag: string };
   timezone: string;
+  age: number;
+  gender: GenderIdentity;
+  intents: ConnectionGoal[];
   nativeLanguages: string[];
   learningLanguages: LearningLanguage[];
   bio: string;
@@ -115,6 +121,11 @@ export interface MatchingPreferences {
   availability: AvailabilitySlot[];
   partnerLevel: PreferredPartnerLevel;
   onlineOnly: boolean;
+  partnerGender: PartnerGenderPreference;
+  ageMin: number;
+  ageMax: number;
+  verifiedOnly: boolean;
+  intents: ConnectionGoal[];
 }
 
 export interface PartnerMatchingSignal {
@@ -130,6 +141,64 @@ export interface ConversationGuide {
   suggestedOpeners: string[];
   followUpQuestions: string[];
   tip: string;
+}
+
+export type DmPermission = "matches" | "mutual-follows" | "followers" | "everyone";
+
+export interface DmPrivacySettings {
+  whoCanMessage: DmPermission;
+  routeOthersToRequests: boolean;
+  filterSuspectedSpam: boolean;
+  allowVoiceMessagesInRequests: boolean;
+  readReceipts: boolean;
+}
+
+export interface DmRequest {
+  id: string;
+  sender: Pick<UserProfile, "id" | "name" | "handle" | "avatar" | "avatarColor" | "verified">;
+  preview: string;
+  receivedAt: string;
+  status: "pending" | "accepted" | "declined" | "blocked";
+  relationship: "matched" | "follower" | "not-connected";
+  risk: { level: "low" | "medium" | "high"; signals: string[] };
+}
+
+export type SafetyReportStatus = "received" | "triaging" | "action-taken" | "closed";
+
+export interface SafetyReport {
+  id: string;
+  reporterId: string;
+  targetType: "user" | "post" | "message" | "room";
+  targetId: string;
+  reason: "spam" | "scam" | "harassment" | "dating" | "sexual_content" | "hate" | "impersonation" | "other";
+  details: string;
+  status: SafetyReportStatus;
+  submittedAt: string;
+  updatedAt: string;
+  nextUpdateBy: string;
+  reporterAccountStatus: "active";
+  statusHistory: { status: SafetyReportStatus; at: string; note: string }[];
+}
+
+export interface AccountVerification {
+  userId: string;
+  accountStatus: "pending-verification" | "active" | "restricted";
+  assuranceLevel: "none" | "email" | "phone" | "identity";
+  activationEligible: boolean;
+  requiredForActivation: Array<"email" | "phone">;
+  steps: Array<{
+    type: "email" | "phone" | "identity";
+    status: "not-started" | "pending" | "verified";
+    required: boolean;
+    verifiedAt?: string;
+    maskedDestination?: string;
+  }>;
+  reSignupProtection: {
+    enabled: boolean;
+    identifier: "verified-phone-hash";
+    note: string;
+  };
+  updatedAt: string;
 }
 
 export const languages: Language[] = [
@@ -150,6 +219,9 @@ export const currentUser: UserProfile = {
   avatarColor: "#6657E8",
   country: { code: "KR", name: "South Korea", flag: "🇰🇷" },
   timezone: "Asia/Seoul",
+  age: 29,
+  gender: "man",
+  intents: ["language-exchange", "friendship", "voice-practice"],
   nativeLanguages: ["ko"],
   learningLanguages: [
     { code: "en", level: "intermediate", goal: "자연스러운 일상 대화" },
@@ -174,6 +246,9 @@ export const partners: UserProfile[] = [
     avatarColor: "#F06A6A",
     country: { code: "US", name: "United States", flag: "🇺🇸" },
     timezone: "America/Los_Angeles",
+    age: 28,
+    gender: "woman",
+    intents: ["language-exchange", "friendship"],
     nativeLanguages: ["en"],
     learningLanguages: [{ code: "ko", level: "intermediate", goal: "한국 친구들과 자연스럽게 대화하기" }],
     bio: "UX researcher, weekend hiker, and enthusiastic 떡볶이 student.",
@@ -193,6 +268,9 @@ export const partners: UserProfile[] = [
     avatarColor: "#2DAA8A",
     country: { code: "JP", name: "Japan", flag: "🇯🇵" },
     timezone: "Asia/Tokyo",
+    age: 27,
+    gender: "man",
+    intents: ["language-exchange", "friendship", "voice-practice"],
     nativeLanguages: ["ja"],
     learningLanguages: [{ code: "ko", level: "elementary", goal: "드라마를 자막 없이 보기" }],
     bio: "도쿄의 사진가입니다. 천천히 이야기해도 괜찮아요!",
@@ -212,6 +290,9 @@ export const partners: UserProfile[] = [
     avatarColor: "#EE9B45",
     country: { code: "ES", name: "Spain", flag: "🇪🇸" },
     timezone: "Europe/Madrid",
+    age: 31,
+    gender: "woman",
+    intents: ["language-exchange", "culture"],
     nativeLanguages: ["es"],
     learningLanguages: [
       { code: "en", level: "advanced", goal: "업무 프레젠테이션" },
@@ -234,6 +315,9 @@ export const partners: UserProfile[] = [
     avatarColor: "#3E86DB",
     country: { code: "CA", name: "Canada", flag: "🇨🇦" },
     timezone: "America/Toronto",
+    age: 30,
+    gender: "man",
+    intents: ["language-exchange", "friendship"],
     nativeLanguages: ["en", "fr"],
     learningLanguages: [{ code: "ko", level: "beginner", goal: "동료와 간단히 대화하기" }],
     bio: "Developer in Toronto. Happy to talk about tech, games, or Montréal food.",
@@ -253,6 +337,9 @@ export const partners: UserProfile[] = [
     avatarColor: "#A65DC9",
     country: { code: "DE", name: "Germany", flag: "🇩🇪" },
     timezone: "Europe/Berlin",
+    age: 25,
+    gender: "woman",
+    intents: ["language-exchange", "friendship", "culture"],
     nativeLanguages: ["de"],
     learningLanguages: [{ code: "ko", level: "intermediate", goal: "교환학생 생활 준비" }],
     bio: "Graduate student, amateur baker, language notebook collector.",
@@ -272,6 +359,9 @@ export const partners: UserProfile[] = [
     avatarColor: "#D65A8D",
     country: { code: "FR", name: "France", flag: "🇫🇷" },
     timezone: "Europe/Paris",
+    age: 29,
+    gender: "woman",
+    intents: ["language-exchange", "voice-practice", "culture"],
     nativeLanguages: ["fr", "en"],
     learningLanguages: [{ code: "ko", level: "elementary", goal: "한국인 동료와 점심 대화하기" }],
     bio: "Editorial illustrator in Paris. I love museum weekends, coffee, and learning through short voice notes.",
@@ -282,6 +372,204 @@ export const partners: UserProfile[] = [
     exchangeScore: 90,
     responseRate: 94,
     correctionsGiven: 163,
+  },
+  {
+    id: "user-ethan",
+    name: "Ethan",
+    handle: "@ethan.makes",
+    avatar: "ET",
+    avatarColor: "#4F7CAC",
+    country: { code: "US", name: "United States", flag: "🇺🇸" },
+    timezone: "America/New_York",
+    age: 32,
+    gender: "man",
+    intents: ["language-exchange", "friendship", "culture"],
+    nativeLanguages: ["en"],
+    learningLanguages: [{ code: "ko", level: "intermediate", goal: "한국 팀과 자연스럽게 협업하기" }],
+    bio: "Product designer in Brooklyn who enjoys travel sketches and neighborhood coffee shops.",
+    interests: ["design", "coffee", "travel", "drawing"],
+    status: "online",
+    lastActive: "2026-08-11T13:16:00.000Z",
+    verified: true,
+    exchangeScore: 95,
+    responseRate: 96,
+    correctionsGiven: 182,
+  },
+  {
+    id: "user-yui",
+    name: "Yui",
+    handle: "@yui.weekends",
+    avatar: "YU",
+    avatarColor: "#D96C8B",
+    country: { code: "JP", name: "Japan", flag: "🇯🇵" },
+    timezone: "Asia/Tokyo",
+    age: 26,
+    gender: "woman",
+    intents: ["language-exchange", "friendship", "voice-practice"],
+    nativeLanguages: ["ja"],
+    learningLanguages: [{ code: "ko", level: "intermediate", goal: "친구와 자연스럽게 통화하기" }],
+    bio: "Coffee roaster in Yokohama. I like short voice chats and slow weekend trips.",
+    interests: ["coffee", "travel", "music", "food"],
+    status: "online",
+    lastActive: "2026-08-11T13:17:00.000Z",
+    verified: true,
+    exchangeScore: 96,
+    responseRate: 97,
+    correctionsGiven: 231,
+  },
+  {
+    id: "user-chloe",
+    name: "Chloe",
+    handle: "@chloe.vancouver",
+    avatar: "CH",
+    avatarColor: "#4AAE9B",
+    country: { code: "CA", name: "Canada", flag: "🇨🇦" },
+    timezone: "America/Vancouver",
+    age: 24,
+    gender: "woman",
+    intents: ["language-exchange", "friendship"],
+    nativeLanguages: ["en"],
+    learningLanguages: [{ code: "ko", level: "beginner", goal: "여행에서 친구 사귀기" }],
+    bio: "Student and trail runner in Vancouver, planning my first trip to Busan.",
+    interests: ["running", "travel", "books", "nature"],
+    status: "online",
+    lastActive: "2026-08-11T13:12:00.000Z",
+    verified: true,
+    exchangeScore: 90,
+    responseRate: 92,
+    correctionsGiven: 78,
+  },
+  {
+    id: "user-haru",
+    name: "Haru",
+    handle: "@haru.records",
+    avatar: "HA",
+    avatarColor: "#7C69C7",
+    country: { code: "JP", name: "Japan", flag: "🇯🇵" },
+    timezone: "Asia/Osaka",
+    age: 30,
+    gender: "nonbinary",
+    intents: ["language-exchange", "friendship", "culture"],
+    nativeLanguages: ["ja"],
+    learningLanguages: [{ code: "ko", level: "elementary", goal: "음악 이야기를 한국어로 나누기" }],
+    bio: "Record-store staff in Osaka. Happy to swap playlists and café recommendations.",
+    interests: ["coffee", "music", "design", "city walks"],
+    status: "online",
+    lastActive: "2026-08-11T13:14:00.000Z",
+    verified: true,
+    exchangeScore: 93,
+    responseRate: 95,
+    correctionsGiven: 144,
+  },
+  {
+    id: "user-liam",
+    name: "Liam",
+    handle: "@liam.products",
+    avatar: "LM",
+    avatarColor: "#D48645",
+    country: { code: "US", name: "United States", flag: "🇺🇸" },
+    timezone: "America/Chicago",
+    age: 34,
+    gender: "man",
+    intents: ["language-exchange", "friendship"],
+    nativeLanguages: ["en"],
+    learningLanguages: [{ code: "ko", level: "beginner", goal: "출장 중 간단한 대화하기" }],
+    bio: "Product manager in Chicago. I learn best through practical, friendly corrections.",
+    interests: ["design", "coffee", "technology", "baseball"],
+    status: "online",
+    lastActive: "2026-08-11T13:05:00.000Z",
+    verified: true,
+    exchangeScore: 92,
+    responseRate: 90,
+    correctionsGiven: 166,
+  },
+  {
+    id: "user-aiko",
+    name: "Aiko",
+    handle: "@aiko.cooks",
+    avatar: "AI",
+    avatarColor: "#E06464",
+    country: { code: "JP", name: "Japan", flag: "🇯🇵" },
+    timezone: "Asia/Fukuoka",
+    age: 28,
+    gender: "woman",
+    intents: ["language-exchange", "friendship", "culture"],
+    nativeLanguages: ["ja"],
+    learningLanguages: [{ code: "ko", level: "intermediate", goal: "한일 요리 문화를 소개하기" }],
+    bio: "Home cook in Fukuoka who collects recipes while traveling.",
+    interests: ["travel", "cooking", "food", "photography"],
+    status: "online",
+    lastActive: "2026-08-11T13:11:00.000Z",
+    verified: true,
+    exchangeScore: 94,
+    responseRate: 96,
+    correctionsGiven: 213,
+  },
+  {
+    id: "user-olivia",
+    name: "Olivia",
+    handle: "@olivia.reads",
+    avatar: "OL",
+    avatarColor: "#3A91A8",
+    country: { code: "CA", name: "Canada", flag: "🇨🇦" },
+    timezone: "America/Toronto",
+    age: 27,
+    gender: "woman",
+    intents: ["language-exchange", "friendship"],
+    nativeLanguages: ["en"],
+    learningLanguages: [{ code: "ko", level: "advanced", goal: "책과 디자인을 깊이 있게 토론하기" }],
+    bio: "Editorial designer in Toronto. I enjoy book clubs and thoughtful language exchange.",
+    interests: ["design", "books", "coffee", "art"],
+    status: "online",
+    lastActive: "2026-08-11T13:09:00.000Z",
+    verified: true,
+    exchangeScore: 98,
+    responseRate: 99,
+    correctionsGiven: 348,
+  },
+  {
+    id: "user-kenji",
+    name: "Kenji",
+    handle: "@kenji.runs",
+    avatar: "KJ",
+    avatarColor: "#5376C6",
+    country: { code: "JP", name: "Japan", flag: "🇯🇵" },
+    timezone: "Asia/Tokyo",
+    age: 33,
+    gender: "man",
+    intents: ["language-exchange", "friendship", "voice-practice"],
+    nativeLanguages: ["ja"],
+    learningLanguages: [{ code: "ko", level: "intermediate", goal: "러닝 친구와 편하게 대화하기" }],
+    bio: "Morning runner and travel planner. Ten-minute voice exchanges work best for me.",
+    interests: ["running", "travel", "coffee", "sports"],
+    status: "online",
+    lastActive: "2026-08-11T13:07:00.000Z",
+    verified: true,
+    exchangeScore: 91,
+    responseRate: 94,
+    correctionsGiven: 121,
+  },
+  {
+    id: "user-emma",
+    name: "Emma",
+    handle: "@emma.films",
+    avatar: "EM",
+    avatarColor: "#C35C9A",
+    country: { code: "US", name: "United States", flag: "🇺🇸" },
+    timezone: "America/Los_Angeles",
+    age: 26,
+    gender: "woman",
+    intents: ["language-exchange", "friendship", "culture"],
+    nativeLanguages: ["en"],
+    learningLanguages: [{ code: "ko", level: "elementary", goal: "영화 감상을 한국어로 이야기하기" }],
+    bio: "Film editor in Los Angeles. Let’s trade movie picks and café notes.",
+    interests: ["coffee", "movies", "design", "travel"],
+    status: "online",
+    lastActive: "2026-08-11T13:15:00.000Z",
+    verified: true,
+    exchangeScore: 95,
+    responseRate: 97,
+    correctionsGiven: 239,
   },
 ];
 
@@ -465,6 +753,11 @@ export const defaultMatchingPreferences: MatchingPreferences = {
   availability: ["weekday-evening", "weekend-morning"],
   partnerLevel: "any",
   onlineOnly: false,
+  partnerGender: "any",
+  ageMin: 20,
+  ageMax: 40,
+  verifiedOnly: false,
+  intents: ["language-exchange", "friendship"],
 };
 
 export const partnerMatchingSignals: PartnerMatchingSignal[] = [
@@ -521,6 +814,60 @@ export const partnerMatchingSignals: PartnerMatchingSignal[] = [
       "Amélie에게 파리에서 조용히 그림 보기 좋은 미술관을 물어보세요.",
       "서로의 동네에서 좋아하는 카페를 한 곳씩 소개해 보세요.",
     ],
+  },
+  {
+    partnerId: "user-ethan",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "correction-focused",
+    icebreakers: ["Ethan에게 최근 인상 깊었던 제품 디자인을 물어보세요.", "서울과 뉴욕의 동네 카페를 비교해 보세요."],
+  },
+  {
+    partnerId: "user-yui",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "voice-first",
+    icebreakers: ["Yui에게 요코하마에서 좋아하는 카페를 물어보세요.", "서로 10초 음성으로 오늘의 커피를 소개해 보세요."],
+  },
+  {
+    partnerId: "user-chloe",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "casual-chat",
+    icebreakers: ["Chloe에게 밴쿠버 러닝 코스를 추천해 달라고 해보세요.", "부산에서 가보고 싶은 곳을 함께 골라 보세요."],
+  },
+  {
+    partnerId: "user-haru",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "casual-chat",
+    icebreakers: ["Haru와 요즘 자주 듣는 곡을 한 곡씩 나눠 보세요.", "오사카의 조용한 카페를 추천해 달라고 해보세요."],
+  },
+  {
+    partnerId: "user-liam",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "correction-focused",
+    icebreakers: ["Liam과 최근 유용했던 제품을 하나씩 소개해 보세요.", "출장에서 꼭 쓰는 표현을 서로 교정해 보세요."],
+  },
+  {
+    partnerId: "user-aiko",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "structured",
+    icebreakers: ["Aiko에게 후쿠오카 가정식을 추천해 달라고 해보세요.", "한일 여행에서 기억에 남은 음식을 나눠 보세요."],
+  },
+  {
+    partnerId: "user-olivia",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "structured",
+    icebreakers: ["Olivia에게 요즘 읽는 책을 물어보세요.", "좋아하는 책 표지 디자인을 한 개씩 소개해 보세요."],
+  },
+  {
+    partnerId: "user-kenji",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "voice-first",
+    icebreakers: ["Kenji와 아침 러닝 습관을 짧게 이야기해 보세요.", "다음 여행에서 달리고 싶은 도시를 골라 보세요."],
+  },
+  {
+    partnerId: "user-emma",
+    availability: ["weekday-evening", "weekend-morning"],
+    learningStyle: "casual-chat",
+    icebreakers: ["Emma에게 최근 재미있게 본 영화를 물어보세요.", "한국과 미국 영화의 대사를 하나씩 추천해 보세요."],
   },
 ];
 
@@ -593,6 +940,81 @@ export const conversationGuides: ConversationGuide[] = [
   },
 ];
 
+export const defaultDmPrivacySettings: DmPrivacySettings = {
+  whoCanMessage: "mutual-follows",
+  routeOthersToRequests: true,
+  filterSuspectedSpam: true,
+  allowVoiceMessagesInRequests: false,
+  readReceipts: true,
+};
+
+export const dmRequests: DmRequest[] = [
+  {
+    id: "dm-request-chloe",
+    sender: partners.find((partner) => partner.id === "user-chloe")!,
+    preview: "안녕하세요! 부산 여행 표현을 같이 연습하고 싶어요.",
+    receivedAt: "2026-08-11T12:32:00.000Z",
+    status: "pending",
+    relationship: "follower",
+    risk: { level: "low", signals: [] },
+  },
+  {
+    id: "dm-request-example",
+    sender: {
+      id: "user-example",
+      name: "Travel Buddy",
+      handle: "@travel.fast",
+      avatar: "TB",
+      avatarColor: "#767676",
+      verified: false,
+    },
+    preview: "다른 메신저로 이동하면 투자 정보를 알려드릴게요.",
+    receivedAt: "2026-08-11T11:10:00.000Z",
+    status: "pending",
+    relationship: "not-connected",
+    risk: { level: "high", signals: ["외부 메신저 이동 유도", "금전·투자 관련 표현"] },
+  },
+];
+
+export const seededSafetyReports: SafetyReport[] = [
+  {
+    id: "report-demo-scam",
+    reporterId: currentUser.id,
+    targetType: "user",
+    targetId: "user-example",
+    reason: "scam",
+    details: "외부 메신저에서 투자금을 보내 달라고 요청했습니다.",
+    status: "triaging",
+    submittedAt: "2026-08-11T11:20:00.000Z",
+    updatedAt: "2026-08-11T11:35:00.000Z",
+    nextUpdateBy: "2026-08-12T11:20:00.000Z",
+    reporterAccountStatus: "active",
+    statusHistory: [
+      { status: "received", at: "2026-08-11T11:20:00.000Z", note: "신고와 관련 메시지 증거를 안전하게 접수했어요." },
+      { status: "triaging", at: "2026-08-11T11:35:00.000Z", note: "자동 분류 후 안전 담당 검토 대기 중이에요." },
+    ],
+  },
+];
+
+export const accountVerification: AccountVerification = {
+  userId: currentUser.id,
+  accountStatus: "active",
+  assuranceLevel: "phone",
+  activationEligible: true,
+  requiredForActivation: ["email", "phone"],
+  steps: [
+    { type: "email", status: "verified", required: true, verifiedAt: "2026-07-01T04:20:00.000Z", maskedDestination: "m***@example.com" },
+    { type: "phone", status: "verified", required: true, verifiedAt: "2026-07-01T04:23:00.000Z", maskedDestination: "+82 10-****-1234" },
+    { type: "identity", status: "not-started", required: false },
+  ],
+  reSignupProtection: {
+    enabled: true,
+    identifier: "verified-phone-hash",
+    note: "정지된 전화번호 식별자의 즉시 재가입을 제한하는 목업 정책입니다.",
+  },
+  updatedAt: "2026-08-11T13:22:00.000Z",
+};
+
 export const bootstrap = {
   currentUser,
   languages,
@@ -614,5 +1036,8 @@ export const bootstrap = {
     instantTranslation: true,
     inlineCorrections: true,
     videoCalls: false,
+    freeTranslation: true,
+    dmRequestInbox: true,
+    transparentSafetyReports: true,
   },
 };

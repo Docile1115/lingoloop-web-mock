@@ -1,21 +1,32 @@
 import {
+  accountVerification,
   bootstrap,
   conversationGuides,
   conversations,
   corrections,
   currentUser,
+  defaultDmPrivacySettings,
   defaultMatchingPreferences,
+  dmRequests,
   languages,
   notifications,
   partnerMatchingSignals,
   partners,
   posts,
+  seededSafetyReports,
   voiceRooms,
+  type AccountVerification,
   type AvailabilitySlot,
   type ChatMessage,
   type Correction,
+  type DmPermission,
+  type DmPrivacySettings,
+  type DmRequest,
+  type ConnectionGoal,
   type MatchingPreferences,
+  type PartnerGenderPreference,
   type PreferredPartnerLevel,
+  type SafetyReport,
   type UserProfile,
 } from "./data";
 
@@ -23,6 +34,12 @@ const API_VERSION = "0.1.0";
 const MAX_BODY_BYTES = 64 * 1024;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
+const DAILY_MATCH_COUNT = 12;
+
+let mockDmPrivacySettings: DmPrivacySettings = structuredClone(defaultDmPrivacySettings);
+const mockDmRequests: DmRequest[] = structuredClone(dmRequests);
+const mockSafetyReports: SafetyReport[] = structuredClone(seededSafetyReports);
+const mockAccountVerification: AccountVerification = structuredClone(accountVerification);
 
 type JsonObject = Record<string, unknown>;
 type Meta = Record<string, unknown>;
@@ -189,6 +206,8 @@ const availabilitySlots: AvailabilitySlot[] = [
   "weekend-evening",
 ];
 const partnerLevels: PreferredPartnerLevel[] = ["any", "beginner", "intermediate", "advanced"];
+const partnerGenderPreferences: PartnerGenderPreference[] = ["any", "same", "women", "men"];
+const connectionGoals: ConnectionGoal[] = ["language-exchange", "friendship", "voice-practice", "culture"];
 
 function normalizedStringArray(
   body: JsonObject,
@@ -296,6 +315,42 @@ function normalizeMatchingPreferences(body: JsonObject, requireTargetLanguages: 
   if (typeof rawOnlineOnly !== "boolean") {
     throw new ApiError(422, "VALIDATION_ERROR", "onlineOnly은 boolean 값이어야 합니다.", { field: "onlineOnly" });
   }
+  const rawPartnerGender = body.partnerGender ?? defaultMatchingPreferences.partnerGender;
+  if (
+    typeof rawPartnerGender !== "string" ||
+    !partnerGenderPreferences.includes(rawPartnerGender as PartnerGenderPreference)
+  ) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 partnerGender 값입니다.", {
+      field: "partnerGender",
+      allowed: partnerGenderPreferences,
+    });
+  }
+  const ageMin = body.ageMin ?? defaultMatchingPreferences.ageMin;
+  const ageMax = body.ageMax ?? defaultMatchingPreferences.ageMax;
+  if (!Number.isInteger(ageMin) || !Number.isInteger(ageMax) || (ageMin as number) < 18 || (ageMax as number) > 100 || (ageMin as number) > (ageMax as number)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "ageMin과 ageMax는 18~100 사이의 올바른 범위여야 합니다.", {
+      field: "ageRange",
+      min: 18,
+      max: 100,
+    });
+  }
+  const rawVerifiedOnly = body.verifiedOnly ?? defaultMatchingPreferences.verifiedOnly;
+  if (typeof rawVerifiedOnly !== "boolean") {
+    throw new ApiError(422, "VALIDATION_ERROR", "verifiedOnly는 boolean 값이어야 합니다.", { field: "verifiedOnly" });
+  }
+  const intents = normalizedStringArray(body, "intents", {
+    fallback: defaultMatchingPreferences.intents,
+    maxItems: connectionGoals.length,
+    maxItemLength: 32,
+    allowSingleString: true,
+    transform: (value) => value.toLocaleLowerCase(),
+  });
+  if (intents.some((intent) => !connectionGoals.includes(intent as ConnectionGoal))) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 intents 값입니다.", {
+      field: "intents",
+      allowed: connectionGoals,
+    });
+  }
 
   return {
     targetLanguages,
@@ -304,6 +359,11 @@ function normalizeMatchingPreferences(body: JsonObject, requireTargetLanguages: 
     availability: availability as AvailabilitySlot[],
     partnerLevel: rawPartnerLevel as PreferredPartnerLevel,
     onlineOnly: rawOnlineOnly,
+    partnerGender: rawPartnerGender as PartnerGenderPreference,
+    ageMin: ageMin as number,
+    ageMax: ageMax as number,
+    verifiedOnly: rawVerifiedOnly,
+    intents: intents as ConnectionGoal[],
   };
 }
 
@@ -317,8 +377,9 @@ function nextRefreshAt(date: string): string {
 }
 
 function validatedDate(value: string | null): string {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new ApiError(400, "INVALID_DATE", "date는 YYYY-MM-DD 형식의 필수 값입니다.", { field: "date" });
+  if (value === null || value === "") return todayInSeoul();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new ApiError(400, "INVALID_DATE", "date는 YYYY-MM-DD 형식이어야 합니다.", { field: "date" });
   }
   const parsed = new Date(`${value}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
@@ -487,6 +548,102 @@ async function translate(context: ApiContext): Promise<Response> {
     ...translated,
     confidence: translationSamples[text]?.[targetLanguage] ? 0.98 : 0.71,
     provider: "local-mock",
+    entitlement: {
+      tier: "free",
+      charged: false,
+      metered: false,
+      remaining: null,
+      paywall: false,
+      policy: "번역은 언어 장벽을 낮추기 위한 무료 기본 기능입니다.",
+    },
+  });
+}
+
+async function handleDmPrivacy(context: ApiContext): Promise<Response> {
+  if (context.request.method === "GET") {
+    return jsonResponse(context, { settings: mockDmPrivacySettings, persisted: false });
+  }
+
+  assertMethod(context.request, ["GET", "POST"]);
+  const body = await readJsonBody(context.request);
+  const allowedPermissions: DmPermission[] = ["matches", "mutual-follows", "followers", "everyone"];
+  const whoCanMessage = body.whoCanMessage ?? mockDmPrivacySettings.whoCanMessage;
+  if (typeof whoCanMessage !== "string" || !allowedPermissions.includes(whoCanMessage as DmPermission)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 DM 허용 범위입니다.", {
+      field: "whoCanMessage",
+      allowed: allowedPermissions,
+    });
+  }
+
+  const booleanSetting = (key: keyof DmPrivacySettings): boolean => {
+    const value = body[key] ?? mockDmPrivacySettings[key];
+    if (typeof value !== "boolean") {
+      throw new ApiError(422, "VALIDATION_ERROR", `\`${key}\`는 boolean 값이어야 합니다.`, { field: key });
+    }
+    return value;
+  };
+
+  mockDmPrivacySettings = {
+    whoCanMessage: whoCanMessage as DmPermission,
+    routeOthersToRequests: booleanSetting("routeOthersToRequests"),
+    filterSuspectedSpam: booleanSetting("filterSuspectedSpam"),
+    allowVoiceMessagesInRequests: booleanSetting("allowVoiceMessagesInRequests"),
+    readReceipts: booleanSetting("readReceipts"),
+  };
+  return jsonResponse(context, { settings: mockDmPrivacySettings, persisted: false });
+}
+
+async function handleDmRequests(context: ApiContext): Promise<Response> {
+  if (context.request.method === "GET") {
+    const status = context.url.searchParams.get("status") ?? "pending";
+    const allowedStatuses: DmRequest["status"][] = ["pending", "accepted", "declined", "blocked"];
+    if (status !== "all" && !allowedStatuses.includes(status as DmRequest["status"])) {
+      throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 요청함 상태입니다.", {
+        field: "status",
+        allowed: ["all", ...allowedStatuses],
+      });
+    }
+    const filtered = status === "all" ? mockDmRequests : mockDmRequests.filter((request) => request.status === status);
+    return page(context, filtered);
+  }
+
+  assertMethod(context.request, ["GET", "POST"]);
+  const body = await readJsonBody(context.request);
+  const requestId = requiredString(body, "requestId", 128);
+  const action = requiredString(body, "action", 16);
+  const request = mockDmRequests.find((item) => item.id === requestId);
+  if (!request) throw new ApiError(404, "DM_REQUEST_NOT_FOUND", "DM 요청을 찾을 수 없습니다.");
+  const statusByAction: Record<string, DmRequest["status"]> = {
+    accept: "accepted",
+    decline: "declined",
+    block: "blocked",
+  };
+  const nextStatus = statusByAction[action];
+  if (!nextStatus) {
+    throw new ApiError(422, "VALIDATION_ERROR", "action은 accept, decline 또는 block이어야 합니다.", {
+      field: "action",
+      allowed: Object.keys(statusByAction),
+    });
+  }
+  request.status = nextStatus;
+  return jsonResponse(context, {
+    request,
+    conversationCreated: nextStatus === "accepted",
+    senderBlocked: nextStatus === "blocked",
+    persisted: false,
+  });
+}
+
+function handleDmSync(context: ApiContext): Response {
+  assertMethod(context.request, ["GET"]);
+  return jsonResponse(context, {
+    storage: "server",
+    automaticSync: true,
+    reinstallRecovery: true,
+    retention: { mode: "until-user-deletes", userDeleteAvailable: true },
+    encryption: { inTransit: true, atRest: true, endToEnd: false },
+    lastSyncedAt: "2026-08-11T13:22:00.000Z",
+    mockNotice: "목업 계약이며 실제 저장소에는 연결되지 않았습니다.",
   });
 }
 
@@ -525,14 +682,26 @@ async function handleCorrections(context: ApiContext): Promise<Response> {
   return jsonResponse(context, correction, { status: 201 });
 }
 
-async function createReport(context: ApiContext): Promise<Response> {
-  assertMethod(context.request, ["POST"]);
+async function handleReports(context: ApiContext, reportId?: string): Promise<Response> {
+  if (context.request.method === "GET") {
+    if (reportId) {
+      const report = mockSafetyReports.find((item) => item.id === reportId);
+      if (!report) throw new ApiError(404, "REPORT_NOT_FOUND", "신고 접수 내역을 찾을 수 없습니다.");
+      return jsonResponse(context, report);
+    }
+    return page(context, mockSafetyReports);
+  }
+
+  if (reportId) {
+    throw new ApiError(405, "METHOD_NOT_ALLOWED", "신고 상태는 조회만 지원합니다.", { allowed: ["GET"] }, { allow: "GET" });
+  }
+  assertMethod(context.request, ["GET", "POST"]);
   const body = await readJsonBody(context.request);
   const targetType = requiredString(body, "targetType", 32);
   const targetId = requiredString(body, "targetId", 128);
   const reason = requiredString(body, "reason", 64);
   const allowedTargetTypes = ["user", "post", "message", "room"];
-  const allowedReasons = ["spam", "harassment", "dating", "sexual_content", "hate", "impersonation", "other"];
+  const allowedReasons = ["spam", "scam", "harassment", "dating", "sexual_content", "hate", "impersonation", "other"];
   if (!allowedTargetTypes.includes(targetType)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 신고 대상 유형입니다.", { field: "targetType", allowed: allowedTargetTypes });
   }
@@ -540,20 +709,65 @@ async function createReport(context: ApiContext): Promise<Response> {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 신고 사유입니다.", { field: "reason", allowed: allowedReasons });
   }
 
-  return jsonResponse(
-    context,
-    {
-      id: `report-${crypto.randomUUID()}`,
-      targetType,
-      targetId,
-      reason,
-      details: optionalString(body, "details", 2_000) ?? "",
-      status: "received",
-      submittedAt: new Date().toISOString(),
-      safetyMessage: "신고가 접수되었습니다. 긴급한 위험이 있다면 현지 긴급기관에 연락해 주세요.",
-    },
-    { status: 201 },
+  const submittedAt = new Date().toISOString();
+  const report: SafetyReport = {
+    id: `report-${crypto.randomUUID()}`,
+    reporterId: currentUser.id,
+    targetType: targetType as SafetyReport["targetType"],
+    targetId,
+    reason: reason as SafetyReport["reason"],
+    details: optionalString(body, "details", 2_000) ?? "",
+    status: "received",
+    submittedAt,
+    updatedAt: submittedAt,
+    nextUpdateBy: new Date(Date.parse(submittedAt) + 24 * 60 * 60 * 1_000).toISOString(),
+    reporterAccountStatus: "active",
+    statusHistory: [
+      {
+        status: "received",
+        at: submittedAt,
+        note: "신고자 계정에 불이익 없이 신고와 관련 증거를 접수했어요.",
+      },
+    ],
+  };
+  mockSafetyReports.unshift(report);
+  return jsonResponse(context, {
+    ...report,
+    safetyMessage: "신고가 접수되었습니다. 신고자 계정은 활성 상태로 유지되며, 긴급한 위험이 있다면 현지 긴급기관에 연락해 주세요.",
+  }, { status: 201 });
+}
+
+async function handleAccountVerification(context: ApiContext): Promise<Response> {
+  if (context.request.method === "GET") return jsonResponse(context, mockAccountVerification);
+
+  assertMethod(context.request, ["GET", "POST"]);
+  const body = await readJsonBody(context.request);
+  const type = requiredString(body, "type", 16);
+  const action = requiredString(body, "action", 16);
+  if (!(["email", "phone", "identity"] as string[]).includes(type)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 인증 유형입니다.", { field: "type" });
+  }
+  if (action !== "start" && action !== "verify") {
+    throw new ApiError(422, "VALIDATION_ERROR", "action은 start 또는 verify여야 합니다.", { field: "action" });
+  }
+  const step = mockAccountVerification.steps.find((item) => item.type === type);
+  if (!step) throw new ApiError(404, "VERIFICATION_STEP_NOT_FOUND", "인증 단계를 찾을 수 없습니다.");
+  step.status = action === "verify" ? "verified" : "pending";
+  if (action === "verify") step.verifiedAt = new Date().toISOString();
+  mockAccountVerification.updatedAt = new Date().toISOString();
+  const verifiedTypes = new Set(
+    mockAccountVerification.steps.filter((item) => item.status === "verified").map((item) => item.type),
   );
+  mockAccountVerification.activationEligible = mockAccountVerification.requiredForActivation.every((item) => verifiedTypes.has(item));
+  mockAccountVerification.accountStatus = mockAccountVerification.activationEligible ? "active" : "pending-verification";
+  mockAccountVerification.assuranceLevel = verifiedTypes.has("identity")
+    ? "identity"
+    : verifiedTypes.has("phone")
+      ? "phone"
+      : verifiedTypes.has("email")
+        ? "email"
+        : "none";
+  return jsonResponse(context, { verification: mockAccountVerification, persisted: false });
 }
 
 function search(context: ApiContext): Response {
@@ -590,7 +804,7 @@ async function handleMatchingPreferences(context: ApiContext): Promise<Response>
 
 function matchingPreferencesFromQuery(url: URL): MatchingPreferences {
   const body: JsonObject = {};
-  for (const key of ["targetLanguages", "preferredCountries", "interests", "availability"] as const) {
+  for (const key of ["targetLanguages", "preferredCountries", "interests", "availability", "intents"] as const) {
     const value = url.searchParams.get(key);
     if (value !== null) body[key] = value.split(",");
   }
@@ -603,6 +817,19 @@ function matchingPreferencesFromQuery(url: URL): MatchingPreferences {
       throw new ApiError(422, "VALIDATION_ERROR", "onlineOnly query는 true 또는 false여야 합니다.", { field: "onlineOnly" });
     }
     body.onlineOnly = onlineOnly === "true";
+  }
+  const verifiedOnly = url.searchParams.get("verifiedOnly");
+  if (verifiedOnly !== null) {
+    if (verifiedOnly !== "true" && verifiedOnly !== "false") {
+      throw new ApiError(422, "VALIDATION_ERROR", "verifiedOnly query는 true 또는 false여야 합니다.", { field: "verifiedOnly" });
+    }
+    body.verifiedOnly = verifiedOnly === "true";
+  }
+  const partnerGender = url.searchParams.get("partnerGender");
+  if (partnerGender !== null) body.partnerGender = partnerGender;
+  for (const key of ["ageMin", "ageMax"] as const) {
+    const value = url.searchParams.get(key);
+    if (value !== null) body[key] = Number(value);
   }
   return normalizeMatchingPreferences(body, false);
 }
@@ -659,6 +886,11 @@ function scorePartner(partner: UserProfile, preferences: MatchingPreferences, da
     score += 2;
   }
   if (partner.verified) score += 3;
+  const matchedIntents = partner.intents.filter((intent) => preferences.intents.includes(intent));
+  if (matchedIntents.length > 0) {
+    score += Math.min(8, matchedIntents.length * 4);
+    reasons.push("원하는 교류 목적이 같아요");
+  }
   score += Math.round(partner.exchangeScore / 14);
   score += stableHash(`${date}:${partner.id}`) % 5;
 
@@ -685,12 +917,24 @@ function satisfiesMatchingPreferences(partner: UserProfile, preferences: Matchin
   const matchesAvailability =
     preferences.availability.length === 0 ||
     Boolean(signal?.availability.some((slot) => preferences.availability.includes(slot)));
+  const matchesGender =
+    preferences.partnerGender === "any" ||
+    (preferences.partnerGender === "same" && partner.gender === currentUser.gender) ||
+    (preferences.partnerGender === "women" && partner.gender === "woman") ||
+    (preferences.partnerGender === "men" && partner.gender === "man");
+  const matchesIntent =
+    preferences.intents.length === 0 || partner.intents.some((intent) => preferences.intents.includes(intent));
 
   return (
     matchesTargetLanguage &&
     matchesCountry &&
     matchesInterest &&
     matchesAvailability &&
+    matchesGender &&
+    matchesIntent &&
+    partner.age >= preferences.ageMin &&
+    partner.age <= preferences.ageMax &&
+    (!preferences.verifiedOnly || partner.verified) &&
     partnerLevelMatches(partner, preferences.partnerLevel) &&
     (!preferences.onlineOnly || partner.status === "online")
   );
@@ -705,6 +949,11 @@ function matchingSelectionSeed(date: string, preferences: MatchingPreferences): 
     availability: [...preferences.availability].sort(),
     partnerLevel: preferences.partnerLevel,
     onlineOnly: preferences.onlineOnly,
+    partnerGender: preferences.partnerGender,
+    ageMin: preferences.ageMin,
+    ageMax: preferences.ageMax,
+    verifiedOnly: preferences.verifiedOnly,
+    intents: [...preferences.intents].sort(),
   });
 }
 
@@ -712,31 +961,48 @@ function handleDailyMatching(context: ApiContext): Response {
   assertMethod(context.request, ["GET"]);
   const date = validatedDate(context.url.searchParams.get("date"));
   const preferences = matchingPreferencesFromQuery(context.url);
-  const matchingPartners = partners.filter((partner) => satisfiesMatchingPreferences(partner, preferences));
-  const fallbackUsed = matchingPartners.length === 0;
-  const candidatePool = fallbackUsed ? partners : matchingPartners;
+  const matchingPartnerIds = new Set(
+    partners.filter((partner) => satisfiesMatchingPreferences(partner, preferences)).map((partner) => partner.id),
+  );
+  const languageEligiblePartners = partners.filter((partner) =>
+    partner.nativeLanguages.some((code) => preferences.targetLanguages.includes(code)),
+  );
   const seed = matchingSelectionSeed(date, preferences);
-  const selected = candidatePool
-    .map((partner) => scorePartner(partner, preferences, date))
+  const ranked = languageEligiblePartners
+    .map((partner) => ({
+      ...scorePartner(partner, preferences, date),
+      meetsAllPreferences: matchingPartnerIds.has(partner.id),
+    }))
     .sort(
       (left, right) =>
+        Number(right.meetsAllPreferences) - Number(left.meetsAllPreferences) ||
         stableHash(`${seed}:${left.partner.id}`) - stableHash(`${seed}:${right.partner.id}`) ||
         right.score - left.score ||
         left.partner.id.localeCompare(right.partner.id),
-    )[0];
-
-  const recommendation = fallbackUsed
-    ? {
-        ...selected,
-        matchReasons: ["희망 조건과 가장 가까운 파트너예요", ...selected.matchReasons].slice(0, 4),
-      }
-    : selected;
+    )
+    .slice(0, DAILY_MATCH_COUNT)
+    .map((recommendation) =>
+      recommendation.meetsAllPreferences
+        ? recommendation
+        : {
+            ...recommendation,
+            matchReasons: ["일부 조건을 넓혀 찾은 가까운 파트너예요", ...recommendation.matchReasons].slice(0, 4),
+          },
+    );
 
   return jsonResponse(context, {
     date,
-    recommendations: [recommendation],
+    recommendations: ranked,
     preferencesApplied: preferences,
     nextRefreshAt: nextRefreshAt(date),
+    discovery: {
+      includedToday: ranked.length,
+      exactMatchCount: ranked.filter((recommendation) => recommendation.meetsAllPreferences).length,
+      additionalViewsAvailable: false,
+      hardConstraints: ["targetLanguages"],
+      expandedSoftPreferences: ranked.some((recommendation) => !recommendation.meetsAllPreferences),
+      mockPolicy: "출시 초기에는 오늘의 추천 12명을 무료로 제공합니다.",
+    },
   });
 }
 
@@ -838,7 +1104,21 @@ async function route(context: ApiContext): Promise<Response> {
   if (resource === "messages" && segments.length === 1) return createMessage(context);
   if (resource === "translate" && segments.length === 1) return translate(context);
   if (resource === "corrections" && segments.length === 1) return handleCorrections(context);
-  if (resource === "reports" && segments.length === 1) return createReport(context);
+  if (resource === "reports" && (segments.length === 1 || segments.length === 2)) {
+    return handleReports(context, segments[1]);
+  }
+  if (resource === "dm" && segments[1] === "privacy" && segments.length === 2) {
+    return handleDmPrivacy(context);
+  }
+  if (resource === "dm" && segments[1] === "requests" && segments.length === 2) {
+    return handleDmRequests(context);
+  }
+  if (resource === "dm" && segments[1] === "sync" && segments.length === 2) {
+    return handleDmSync(context);
+  }
+  if (resource === "account" && segments[1] === "verification" && segments.length === 2) {
+    return handleAccountVerification(context);
+  }
   if (resource === "rooms" && segments.length === 1) {
     assertMethod(context.request, ["GET"]);
     return page(context, voiceRooms);

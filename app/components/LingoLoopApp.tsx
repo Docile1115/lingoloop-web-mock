@@ -13,7 +13,9 @@ import {
   ChevronDown,
   ChevronRight,
   Clock3,
+  Cloud,
   Compass,
+  Download,
   Ellipsis,
   Eye,
   Flame,
@@ -47,9 +49,9 @@ import {
   Star,
   Timer,
   Target,
+  Trash2,
   Trophy,
   UserPlus,
-  Users,
   UsersRound,
   Video,
   Volume2,
@@ -78,6 +80,9 @@ type ApiState = "checking" | "ready" | "fallback";
 
 type MatchAvailability = "weekday-morning" | "weekday-evening" | "weekend-morning" | "weekend-evening";
 type PartnerLevel = "any" | "beginner" | "intermediate" | "advanced";
+type PartnerGender = "any" | "same" | "women" | "men";
+type MatchIntent = "language-exchange" | "friendship" | "voice-practice" | "culture";
+type DmScope = "matches" | "mutuals" | "anyone";
 
 type MatchPreferences = {
   targetLanguages: string[];
@@ -85,7 +90,20 @@ type MatchPreferences = {
   interests: string[];
   availability: MatchAvailability[];
   partnerLevel: PartnerLevel;
+  partnerGender: PartnerGender;
+  ageMin: number;
+  ageMax: number;
+  verifiedOnly: boolean;
+  intents: MatchIntent[];
   onlineOnly: boolean;
+};
+
+type AppSettings = {
+  dmRequests: boolean;
+  hideLocation: boolean;
+  correctionAlerts: boolean;
+  autoSync: boolean;
+  dmScope: DmScope;
 };
 
 type ConversationSupport = {
@@ -138,6 +156,11 @@ const defaultMatchPreferences: MatchPreferences = {
   interests: ["travel", "movies", "coffee"],
   availability: ["weekday-evening", "weekend-morning"],
   partnerLevel: "intermediate",
+  partnerGender: "any",
+  ageMin: 20,
+  ageMax: 35,
+  verifiedOnly: true,
+  intents: ["language-exchange", "friendship"],
   onlineOnly: false,
 };
 
@@ -169,6 +192,20 @@ const levelLabels: Record<PartnerLevel, string> = {
   beginner: "초급",
   intermediate: "중급",
   advanced: "고급",
+};
+
+const genderLabels: Record<PartnerGender, string> = {
+  any: "성별 무관",
+  same: "같은 성별 우선",
+  women: "여성",
+  men: "남성",
+};
+
+const intentLabels: Record<MatchIntent, string> = {
+  "language-exchange": "언어 교환",
+  friendship: "친구 만들기",
+  "voice-practice": "음성 연습",
+  culture: "문화 교류",
 };
 
 const dailyMatchDetails: Record<string, { reasons: string[]; icebreaker: string }> = {
@@ -243,10 +280,10 @@ function displayPartnerFromApi(partner: MatchingApiPartner, score: number, index
 }
 
 function fallbackDailyRecommendations(): DailyMatchRecommendation[] {
-  return [partners[0]].map((partner) => ({
+  return partners.slice(0, 12).map((partner, index) => ({
     partner,
-    score: partner.compatibility,
-    matchReasons: dailyMatchDetails[partner.id]?.reasons ?? ["학습 목표 일치", "비슷한 활동 시간"],
+    score: Math.max(partner.compatibility, 82 - index),
+    matchReasons: dailyMatchDetails[partner.id]?.reasons ?? [partner.goal, partner.activeTime, partner.verified ? "인증 프로필" : "공통 관심사"],
     icebreaker: dailyMatchDetails[partner.id]?.icebreaker ?? `Hi ${partner.name}! What would you like to practice today?`,
   }));
 }
@@ -339,7 +376,7 @@ export default function LingoLoopApp() {
   const [roomHandRaised, setRoomHandRaised] = useState(false);
   const [roomMicOn, setRoomMicOn] = useState(false);
   const [exchangeLength, setExchangeLength] = useState(15);
-  const [settings, setSettings] = useState({ dmRequests: true, hideLocation: true, correctionAlerts: true });
+  const [settings, setSettings] = useState<AppSettings>({ dmRequests: true, hideLocation: true, correctionAlerts: true, autoSync: true, dmScope: "matches" });
   const [matchPreferences, setMatchPreferences] = useState<MatchPreferences>(defaultMatchPreferences);
   const [dailyRecommendations, setDailyRecommendations] = useState<DailyMatchRecommendation[]>(fallbackDailyRecommendations);
   const [practiceRooms, setPracticeRooms] = useState<PracticeRoom[]>(rooms);
@@ -378,6 +415,11 @@ export default function LingoLoopApp() {
       interests: matchPreferences.interests.join(","),
       availability: matchPreferences.availability.join(","),
       partnerLevel: matchPreferences.partnerLevel,
+      partnerGender: matchPreferences.partnerGender,
+      ageMin: String(matchPreferences.ageMin),
+      ageMax: String(matchPreferences.ageMax),
+      verifiedOnly: String(matchPreferences.verifiedOnly),
+      intents: matchPreferences.intents.join(","),
       onlineOnly: String(matchPreferences.onlineOnly),
     });
 
@@ -803,25 +845,49 @@ function DiscoverView({
   onChat: (partner: Partner) => void;
   onFilters: () => void;
 }) {
-  const match = dailyRecommendations[0] ?? fallbackDailyRecommendations()[0];
+  const recommendations = [...dailyRecommendations, ...fallbackDailyRecommendations()]
+    .filter((item, index, list) => list.findIndex((candidate) => candidate.partner.id === item.partner.id) === index)
+    .slice(0, 12);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [passedIds, setPassedIds] = useState<Set<string>>(new Set());
+  const match = recommendations[currentIndex % recommendations.length] ?? fallbackDailyRecommendations()[0];
   const partner = match.partner;
   const targetLanguage = languageLabels[preferences.targetLanguages[0] ?? "en"] ?? "영어";
   const preferenceSummary = [
     targetLanguage,
+    genderLabels[preferences.partnerGender],
+    `${preferences.ageMin}–${preferences.ageMax}세`,
     preferences.interests.slice(0, 2).map((item) => interestLabels[item] ?? item).join(" · "),
     availabilityLabels[preferences.availability[0] ?? "weekday-evening"],
   ].filter(Boolean);
+
+  const moveTo = (index: number) => setCurrentIndex((index + recommendations.length) % recommendations.length);
+  const passCurrent = () => {
+    setPassedIds((current) => new Set(current).add(partner.id));
+    moveTo(currentIndex + 1);
+  };
 
   return (
     <div className="view discover-view compact-discover">
       <header className="simple-view-header partner-view-header">
         <div>
-          <span><CalendarClock size={14} /> 매일 오전 9시 자동 매칭</span>
-          <h1>오늘의 파트너</h1>
-          <p>설정한 조건에 가장 가까운 한 사람만 추천해요.</p>
+          <span><CalendarClock size={14} /> 매일 오전 9시 새 추천</span>
+          <h1>오늘의 파트너 {recommendations.length}명</h1>
+          <p>조건에 맞는 파트너를 넘겨보며 직접 선택하세요.</p>
         </div>
         <button className="secondary-button" type="button" onClick={onFilters}><SlidersHorizontal size={16} /> 매칭 설정</button>
       </header>
+
+      <div className="beta-access-note"><Sparkles size={17} /><span><strong>오픈 베타 · 오늘 추천 모두 무료</strong><small>지금은 횟수 제한이나 결제 없이 모든 추천과 기본 번역을 사용할 수 있어요.</small></span><Pill tone="success">{currentIndex + 1} / {recommendations.length}</Pill></div>
+
+      <div className="partner-candidate-strip" aria-label="오늘의 추천 파트너 목록">
+        {recommendations.map((item, index) => (
+          <button className={`${currentIndex === index ? "active" : ""} ${passedIds.has(item.partner.id) ? "passed" : ""}`} type="button" key={item.partner.id} onClick={() => setCurrentIndex(index)} aria-label={`${item.partner.name}, ${item.score}% 일치`}>
+            <Avatar name={item.partner.name} flag={item.partner.flag} accent={item.partner.accent} size="sm" online={item.partner.online} />
+            <span><strong>{item.partner.name}</strong><small>{item.score}%</small></span>
+          </button>
+        ))}
+      </div>
 
       <article className="single-match-card">
         <div className="single-match-person">
@@ -840,15 +906,15 @@ function DiscoverView({
         <div className="preference-summary compact">{preferenceSummary.map((item) => <span key={item}><Check size={11} /> {item}</span>)}</div>
 
         <div className="single-match-reasons">
-          <strong><Sparkles size={14} /> 자동 매칭된 이유</strong>
+          <strong><Sparkles size={14} /> 추천된 이유</strong>
           <div>{match.matchReasons.slice(0, 3).map((reason) => <span key={reason}><Check size={11} /> {reason}</span>)}</div>
         </div>
 
         <button className="single-match-opener" type="button" onClick={() => onChat(partner)}><MessageCircle size={16} /><span><small>추천 첫 질문</small><strong>{match.icebreaker}</strong></span><ChevronRight size={16} /></button>
-        <footer><button type="button" onClick={() => onProfile(partner)}>프로필 보기</button><button type="button" onClick={() => onChat(partner)}><MessageCircle size={16} /> 대화 시작</button></footer>
+        <footer className="match-decision-actions"><button type="button" onClick={passCurrent}><X size={16} /> 다음에</button><button type="button" onClick={() => onProfile(partner)}>프로필 보기</button><button type="button" onClick={() => onChat(partner)}><Heart size={16} /> 대화 요청</button></footer>
       </article>
 
-      <div className="next-match-note"><CalendarDays size={16} /><span><strong>다음 자동 매칭은 내일 오전 9시</strong><small>조건을 바꾸면 오늘의 추천도 바로 다시 계산돼요.</small></span><button type="button" onClick={onFilters}>조건 변경</button></div>
+      <div className="next-match-note"><CalendarDays size={16} /><span><strong>내일 오전 9시에 새로운 {recommendations.length}명</strong><small>같은 성별 친구, 나이, 인증 여부와 대화 목적까지 조정할 수 있어요.</small></span><button type="button" onClick={onFilters}>조건 변경</button></div>
     </div>
   );
 }
@@ -880,6 +946,7 @@ function CommunityView({
 }) {
   return (
     <div className="view community-view">
+      <div className="translation-access-note"><Languages size={17} /><span><strong>기본 번역은 무료예요</strong><small>언어 장벽 없이 피드를 읽을 수 있도록 베타 기간 이후에도 기본 번역은 열어둘 계획이에요.</small></span><Pill tone="success">FREE</Pill></div>
       <div className="community-toolbar">
         <div className="segmented-tabs" role="tablist" aria-label="커뮤니티 피드">
           <button type="button" role="tab" aria-selected={tab === "recommended"} className={tab === "recommended" ? "active" : ""} onClick={() => setTab("recommended")}>추천</button>
@@ -962,13 +1029,32 @@ function ChatsView({
   onReport: () => void;
   onToast: (message: string) => void;
 }) {
-  const [listTab, setListTab] = useState<"all" | "turn" | "requests">("all");
+  const [listTab, setListTab] = useState<"inbox" | "turn" | "requests">("inbox");
+  const [requestIds, setRequestIds] = useState<Set<string>>(new Set(["chat-aiko"]));
   const [translatedMessages, setTranslatedMessages] = useState<Set<string>>(new Set(["m1"]));
   const [coachOpen, setCoachOpen] = useState(true);
   const [coachLoading, setCoachLoading] = useState(false);
   const [supportResult, setSupportResult] = useState<{ conversationId: string; data: ConversationSupport } | null>(null);
   const conversationSupport = supportResult?.conversationId === selected.id ? supportResult.data : fallbackConversationSupport(selected.name);
-  const filtered = conversations.filter((item) => listTab === "turn" ? item.myTurn : listTab === "requests" ? item.id === "chat-aiko" : true);
+  const filtered = conversations.filter((item) => listTab === "turn" ? item.myTurn && !requestIds.has(item.id) : listTab === "requests" ? requestIds.has(item.id) : !requestIds.has(item.id));
+  const selectedIsRequest = requestIds.has(selected.id);
+  const acceptRequest = (id: string, name: string) => {
+    setRequestIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    setListTab("inbox");
+    onToast(`${name}님의 요청을 수락했어요`);
+  };
+  const removeRequest = (id: string, name: string) => {
+    setRequestIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    onToast(`${name}님의 요청을 삭제했어요 · 상대에게 알리지 않아요`);
+  };
 
   const requestConversationSupport = async (polishDraft = false) => {
     setCoachLoading(true);
@@ -1012,33 +1098,37 @@ function ChatsView({
           <div><h1>대화</h1><Pill tone="soft">7 unread</Pill></div>
           <IconButton label="새 대화" icon={PenLine} onClick={() => onToast("파트너 검색에서 새 대화를 시작해보세요")} />
         </header>
+        <div className="chat-sync-note"><Cloud size={15} /><span><strong>실서비스 설계 · 서버 자동 동기화</strong><small>출시 버전에서는 앱을 삭제하거나 기기를 바꿔도 로그인하면 복원돼요. 현재는 mock입니다.</small></span><Pill tone="soft">DEMO</Pill></div>
         <label className="chat-search"><Search size={16} /><input type="search" placeholder="이름 또는 대화 검색" /></label>
         <div className="chat-list-tabs">
-          <button type="button" className={listTab === "all" ? "active" : ""} onClick={() => setListTab("all")}>전체</button>
+          <button type="button" className={listTab === "inbox" ? "active" : ""} onClick={() => setListTab("inbox")}>매칭 · 맞팔</button>
           <button type="button" className={listTab === "turn" ? "active" : ""} onClick={() => setListTab("turn")}>내 차례 <span>4</span></button>
-          <button type="button" className={listTab === "requests" ? "active" : ""} onClick={() => setListTab("requests")}>요청함</button>
+          <button type="button" className={listTab === "requests" ? "active" : ""} onClick={() => setListTab("requests")}>요청함 <span>{requestIds.size}</span></button>
         </div>
         <div className="conversation-list">
           {filtered.map((conversation) => (
-            <button
-              type="button"
-              className={`conversation-item ${selected.id === conversation.id ? "active" : ""}`}
-              key={conversation.id}
-              onClick={() => onSelect(conversation.id)}
-            >
-              <Avatar name={conversation.name} flag={conversation.flag} accent={conversation.accent} size="sm" online={conversation.online} />
-              <span className="conversation-copy">
-                <span className="conversation-name"><strong>{conversation.name}</strong><small>{conversation.time}</small></span>
-                <span className={conversation.typing ? "typing" : ""}>{conversation.typing ? "입력 중…" : conversation.preview}</span>
-                <span className="conversation-labels">
-                  {conversation.myTurn ? <i>내 차례</i> : null}
-                  {conversation.group ? <i className="group-label"><Users size={11} /> 그룹</i> : null}
-                  {conversation.muted ? <i>알림 끔</i> : null}
+            <div className="conversation-entry" key={conversation.id}>
+              <button
+                type="button"
+                className={`conversation-item ${selected.id === conversation.id ? "active" : ""}`}
+                onClick={() => onSelect(conversation.id)}
+              >
+                <Avatar name={conversation.name} flag={conversation.flag} accent={conversation.accent} size="sm" online={conversation.online} />
+                <span className="conversation-copy">
+                  <span className="conversation-name"><strong>{conversation.name}</strong><small>{conversation.time}</small></span>
+                  <span className={conversation.typing ? "typing" : ""}>{conversation.typing ? "입력 중…" : conversation.preview}</span>
+                  <span className="conversation-labels">
+                    {listTab === "requests" ? <i>새 메시지 요청</i> : <i><ShieldCheck size={10} /> {conversation.group ? "그룹" : "매칭됨"}</i>}
+                    {conversation.myTurn ? <i>내 차례</i> : null}
+                    {conversation.muted ? <i>알림 끔</i> : null}
+                  </span>
                 </span>
-              </span>
-              {conversation.unread ? <span className="unread-count">{conversation.unread}</span> : null}
-            </button>
+                {conversation.unread ? <span className="unread-count">{conversation.unread}</span> : null}
+              </button>
+              {listTab === "requests" ? <div className="request-actions"><button type="button" onClick={() => removeRequest(conversation.id, conversation.name)}>삭제</button><button type="button" onClick={() => acceptRequest(conversation.id, conversation.name)}>수락</button></div> : null}
+            </div>
           ))}
+          {listTab === "requests" && !filtered.length ? <div className="empty-search"><ShieldCheck size={26} /><strong>새 메시지 요청이 없어요</strong><p>매칭되지 않았거나 맞팔이 아닌 사람의 DM은 여기에 모여요.</p></div> : null}
         </div>
       </section>
 
@@ -1057,6 +1147,8 @@ function ChatsView({
             <IconButton label="대화 메뉴" icon={Ellipsis} onClick={onReport} />
           </div>
         </header>
+
+        {selectedIsRequest ? <div className="dm-request-banner"><ShieldCheck size={18} /><span><strong>{selected.name}님의 메시지 요청</strong><small>수락하기 전까지 읽음 여부와 활동 상태가 상대에게 보이지 않아요.</small></span><button type="button" onClick={() => removeRequest(selected.id, selected.name)}>삭제</button><button type="button" onClick={() => acceptRequest(selected.id, selected.name)}>수락</button></div> : null}
 
         <div className="exchange-banner">
           <span className="exchange-banner-icon"><Languages size={18} /></span>
@@ -1138,7 +1230,7 @@ function ChatsView({
           <div className="typing-indicator"><Avatar name={selected.name} accent={selected.accent} size="xs" /><span><i /><i /><i /></span><small>{selected.name}님이 입력 중</small></div>
         </div>
 
-        <form className="message-composer" onSubmit={onSend}>
+        {selectedIsRequest ? <div className="request-composer-lock"><LockKeyhole size={17} /><span><strong>요청을 수락하면 답장할 수 있어요</strong><small>삭제하거나 수락해도 상대에게 별도 알림은 가지 않아요.</small></span></div> : <form className="message-composer" onSubmit={onSend}>
           <div className="writing-language"><span>EN</span> 영어로 작성 중 <ChevronDown size={13} /></div>
           <div className="composer-row">
             <IconButton label="파일 첨부" icon={Paperclip} onClick={() => onToast("파일 첨부 데모를 열었어요")} />
@@ -1150,8 +1242,8 @@ function ChatsView({
             </label>
             <button className="send-button" type="submit" disabled={!draft.trim()} aria-label="메시지 보내기"><Send size={18} /></button>
           </div>
-          <small className="composer-hint"><WandSparkles size={12} /> Enter로 줄바꿈 · 전송 전 문법 힌트는 데모로 제공돼요</small>
-        </form>
+          <small className="composer-hint"><Languages size={12} /> 기본 번역 무료 · 서버 자동 저장은 실서비스 설계 목업</small>
+        </form>}
       </section>
     </div>
   );
@@ -1208,12 +1300,12 @@ function LearnView({
   onOnboarding,
   onToast,
 }: {
-  settings: { dmRequests: boolean; hideLocation: boolean; correctionAlerts: boolean };
-  setSettings: React.Dispatch<React.SetStateAction<{ dmRequests: boolean; hideLocation: boolean; correctionAlerts: boolean }>>;
+  settings: AppSettings;
+  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
   onOnboarding: () => void;
   onToast: (message: string) => void;
 }) {
-  const toggle = (key: keyof typeof settings) => setSettings((current) => ({ ...current, [key]: !current[key] }));
+  const toggle = (key: "dmRequests" | "hideLocation" | "correctionAlerts" | "autoSync") => setSettings((current) => ({ ...current, [key]: !current[key] }));
   return (
     <div className="view learn-view compact-learn">
       <header className="simple-view-header">
@@ -1247,10 +1339,36 @@ function LearnView({
           <header><span><strong>계정 및 학습 설정</strong><small>변경 내용은 이 기기에 반영돼요</small></span><Settings size={18} /></header>
           <button className="profile-settings-link" type="button" onClick={() => onToast("프로필 설정을 열었어요")}><span className="setting-icon"><PenLine size={17} /></span><span><strong>프로필 설정</strong><small>사진, 자기소개, 관심사 수정</small></span><ChevronRight size={15} /></button>
           <button className="profile-settings-link" type="button" onClick={onOnboarding}><span className="setting-icon"><Target size={17} /></span><span><strong>언어 및 목표</strong><small>학습 언어와 목표 다시 설정</small></span><ChevronRight size={15} /></button>
-          <SettingRow icon={Bell} title="메시지 알림" description="새 메시지가 오면 알려주기" checked={settings.dmRequests} onChange={() => toggle("dmRequests")} />
+          <div className="dm-scope-setting"><span className="field-label">누가 바로 DM을 보낼 수 있나요?</span><div className="choice-row">{([['matches', '매칭된 사람'], ['mutuals', '서로 팔로우'], ['anyone', '모든 사람']] as Array<[DmScope, string]>).map(([value, label]) => <button type="button" className={settings.dmScope === value ? "active" : ""} key={value} onClick={() => setSettings((current) => ({ ...current, dmScope: value }))}>{label}</button>)}</div><small>그 외 DM은 대화 목록이 아닌 요청함으로 분리돼요.</small></div>
+          <SettingRow icon={Bell} title="메시지 요청 알림" description="요청함에 새 DM이 오면 알려주기" checked={settings.dmRequests} onChange={() => toggle("dmRequests")} />
+          <SettingRow icon={Cloud} title="대화 자동 동기화" description="재설치·기기 변경 후에도 서버에서 복원" checked={settings.autoSync} onChange={() => toggle("autoSync")} />
           <SettingRow icon={LockKeyhole} title="정밀 위치 숨기기" description="도시 수준만 프로필에 표시" checked={settings.hideLocation} onChange={() => toggle("hideLocation")} />
           <SettingRow icon={PenLine} title="교정 알림" description="내 문장이 교정되면 알려주기" checked={settings.correctionAlerts} onChange={() => toggle("correctionAlerts")} />
           <button className="blocked-link" type="button" onClick={() => onToast("차단 사용자 목록을 열었어요")}><Flag size={16} /> 신고 및 차단 관리 <ChevronRight size={15} /></button>
+        </section>
+      </div>
+
+      <div className="account-safety-grid">
+        <section className="settings-card verification-card">
+          <header><span><strong>계정 인증</strong><small>단계별 신뢰 표시 · 과도한 가입 장벽 없이 운영</small></span><BadgeCheck size={18} /></header>
+          <div className="verification-step done"><CheckCircle2 size={17} /><span><strong>1단계 · 이메일 인증</strong><small>완료됨</small></span><Pill tone="success">완료</Pill></div>
+          <div className="verification-step"><Phone size={17} /><span><strong>2단계 · 전화번호 인증</strong><small>재가입 악용과 대량 계정 생성을 줄여요</small></span><button type="button" onClick={() => onToast("전화번호 인증 흐름을 열었어요 · mock")}>인증하기</button></div>
+          <div className="verification-step"><ShieldCheck size={17} /><span><strong>3단계 · 신원 확인</strong><small>선택 사항이며 인증 배지만 표시해요</small></span><button type="button" onClick={() => onToast("선택 신원 인증 안내를 열었어요 · mock")}>자세히</button></div>
+        </section>
+
+        <section className="settings-card conversation-data-card">
+          <header><span><strong>대화 데이터</strong><small>내 기록은 내가 관리해요</small></span><Cloud size={18} /></header>
+          <div className="data-sync-status"><CheckCircle2 size={17} /><span><strong>{settings.autoSync ? "자동 동기화 켜짐 · DEMO" : "자동 동기화 꺼짐"}</strong><small>{settings.autoSync ? "실서비스 동작을 보여주는 목업이며 현재 재로그인 복원은 지원하지 않아요." : "출시 버전에서는 이 기기의 새 메시지가 복원되지 않을 수 있어요."}</small></span></div>
+          <button className="profile-settings-link" type="button" onClick={() => onToast("대화 기록 다운로드 파일을 준비하고 있어요 · mock")}><span className="setting-icon"><Download size={17} /></span><span><strong>대화 기록 다운로드</strong><small>내 메시지를 파일로 보관</small></span><ChevronRight size={15} /></button>
+          <button className="blocked-link" type="button" onClick={() => onToast("본인 확인 후 삭제 범위와 보관 정책을 안내하는 단계예요 · mock")}><Trash2 size={16} /> 대화 기록 삭제 요청 <ChevronRight size={15} /></button>
+        </section>
+
+        <section className="settings-card report-status-card">
+          <header><span><strong>신고센터</strong><small>접수 내역과 검토 상태를 투명하게 확인해요</small></span><Flag size={18} /></header>
+          <div className="report-case-head"><span><small>접수번호</small><strong>LL-2026-0812-0042</strong></span><Pill tone="soft">검토 중</Pill></div>
+          <p><ShieldCheck size={16} /> 신고했다는 이유만으로 신고자 계정이 자동 제재되지 않아요. 양쪽 자료를 분리해 검토합니다.</p>
+          <div className="report-timeline"><span className="done"><Check size={12} /> 접수 완료</span><span className="active"><Clock3 size={12} /> 안전팀 검토</span><span>결과 안내</span></div>
+          <button className="profile-settings-link" type="button" onClick={() => onToast("추가 자료 제출 및 이의제기 화면을 열었어요 · mock")}><span className="setting-icon"><MessageCircle size={17} /></span><span><strong>추가 자료 제출 · 이의제기</strong><small>처리 결과에도 이의를 제기할 수 있어요</small></span><ChevronRight size={15} /></button>
         </section>
       </div>
     </div>
@@ -1371,6 +1489,10 @@ function MatchingPreferencesModal({
     ...current,
     availability: current.availability.includes(availability) ? current.availability.filter((item) => item !== availability) : [...current.availability, availability],
   }));
+  const toggleIntent = (intent: MatchIntent) => setPreferences((current) => ({
+    ...current,
+    intents: current.intents.includes(intent) ? current.intents.filter((item) => item !== intent) : [...current.intents, intent],
+  }));
 
   const save = async () => {
     setSaving(true);
@@ -1384,14 +1506,30 @@ function MatchingPreferencesModal({
       <header>
         <Pill tone="soft"><Target size={13} /> DAILY MATCH</Pill>
         <h2>매일 만나고 싶은 상대를 설정해요</h2>
-        <p>언어, 지역, 관심사와 활동 시간이 가까운 한 사람을 매일 오전 9시에 자동으로 연결해요.</p>
+        <p>필수 조건은 정확히 맞추고, 선호 조건이 가까운 파트너를 매일 12명 추천해요.</p>
       </header>
       <div className="form-section">
-        <span className="field-label">배우고 싶은 언어</span>
+        <span className="field-label">배우고 싶은 언어 <small>필수 조건</small></span>
         <div className="choice-row three-columns">
           {[{ value: "en", label: "영어", flag: "🇺🇸" }, { value: "es", label: "스페인어", flag: "🇪🇸" }, { value: "ja", label: "일본어", flag: "🇯🇵" }].map((item) => (
             <button type="button" className={preferences.targetLanguages.includes(item.value) ? "active" : ""} key={item.value} onClick={() => setPreferences((current) => ({ ...current, targetLanguages: [item.value] }))}>{item.flag} {item.label}</button>
           ))}
+        </div>
+      </div>
+      <div className="form-section">
+        <span className="field-label">함께할 파트너 <small>개인 매칭 선호 · 프로필에는 공개되지 않아요</small></span>
+        <div className="choice-row">
+          {(Object.entries(genderLabels) as Array<[PartnerGender, string]>).map(([value, label]) => (
+            <button type="button" className={preferences.partnerGender === value ? "active" : ""} key={value} onClick={() => setPreferences((current) => ({ ...current, partnerGender: value }))}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="form-section">
+        <span className="field-label">선호 나이 <small>우선 조건</small></span>
+        <div className="age-range-fields">
+          <label><span>최소</span><input aria-label="파트너 최소 나이" type="number" min={18} max={preferences.ageMax} value={preferences.ageMin} onChange={(event) => setPreferences((current) => ({ ...current, ageMin: Math.max(18, Math.min(Number(event.target.value), current.ageMax)) }))} /><small>세</small></label>
+          <span>–</span>
+          <label><span>최대</span><input aria-label="파트너 최대 나이" type="number" min={preferences.ageMin} max={80} value={preferences.ageMax} onChange={(event) => setPreferences((current) => ({ ...current, ageMax: Math.max(current.ageMin, Math.min(Number(event.target.value), 80)) }))} /><small>세</small></label>
         </div>
       </div>
       <div className="form-section">
@@ -1421,6 +1559,15 @@ function MatchingPreferencesModal({
         </div>
       </div>
       <div className="form-section">
+        <span className="field-label">만남 목적 <small>복수 선택 · 우선 조건</small></span>
+        <div className="chip-options">
+          {(Object.entries(intentLabels) as Array<[MatchIntent, string]>).map(([intent, label]) => {
+            const active = preferences.intents.includes(intent);
+            return <button type="button" className={active ? "active" : ""} key={intent} onClick={() => toggleIntent(intent)}>{active ? <Check size={13} /> : <Plus size={13} />}{label}</button>;
+          })}
+        </div>
+      </div>
+      <div className="form-section">
         <span className="field-label">주로 대화 가능한 시간</span>
         <div className="choice-row">
           {availabilityOptions.map(([value, label]) => (
@@ -1434,10 +1581,16 @@ function MatchingPreferencesModal({
         <input aria-label="현재 온라인인 사람만 보기" type="checkbox" checked={preferences.onlineOnly} onChange={() => setPreferences((current) => ({ ...current, onlineOnly: !current.onlineOnly }))} />
         <i className="toggle" />
       </label>
-      <div className="matching-schedule-note"><CalendarClock size={18} /><span><strong>다음 매칭 · 내일 오전 9시</strong><small>설정은 이 기기에 저장되며 오늘의 mock 추천에도 즉시 반영됩니다.</small></span><Pill tone="success">1명</Pill></div>
+      <label className="setting-row standalone">
+        <span className="setting-icon"><BadgeCheck size={17} /></span>
+        <span><strong>인증된 프로필 우선</strong><small>전화번호 또는 신원 확인이 끝난 계정을 먼저 추천해요</small></span>
+        <input aria-label="인증된 프로필 우선" type="checkbox" checked={preferences.verifiedOnly} onChange={() => setPreferences((current) => ({ ...current, verifiedOnly: !current.verifiedOnly }))} />
+        <i className="toggle" />
+      </label>
+      <div className="matching-schedule-note"><CalendarClock size={18} /><span><strong>다음 추천 · 내일 오전 9시</strong><small>선호 조건이 부족해도 필수 조건을 벗어난 사람을 임의로 섞지 않아요.</small></span><Pill tone="success">12명</Pill></div>
       <div className="modal-footer">
         <button className="text-button" type="button" onClick={() => { setPreferences(defaultMatchPreferences); onToast("기본 매칭 조건으로 되돌렸어요"); }}><RotateCcw size={15} /> 초기화</button>
-        <button className="primary-button" type="button" disabled={saving || !preferences.targetLanguages.length || !preferences.availability.length} onClick={() => void save()}>{saving ? "저장 중…" : "설정 저장하고 오늘의 매칭 보기"}</button>
+        <button className="primary-button" type="button" disabled={saving || !preferences.targetLanguages.length || !preferences.availability.length || !preferences.intents.length} onClick={() => void save()}>{saving ? "저장 중…" : "설정 저장하고 12명 보기"}</button>
       </div>
     </div>
   );
@@ -1541,6 +1694,20 @@ function ExchangeModal({ length, setLength, onClose, onToast }: { length: number
 
 function ReportModal({ target, onCancel, onConfirm }: { target: string; onCancel: () => void; onConfirm: () => void }) {
   const [reason, setReason] = useState("spam");
+  const [submitted, setSubmitted] = useState(false);
+  if (submitted) {
+    return (
+      <div className="report-content report-receipt">
+        <span className="report-icon"><CheckCircle2 size={25} /></span>
+        <Pill tone="success">접수 완료</Pill>
+        <h2>신고가 안전팀에 전달됐어요</h2>
+        <p><b>{target}</b>님에게 신고자 정보나 신고 여부를 알리지 않아요.</p>
+        <div className="report-receipt-card"><span><small>접수번호</small><strong>LL-2026-0812-0042</strong></span><span><small>현재 상태</small><strong>검토 대기</strong></span></div>
+        <div className="reporter-protection-note"><ShieldCheck size={18} /><span><strong>신고자는 자동 제재되지 않아요</strong><small>신고 내용과 계정 활동은 분리해 검토하며, 처리 결과에 이의를 제기할 수 있어요.</small></span></div>
+        <div className="modal-footer"><button className="secondary-button" type="button" onClick={onCancel}>닫기</button><button className="primary-button" type="button" onClick={onConfirm}>접수 내역 보기</button></div>
+      </div>
+    );
+  }
   return (
     <div className="report-content">
       <span className="report-icon"><ShieldCheck size={24} /></span>
@@ -1558,7 +1725,8 @@ function ReportModal({ target, onCancel, onConfirm }: { target: string; onCancel
         <input aria-label="이 사용자도 함께 차단" type="checkbox" />
         <span><strong>이 사용자도 함께 차단</strong><small>프로필과 메시지가 서로 보이지 않아요.</small></span>
       </label>
-      <div className="modal-footer"><button className="secondary-button" type="button" onClick={onCancel}>취소</button><button className="danger-button" type="button" onClick={onConfirm}><Flag size={16} /> 신고 보내기</button></div>
+      <div className="reporter-protection-note"><ShieldCheck size={17} /><span><strong>신고자 보호 원칙</strong><small>신고했다는 이유만으로 계정을 정지하지 않으며, 자동 제재 없이 안전팀이 맥락을 검토해요.</small></span></div>
+      <div className="modal-footer"><button className="secondary-button" type="button" onClick={onCancel}>취소</button><button className="danger-button" type="button" onClick={() => setSubmitted(true)}><Flag size={16} /> 신고 보내기</button></div>
     </div>
   );
 }
