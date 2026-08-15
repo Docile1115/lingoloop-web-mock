@@ -84,7 +84,7 @@ test("server-renders the LingoLoop product metadata and responsive application s
   assert.match(html, /<aside class="desktop-sidebar" aria-label="주요 메뉴">/);
   assert.match(html, /<main id="main-content" class="main-content">/);
   assert.match(html, /<nav class="mobile-nav" aria-label="모바일 주요 메뉴">/);
-  assert.match(html, /매칭 설정/);
+  assert.match(html, /조건 바꾸기/);
   assert.match(html, /오늘의 파트너/);
   assert.doesNotMatch(
     html,
