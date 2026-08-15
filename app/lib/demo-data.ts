@@ -6,7 +6,12 @@ export type Partner = {
   handle: string;
   flag: string;
   city: string;
+  /** 국가명. 국기만으로는 어디인지 모르는 경우가 많습니다. */
+  country: string;
+  /** 나와의 시차(시간). 양수면 상대가 빠릅니다. */
+  timeOffset: number;
   native: string;
+  nativeLevel?: string;
   learning: string;
   level: string;
   interests: string[];
@@ -93,9 +98,15 @@ export type PracticeRoom = {
   hostFlag: string;
   listeners: number;
   speakers: string[];
+  /** 듣고만 있는 사람. listeners 총원 중 화면에 노출할 일부입니다. */
+  audience: RoomListener[];
   accent: Accent;
   scheduled?: string;
 };
+
+export type RoomListener = { name: string; flag: string };
+
+export type RoomMessage = { id: string; name: string; text: string; mine?: boolean };
 
 export const currentUser = {
   name: "서준",
@@ -107,7 +118,35 @@ export const currentUser = {
   streak: 12,
   points: 1840,
   accent: "violet" as Accent,
+  bio: "한국어 원어민 · 영어 B1\n평일 저녁에 대화 연습해요. 발음 교정 환영합니다.",
+  partners: 24,
+  posts: 8,
 };
+
+/** 내가 쓴 글. 프로필의 "내 글" 탭에서 보여줍니다. */
+export const myPosts: FeedPost[] = [
+  {
+    id: "my-1", authorId: "seojun", author: "서준", handle: "@seojun.learns",
+    flag: "🇰🇷", accent: "violet", time: "2시간 전", language: "영어", level: "B1",
+    text: "오늘 배운 표현: ‘I’m on the fence.’ 결정을 못 내렸다는 뜻이래요. 회의에서 바로 써봤는데 통했어요!",
+    translation: "Today's expression means being undecided. I used it in a meeting and it worked!",
+    tags: ["#오늘의문장", "#English"], likes: 42, comments: 7, corrections: 2,
+  },
+  {
+    id: "my-2", authorId: "seojun", author: "서준", handle: "@seojun.learns",
+    flag: "🇰🇷", accent: "violet", time: "어제", language: "영어", level: "B1",
+    text: "‘Could you say that again?’와 ‘Come again?’의 뉘앙스 차이가 궁금해요. 후자는 좀 캐주얼한가요?",
+    translation: "What is the nuance difference between these two ways of asking someone to repeat?",
+    tags: ["#질문", "#English"], likes: 18, comments: 12, corrections: 4,
+  },
+  {
+    id: "my-3", authorId: "seojun", author: "서준", handle: "@seojun.learns",
+    flag: "🇰🇷", accent: "violet", time: "3일 전", language: "영어", level: "B1",
+    text: "발음 연습 30일째. 오늘 처음으로 원어민 파트너가 “네 발음 많이 좋아졌다”고 해줬어요 🎉",
+    translation: "Day 30 of pronunciation practice. My partner said my pronunciation improved a lot today!",
+    tags: ["#기록", "#발음"], likes: 96, comments: 15, corrections: 1,
+  },
+];
 
 export const partners: Partner[] = [
   {
@@ -115,7 +154,7 @@ export const partners: Partner[] = [
     name: "Maya",
     handle: "@maya.speaks",
     flag: "🇨🇦",
-    city: "밴쿠버 · 오전 10:24",
+    city: "밴쿠버", country: "캐나다", timeOffset: -17,
     native: "영어",
     learning: "한국어",
     level: "A2",
@@ -134,7 +173,7 @@ export const partners: Partner[] = [
     name: "Lucas",
     handle: "@lucas.enruta",
     flag: "🇪🇸",
-    city: "마드리드 · 오후 7:24",
+    city: "마드리드", country: "스페인", timeOffset: -8,
     native: "스페인어",
     learning: "한국어",
     level: "B1",
@@ -152,7 +191,7 @@ export const partners: Partner[] = [
     name: "Aiko",
     handle: "@aiko.notes",
     flag: "🇯🇵",
-    city: "도쿄 · 오전 2:24",
+    city: "도쿄", country: "일본", timeOffset: 0,
     native: "일본어",
     learning: "한국어",
     level: "B2",
@@ -171,7 +210,7 @@ export const partners: Partner[] = [
     name: "Omar",
     handle: "@omar.words",
     flag: "🇬🇧",
-    city: "런던 · 오후 6:24",
+    city: "런던", country: "영국", timeOffset: -9,
     native: "영어",
     learning: "한국어",
     level: "A1",
@@ -189,7 +228,7 @@ export const partners: Partner[] = [
     name: "Clara",
     handle: "@claraparis",
     flag: "🇫🇷",
-    city: "파리 · 오후 7:24",
+    city: "파리", country: "프랑스", timeOffset: -8,
     native: "프랑스어",
     learning: "한국어",
     level: "A2",
@@ -204,7 +243,89 @@ export const partners: Partner[] = [
   },
 ];
 
-export const initialPosts: FeedPost[] = [
+/** 피드 목업을 결정론적으로 늘립니다. 같은 index면 항상 같은 결과입니다. */
+const FEED_SEEDS: Array<{
+  author: string;
+  handle: string;
+  flag: string;
+  accent: Accent;
+  language: string;
+  level: string;
+  text: string;
+  translation: string;
+  tags: string[];
+}> = [
+  {
+    author: "Maya", handle: "@maya.speaks", flag: "🇨🇦", accent: "coral",
+    language: "한국어", level: "A2",
+    text: "오늘 카페에서 ‘아이스 아메리카노 얼죽아’라는 말을 들었어요. 줄임말이 너무 많아서 매번 새로워요!",
+    translation: "I heard a slang phrase at a cafe today. Korean abbreviations are always new to me!",
+    tags: ["#한국어", "#줄임말"],
+  },
+  {
+    author: "Lucas", handle: "@lucas.enruta", flag: "🇪🇸", accent: "amber",
+    language: "영어", level: "B1",
+    text: "Small win: I ordered coffee in English without rehearsing the sentence first.",
+    translation: "작은 성공: 문장을 미리 연습하지 않고 영어로 커피를 주문했어요.",
+    tags: ["#English", "#smallwins"],
+  },
+  {
+    author: "Aiko", handle: "@aiko.notes", flag: "🇯🇵", accent: "rose",
+    language: "한국어", level: "B2",
+    text: "‘눈치가 빠르다’를 일본어로 어떻게 번역하면 자연스러울까요? 직역이 안 되는 것 같아요.",
+    translation: "How would you naturally translate this Korean expression into Japanese?",
+    tags: ["#번역", "#표현"],
+  },
+  {
+    author: "Omar", handle: "@omar.learns", flag: "🇦🇪", accent: "mint",
+    language: "한국어", level: "A1",
+    text: "받침 발음이 제일 어려워요. ‘밖’과 ‘박’ 구분이 아직도 잘 안 됩니다.",
+    translation: "Final consonants are the hardest part for me.",
+    tags: ["#발음", "#한국어"],
+  },
+  {
+    author: "Clara", handle: "@clara.kr", flag: "🇩🇪", accent: "blue",
+    language: "영어", level: "C1",
+    text: "회의에서 ‘let’s circle back’ 같은 표현을 자주 듣는데, 한국어로는 어떻게 말하나요?",
+    translation: "I often hear business idioms in meetings. What is the Korean equivalent?",
+    tags: ["#비즈니스", "#English"],
+  },
+  {
+    author: "서준", handle: "@seojun", flag: "🇰🇷", accent: "violet",
+    language: "영어", level: "B2",
+    text: "오늘 배운 표현: ‘I’m on the fence.’ 결정을 못 내렸다는 뜻이래요. 바로 써먹어야지.",
+    translation: "Today's expression means being undecided about something.",
+    tags: ["#오늘의문장", "#English"],
+  },
+];
+
+const FEED_TIMES = ["방금", "3분 전", "12분 전", "27분 전", "1시간 전", "2시간 전", "5시간 전", "어제", "2일 전"];
+
+export function generateFeedPosts(count: number, startIndex = 0): FeedPost[] {
+  return Array.from({ length: count }, (_, i) => {
+    const n = startIndex + i;
+    const seed = FEED_SEEDS[n % FEED_SEEDS.length];
+    return {
+      id: `post-gen-${n}`,
+      authorId: seed.handle.replace("@", ""),
+      author: seed.author,
+      handle: seed.handle,
+      flag: seed.flag,
+      accent: seed.accent,
+      time: FEED_TIMES[n % FEED_TIMES.length],
+      language: seed.language,
+      level: seed.level,
+      text: seed.text,
+      translation: seed.translation,
+      tags: seed.tags,
+      likes: 6 + ((n * 37) % 240),
+      comments: 1 + ((n * 13) % 48),
+      corrections: (n * 7) % 9,
+    };
+  });
+}
+
+const seededPosts: FeedPost[] = [
   {
     id: "post-1",
     authorId: "maya",
@@ -364,6 +485,7 @@ export const rooms: PracticeRoom[] = [
     hostFlag: "🇦🇺",
     listeners: 42,
     speakers: ["Nina", "Joon", "Sofia", "Ken"],
+    audience: [{ name: "Emma", flag: "🇬🇧" }, { name: "지훈", flag: "🇰🇷" }, { name: "Marco", flag: "🇮🇹" }, { name: "Yuki", flag: "🇯🇵" }, { name: "Ana", flag: "🇧🇷" }, { name: "Tom", flag: "🇺🇸" }, { name: "수아", flag: "🇰🇷" }, { name: "Pierre", flag: "🇫🇷" }],
     accent: "violet",
   },
   {
@@ -376,6 +498,7 @@ export const rooms: PracticeRoom[] = [
     hostFlag: "🇯🇵",
     listeners: 28,
     speakers: ["Haruto", "Mina", "Leo"],
+    audience: [{ name: "서준", flag: "🇰🇷" }, { name: "Aiko", flag: "🇯🇵" }, { name: "민서", flag: "🇰🇷" }, { name: "Kenji", flag: "🇯🇵" }, { name: "Chloe", flag: "🇫🇷" }, { name: "태윤", flag: "🇰🇷" }],
     accent: "rose",
   },
   {
@@ -388,6 +511,7 @@ export const rooms: PracticeRoom[] = [
     hostFlag: "🇲🇽",
     listeners: 76,
     speakers: ["Sofia", "Dan", "Lina", "Omar"],
+    audience: [{ name: "Diego", flag: "🇪🇸" }, { name: "Nina", flag: "🇦🇺" }, { name: "하은", flag: "🇰🇷" }, { name: "Ravi", flag: "🇮🇳" }, { name: "Lucia", flag: "🇦🇷" }, { name: "Ben", flag: "🇨🇦" }, { name: "Mei", flag: "🇹🇼" }],
     accent: "amber",
   },
   {
@@ -400,13 +524,68 @@ export const rooms: PracticeRoom[] = [
     hostFlag: "🇺🇸",
     listeners: 0,
     speakers: ["Alex"],
+    audience: [],
     accent: "mint",
     scheduled: "오늘 오후 9:00",
   },
+];
+
+export const initialRoomMessages: RoomMessage[] = [
+  { id: "rm-1", name: "Nina", text: "Welcome! Listening only is totally okay 👋" },
+  { id: "rm-2", name: "Joon", text: "My small win was finishing a book!" },
+  { id: "rm-3", name: "Emma", text: "That's great. I finally called a cafe in English today ☕" },
+  { id: "rm-4", name: "지훈", text: "듣고만 있어도 도움이 많이 되네요" },
 ];
 
 export const savedPhrases = [
   { phrase: "That makes sense.", meaning: "그 말 이해돼요 / 일리가 있어요", source: "Maya와의 대화", due: "오늘" },
   { phrase: "Could you say that again?", meaning: "다시 한번 말해주시겠어요?", source: "보이스룸", due: "내일" },
   { phrase: "여백을 조금 더 주면 좋겠어요.", meaning: "It would be nice to add more whitespace.", source: "Aiko의 게시물", due: "3일 후" },
+];
+
+/** 손으로 쓴 3개 + 생성분 97개 = 100개 피드. */
+export const initialPosts: FeedPost[] = [...seededPosts, ...generateFeedPosts(97, 3)];
+
+/** 내가 팔로우한 작성자. "팔로잉" 탭에서 이 사람들 글만 봅니다. */
+export const followingAuthors = ["maya", "aiko", "seojun", "maya.speaks", "aiko.notes"];
+
+export type PostReply = {
+  id: string;
+  author: string;
+  handle: string;
+  flag: string;
+  accent: Accent;
+  time: string;
+  text: string;
+  likes: number;
+  /** 일반 답글인지 교정인지. 기본은 답글입니다. */
+  kind?: "reply" | "correction";
+  /** 교정일 때 원문. text가 고친 문장입니다. */
+  original?: string;
+  /** 대댓글. 한 단계만 들여씁니다. */
+  replies?: PostReply[];
+};
+
+/** 게시물별 답글. 상세 화면에서 원글 아래에 이어집니다. */
+export const postReplies: Record<string, PostReply[]> = {
+  "post-1": [
+    {
+      id: "r-1", author: "Jisoo", handle: "@jisoo.daily", flag: "🇰🇷", accent: "mint", time: "5분 전",
+      text: "‘손이 크다’는 요리를 많이 한다는 뜻으로도 쓸 수 있나요?", original: "‘손이 크다’는 요리를 많이 만들었다는 뜻으로도 쓸 수 있어요?", likes: 12, kind: "correction",
+      replies: [
+        { id: "r-1-1", author: "Maya", handle: "@maya.speaks", flag: "🇨🇦", accent: "coral", time: "4분 전", text: "감사해요! 다음엔 ‘손맛’도 배워볼게요 😄", likes: 3 },
+      ],
+    },
+    { id: "r-2", author: "Lucas", handle: "@lucas.enruta", flag: "🇪🇸", accent: "amber", time: "2분 전", text: "김치찌개 만들기 도전해보고 싶네요. 레시피 공유해주세요!", likes: 4 },
+  ],
+  "post-2": [
+    { id: "r-3", author: "Maya", handle: "@maya.speaks", flag: "🇨🇦", accent: "coral", time: "10분 전", text: "Congrats! Presentations are scary even in your first language.", likes: 8 },
+  ],
+};
+
+/** 상대가 먼저 마음을 보낸 사람들. 내가 답하면 대화가 열립니다. */
+export const receivedLikes: Array<{ partnerId: string; time: string; note?: string }> = [
+  { partnerId: "aiko", time: "12분 전", note: "한국어 발음 도와주실 수 있나요?" },
+  { partnerId: "clara", time: "2시간 전" },
+  { partnerId: "omar", time: "어제" },
 ];
