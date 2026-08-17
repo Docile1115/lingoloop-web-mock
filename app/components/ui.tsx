@@ -5,6 +5,7 @@ import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTML
 import { BadgeCheck, Globe } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { avatarSize, type AvatarSize } from "../lib/tokens";
+import { t } from "../lib/i18n";
 import "./ui.css";
 
 /** 최상위 래퍼. 이 안에서만 토큰이 적용됩니다. */
@@ -212,7 +213,7 @@ export function Sheet({
   return (
     <div className="ui-backdrop">
       {/* 바깥 클릭으로 닫기. button이라 키보드로도 접근됩니다. */}
-      <button type="button" className="ui-backdrop-hit" aria-label="닫기" onClick={onClose} />
+      <button type="button" className="ui-backdrop-hit" aria-label={t("닫기")} onClick={onClose} />
       <div className="ui-sheet" role="dialog" aria-modal="true" aria-label={title}>
         <div className="ui-sheet-head">
           <span className="ui-sheet-title">{title}</span>
@@ -488,9 +489,10 @@ export function MessageBubble({
   );
 }
 
-export function TypingIndicator({ label = "입력 중" }: { label?: string }) {
+export function TypingIndicator({ label }: { label?: string }) {
+  const text = label ?? t("입력 중");
   return (
-    <span className="ui-typing" role="status" aria-label={label}>
+    <span className="ui-typing" role="status" aria-label={text}>
       <span />
       <span />
       <span />
@@ -673,7 +675,7 @@ export function AvatarStack({ children }: { children: ReactNode }) {
 }
 
 export function VerifiedBadge({ size = 14 }: { size?: number }) {
-  return <BadgeCheck className="ui-verified" size={size} strokeWidth={2.4} aria-label="인증됨" />;
+  return <BadgeCheck className="ui-verified" size={size} strokeWidth={2.4} aria-label={t("인증됨")} />;
 }
 
 export function ProfileHeader({

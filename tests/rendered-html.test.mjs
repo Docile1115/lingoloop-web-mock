@@ -103,8 +103,8 @@ test("keeps conditional core entry points and removes paid or legacy product cop
     "utf8",
   );
 
-  assert.match(source, /보이스룸 만들기/);
-  assert.match(source, /프로필 설정/);
+  assert.match(source, /t\("보이스룸 만들기"\)/);
+  assert.match(source, /t\("프로필 설정"\)/);
   assert.doesNotMatch(
     source,
     /유료|Loop Plus|\bVIP\b|안전한 메시지 요청함|오늘 배운 표현/i,
@@ -125,7 +125,7 @@ test("locks the mobile navigation and partner-card cascade contracts", async () 
   assert.ok(topbarStart >= 0 && topbarEnd > topbarStart, "topbar actions must exist");
   const topbarActions = source.slice(topbarStart, topbarEnd);
   assert.match(topbarActions, /section === "community"/);
-  assert.match(topbarActions, /label="글쓰기"/);
+  assert.match(topbarActions, /label=\{t\("글쓰기"\)\}/);
   assert.match(topbarActions, /className="top-compose-button"/);
   assert.match(topbarActions, /setModal\(\{ type: "compose" \}\)/);
 
@@ -139,27 +139,77 @@ test("locks the mobile navigation and partner-card cascade contracts", async () 
     "the legacy mobile carousel rule must not leak into the partner stack",
   );
 
-  const guardStart = css.indexOf("Mobile integration guard");
-  assert.ok(guardStart >= 0, "the final mobile integration guard must exist");
+  const integrationGuardStart = css.indexOf("Mobile integration guard");
+  const controlSystemStart = css.lastIndexOf("Mobile control system");
+  assert.ok(integrationGuardStart >= 0, "the mobile integration guard must exist");
+  assert.ok(controlSystemStart >= 0, "the final mobile control system must exist");
   assert.ok(
-    guardStart > css.lastIndexOf(".swipe-button { width: 72px; height: 72px; }"),
-    "the mobile guard must come after broad desktop partner rules",
+    controlSystemStart > css.lastIndexOf(".swipe-button { width: 72px; height: 72px; }"),
+    "the mobile control system must come after broad desktop partner rules",
   );
-  const mobileGuard = css.slice(guardStart);
+  assert.ok(
+    controlSystemStart > integrationGuardStart,
+    "the control system must be the final mobile normalization layer",
+  );
+  const mobileGuard = css.slice(integrationGuardStart, controlSystemStart);
+  const mobileControls = css.slice(controlSystemStart);
   assert.match(mobileGuard, /--page-pad-x:\s*16px;/);
   assert.match(
-    mobileGuard,
+    mobileControls,
+    /--mobile-topbar-total:\s*calc\(59px \+ env\(safe-area-inset-top\)\);/,
+  );
+  assert.match(
+    mobileControls,
     /--mobile-nav-total:\s*calc\(68px \+ env\(safe-area-inset-bottom\)\);/,
   );
   assert.match(
-    mobileGuard,
+    mobileControls,
     /\.partner-stack\s*>\s*\.partner-card\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*none;[^}]*flex:\s*none;/,
   );
   assert.match(
-    mobileGuard,
+    mobileControls,
     /\.swipe-button\s*\{\s*width:\s*56px;\s*height:\s*56px;\s*\}/,
   );
-  assert.match(mobileGuard, /\.mobile-nav\s*\{[^}]*height:\s*var\(--mobile-nav-total\);/);
+  assert.match(mobileControls, /--mobile-tap:\s*44px;/);
+  assert.match(mobileControls, /--mobile-control-gap:\s*var\(--sp-2\);/);
+  assert.match(mobileControls, /--mobile-action-gap:\s*var\(--sp-3\);/);
+  assert.match(mobileControls, /--mobile-group-gap:\s*var\(--sp-4\);/);
+  assert.match(mobileControls, /\.mobile-nav\s*\{[^}]*height:\s*var\(--mobile-nav-total\);/);
+  assert.match(
+    mobileControls,
+    /\.mobile-nav button\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*var\(--mobile-tap\);/,
+  );
+  assert.match(
+    mobileControls,
+    /\.partner-header-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*gap:\s*var\(--mobile-control-gap\);/,
+  );
+  assert.match(
+    mobileControls,
+    /\.post-actions\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(56px, 1fr\)\);[^}]*gap:\s*var\(--mobile-control-gap\);/,
+  );
+
+  const pagePadding = 16;
+  const tapSize = 44;
+  const controlGap = 8;
+  const groupGap = 16;
+  const swipeSize = 56;
+  for (const viewport of [320, 360, 390]) {
+    const contentWidth = viewport - pagePadding * 2;
+    const pairedActionWidth = (contentWidth - controlGap) / 2;
+    const navigationCellWidth = viewport / 5;
+    assert.ok(
+      pairedActionWidth >= tapSize,
+      `${viewport}px must keep both header actions at least ${tapSize}px wide`,
+    );
+    assert.ok(
+      navigationCellWidth >= tapSize,
+      `${viewport}px must keep all five navigation targets tappable`,
+    );
+    assert.ok(
+      swipeSize * 2 + groupGap <= contentWidth,
+      `${viewport}px must fit both partner actions without horizontal overflow`,
+    );
+  }
 });
 
 test("keeps mobile safety copy readable and owns DM request state at the app root", async () => {

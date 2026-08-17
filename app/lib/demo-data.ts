@@ -432,13 +432,25 @@ const FEED_SEEDS: Array<{
 
 const FEED_TIMES = ["방금", "3분 전", "12분 전", "27분 전", "1시간 전", "2시간 전", "5시간 전", "어제", "2일 전"];
 
+/** 표시 이름 → 정식 작성자 id. 파트너 목록·상세 화면과 같은 값을 씁니다. */
+const AUTHOR_IDS: Record<string, string> = {
+  Maya: "maya",
+  Lucas: "lucas",
+  Aiko: "aiko",
+  Omar: "omar",
+  Clara: "clara",
+  "서준": "seojun",
+};
+
 export function generateFeedPosts(count: number, startIndex = 0): FeedPost[] {
   return Array.from({ length: count }, (_, i) => {
     const n = startIndex + i;
     const seed = FEED_SEEDS[n % FEED_SEEDS.length];
     return {
       id: `post-gen-${n}`,
-      authorId: seed.handle.replace("@", ""),
+      // 한 사람은 하나의 id 여야 합니다 — 손으로 쓴 글과 생성된 글의 작성자가 갈라지면
+      // 숨기기·차단이 그 사람 글의 일부에만 걸립니다.
+      authorId: AUTHOR_IDS[seed.author] ?? seed.handle.replace("@", ""),
       author: seed.author,
       handle: seed.handle,
       flag: seed.flag,
