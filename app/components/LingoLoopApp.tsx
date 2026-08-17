@@ -61,7 +61,6 @@ import {
   Target,
   Trash2,
   Trophy,
-  UserPlus,
   Users,
   User,
   UsersRound,
@@ -422,7 +421,8 @@ export default function LingoLoopApp() {
   const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
   const [selectedChatId, setSelectedChatId] = useState(initialConversations[0].id);
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [conversationDrafts, setConversationDrafts] = useState<Record<string, string>>({});
+  const [requestConversationIds, setRequestConversationIds] = useState<Set<string>>(() => new Set(["chat-aiko"]));
   const [feedTab, setFeedTab] = useState<"recommended" | "learning" | "following">("recommended");
   const [translatedPosts, setTranslatedPosts] = useState<Set<string>>(new Set());
   const [openCorrections, setOpenCorrections] = useState<Set<string>>(new Set(["post-1"]));
@@ -443,6 +443,11 @@ export default function LingoLoopApp() {
   const toastTimer = useRef<number | null>(null);
 
   const selectedConversation = conversations.find((item) => item.id === selectedChatId) ?? conversations[0];
+  const draft = selectedConversation ? conversationDrafts[selectedConversation.id] ?? "" : "";
+  const setDraft = (text: string) => {
+    if (!selectedConversation) return;
+    setConversationDrafts((current) => ({ ...current, [selectedConversation.id]: text }));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -593,14 +598,23 @@ export default function LingoLoopApp() {
     showToast("처음부터 다시 볼게요");
   };
 
+  const resetViewScroll = () => {
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      document.querySelector<HTMLElement>(".main-content")?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    });
+  };
+
   const openPost = (post: FeedPost) => {
     setDetail({ kind: "post", post });
     window.history.pushState(null, "", `#${section}/post/${post.id}`);
+    resetViewScroll();
   };
 
   const openProfile = (partner: Partner) => {
     setDetail({ kind: "profile", partner });
     window.history.pushState(null, "", `#${section}/user/${partner.id}`);
+    resetViewScroll();
   };
 
   const closeDetail = () => {
@@ -613,6 +627,7 @@ export default function LingoLoopApp() {
     setSection(next);
     if (next === "chats") setMobileThreadOpen(false);
     window.history.replaceState(null, "", `#${next}`);
+    resetViewScroll();
   };
 
   const togglePost = (postId: string, key: "liked" | "saved") => {
@@ -642,6 +657,12 @@ export default function LingoLoopApp() {
     const existing = conversations.find((item) => item.partnerId === partner.id);
     if (existing) {
       setSelectedChatId(existing.id);
+      setRequestConversationIds((current) => {
+        if (!current.has(existing.id)) return current;
+        const next = new Set(current);
+        next.delete(existing.id);
+        return next;
+      });
     } else {
       const next: Conversation = {
         id: `chat-${partner.id}`,
@@ -665,7 +686,10 @@ export default function LingoLoopApp() {
       };
       setConversations((items) => [next, ...items]);
       setSelectedChatId(next.id);
-      setDraft(dailyRecommendations.find((item) => item.partner.id === partner.id)?.icebreaker ?? dailyMatchDetails[partner.id]?.icebreaker ?? `Hi ${partner.name}! Nice to meet you.`);
+      setConversationDrafts((current) => ({
+        ...current,
+        [next.id]: dailyRecommendations.find((item) => item.partner.id === partner.id)?.icebreaker ?? dailyMatchDetails[partner.id]?.icebreaker ?? `Hi ${partner.name}! Nice to meet you.`,
+      }));
     }
     setSection("chats");
     setMobileThreadOpen(true);
@@ -704,6 +728,36 @@ export default function LingoLoopApp() {
       showToast("메시지를 보냈어요 · mock API 동기화 완료");
     } catch {
       showToast("메시지를 기기에 저장했어요 · 오프라인 데모");
+    }
+  };
+
+  const acceptChatRequest = (id: string) => {
+    setRequestConversationIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  const dismissChatRequest = (id: string) => {
+    const remaining = conversations.filter((conversation) => conversation.id !== id);
+    setRequestConversationIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    setConversations(remaining);
+    setConversationDrafts((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    if (selectedChatId === id) {
+      setSelectedChatId(remaining[0]?.id ?? "");
+      setMobileThreadOpen(false);
     }
   };
 
@@ -853,6 +907,7 @@ export default function LingoLoopApp() {
             <span className="brand-wordmark">Lingo<span>Loop</span></span>
           </button>
           <div className="topbar-actions">
+            {section === "community" ? <IconButton label="글쓰기" icon={PenLine} className="top-compose-button" onClick={() => setModal({ type: "compose" })} /> : null}
             <IconButton label="검색" icon={Search} onClick={() => setModal({ type: "search" })} />
           </div>
         </header>
@@ -923,11 +978,14 @@ export default function LingoLoopApp() {
                 conversations={conversations}
                 selected={selectedConversation}
                 mobileThreadOpen={mobileThreadOpen}
+                requestIds={requestConversationIds}
                 onSelect={(id) => {
                   setSelectedChatId(id);
                   setMobileThreadOpen(true);
                 }}
                 onBack={() => setMobileThreadOpen(false)}
+                onAcceptRequest={acceptChatRequest}
+                onDismissRequest={dismissChatRequest}
                 draft={draft}
                 setDraft={setDraft}
                 onSend={sendMessage}
@@ -1821,8 +1879,11 @@ function ChatsView({
   conversations,
   selected,
   mobileThreadOpen,
+  requestIds,
   onSelect,
   onBack,
+  onAcceptRequest,
+  onDismissRequest,
   draft,
   setDraft,
   onSend,
@@ -1834,8 +1895,11 @@ function ChatsView({
   conversations: Conversation[];
   selected: Conversation;
   mobileThreadOpen: boolean;
+  requestIds: ReadonlySet<string>;
   onSelect: (id: string) => void;
   onBack: () => void;
+  onAcceptRequest: (id: string) => void;
+  onDismissRequest: (id: string) => void;
   draft: string;
   setDraft: (text: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
@@ -1845,7 +1909,6 @@ function ChatsView({
   onToast: (message: string) => void;
 }) {
   const [listTab, setListTab] = useState<"inbox" | "turn" | "requests">("inbox");
-  const [requestIds, setRequestIds] = useState<Set<string>>(new Set(["chat-aiko"]));
   const [translatedMessages, setTranslatedMessages] = useState<Set<string>>(new Set(["m1"]));
   const [coachOpen, setCoachOpen] = useState(true);
   const [coachLoading, setCoachLoading] = useState(false);
@@ -1854,20 +1917,12 @@ function ChatsView({
   const filtered = conversations.filter((item) => listTab === "turn" ? item.myTurn && !requestIds.has(item.id) : listTab === "requests" ? requestIds.has(item.id) : !requestIds.has(item.id));
   const selectedIsRequest = requestIds.has(selected.id);
   const acceptRequest = (id: string, name: string) => {
-    setRequestIds((current) => {
-      const next = new Set(current);
-      next.delete(id);
-      return next;
-    });
+    onAcceptRequest(id);
     setListTab("inbox");
     onToast(`${name}님의 요청을 수락했어요`);
   };
   const removeRequest = (id: string, name: string) => {
-    setRequestIds((current) => {
-      const next = new Set(current);
-      next.delete(id);
-      return next;
-    });
+    onDismissRequest(id);
     onToast(`${name}님의 요청을 삭제했어요 · 상대에게 알리지 않아요`);
   };
 

@@ -111,6 +111,141 @@ test("keeps conditional core entry points and removes paid or legacy product cop
   );
 });
 
+test("locks the mobile navigation and partner-card cascade contracts", async () => {
+  const [source, css] = await Promise.all([
+    readFile(
+      new URL("../app/components/LingoLoopApp.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  const topbarStart = source.indexOf('<div className="topbar-actions">');
+  const topbarEnd = source.indexOf("</div>", topbarStart);
+  assert.ok(topbarStart >= 0 && topbarEnd > topbarStart, "topbar actions must exist");
+  const topbarActions = source.slice(topbarStart, topbarEnd);
+  assert.match(topbarActions, /section === "community"/);
+  assert.match(topbarActions, /label="글쓰기"/);
+  assert.match(topbarActions, /className="top-compose-button"/);
+  assert.match(topbarActions, /setModal\(\{ type: "compose" \}\)/);
+
+  assert.match(
+    css,
+    /\.partner-grid\s*>\s*\.partner-card\s*\{[^}]*width:\s*77vw;[^}]*max-width:\s*300px;/,
+  );
+  assert.doesNotMatch(
+    css,
+    /(?:^|\n)\s*\.partner-card\s*\{[^}]*width:\s*77vw;/,
+    "the legacy mobile carousel rule must not leak into the partner stack",
+  );
+
+  const guardStart = css.indexOf("Mobile integration guard");
+  assert.ok(guardStart >= 0, "the final mobile integration guard must exist");
+  assert.ok(
+    guardStart > css.lastIndexOf(".swipe-button { width: 72px; height: 72px; }"),
+    "the mobile guard must come after broad desktop partner rules",
+  );
+  const mobileGuard = css.slice(guardStart);
+  assert.match(mobileGuard, /--page-pad-x:\s*16px;/);
+  assert.match(
+    mobileGuard,
+    /--mobile-nav-total:\s*calc\(68px \+ env\(safe-area-inset-bottom\)\);/,
+  );
+  assert.match(
+    mobileGuard,
+    /\.partner-stack\s*>\s*\.partner-card\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*none;[^}]*flex:\s*none;/,
+  );
+  assert.match(
+    mobileGuard,
+    /\.swipe-button\s*\{\s*width:\s*56px;\s*height:\s*56px;\s*\}/,
+  );
+  assert.match(mobileGuard, /\.mobile-nav\s*\{[^}]*height:\s*var\(--mobile-nav-total\);/);
+});
+
+test("keeps mobile safety copy readable and owns DM request state at the app root", async () => {
+  const [source, css] = await Promise.all([
+    readFile(
+      new URL("../app/components/LingoLoopApp.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  const lastDeclaredFontSize = (selector) => {
+    let result;
+    const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
+    for (const match of css.matchAll(rulePattern)) {
+      const selectors = match[1]
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .split(",")
+        .map((item) => item.trim());
+      if (!selectors.includes(selector)) continue;
+      const declaration = match[2].match(/font-size:\s*(\d+)px;/);
+      if (declaration) result = Number(declaration[1]);
+    }
+    return result;
+  };
+
+  const readableSafetySizes = new Map([
+    [".dm-request-banner strong", 13],
+    [".dm-request-banner small", 12],
+    [".request-composer-lock strong", 13],
+    [".request-composer-lock small", 12],
+    [".dm-scope-setting .choice-row button", 12],
+    [".dm-scope-setting > small", 12],
+    [".verification-step strong", 13],
+    [".data-sync-status strong", 13],
+    [".verification-step small", 12],
+    [".data-sync-status small", 12],
+    [".verification-step > button", 12],
+    [".report-case-head small", 12],
+    [".report-case-head strong", 13],
+    [".report-status-card > p", 12],
+    [".report-timeline span", 12],
+    [".report-receipt-card small", 12],
+    [".report-receipt-card strong", 13],
+    [".reporter-protection-note strong", 13],
+    [".reporter-protection-note small", 12],
+  ]);
+
+  for (const [selector, expected] of readableSafetySizes) {
+    assert.equal(
+      lastDeclaredFontSize(selector),
+      expected,
+      `${selector} must finish the cascade at ${expected}px`,
+    );
+  }
+
+  const chatsViewStart = source.indexOf("function ChatsView(");
+  assert.ok(chatsViewStart > 0, "ChatsView must exist");
+  const rootSource = source.slice(0, chatsViewStart);
+  const chatsViewSource = source.slice(chatsViewStart);
+  assert.match(
+    rootSource,
+    /const \[requestConversationIds, setRequestConversationIds\] = useState<Set<string>>\(\(\) => new Set\(\["chat-aiko"\]\)\);/,
+  );
+  assert.match(rootSource, /requestIds=\{requestConversationIds\}/);
+  assert.match(rootSource, /onDismissRequest=\{dismissChatRequest\}/);
+  assert.doesNotMatch(
+    chatsViewSource,
+    /const \[requestIds, setRequestIds\] = useState/,
+    "DM request ownership must not move back into ChatsView",
+  );
+
+  const dismissStart = rootSource.indexOf("const dismissChatRequest = (id: string) => {");
+  const dismissEnd = rootSource.indexOf("const publishPost", dismissStart);
+  assert.ok(dismissStart >= 0 && dismissEnd > dismissStart, "dismiss handler must exist at the app root");
+  const dismissHandler = rootSource.slice(dismissStart, dismissEnd);
+  assert.match(
+    dismissHandler,
+    /const remaining = conversations\.filter\(\(conversation\) => conversation\.id !== id\);/,
+  );
+  assert.match(dismissHandler, /setConversations\(remaining\);/);
+  assert.match(dismissHandler, /setRequestConversationIds\(\(current\) => \{/);
+  assert.match(dismissHandler, /delete next\[id\];/);
+  assert.match(chatsViewSource, /onDismissRequest\(id\);/);
+});
+
 test("removes every starter-preview marker from the rendered product", async () => {
   const response = await fetchApp("/", {
     headers: { accept: "text/html" },
