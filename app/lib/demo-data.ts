@@ -43,6 +43,8 @@ export type FeedPost = {
   corrections: number;
   liked?: boolean;
   saved?: boolean;
+  /** 공개 범위. 없으면 전체 공개로 취급합니다. */
+  visibility?: "public" | "partners";
   visual?: {
     emoji: string;
     eyebrow: string;
