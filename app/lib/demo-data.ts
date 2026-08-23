@@ -110,7 +110,20 @@ export type RoomListener = { name: string; flag: string };
 
 export type RoomMessage = { id: string; name: string; text: string; mine?: boolean };
 
+/** 온보딩에서 고를 수 있는 학습 언어. 사전에 이미 있는 이름만 씁니다. */
+export type LanguageOption = { code: string; label: string; flag: string };
+export const languageOptions: LanguageOption[] = [
+  { code: "ko", label: "한국어", flag: "🇰🇷" },
+  { code: "en", label: "영어", flag: "🇺🇸" },
+  { code: "ja", label: "일본어", flag: "🇯🇵" },
+  { code: "es", label: "스페인어", flag: "🇪🇸" },
+  { code: "fr", label: "프랑스어", flag: "🇫🇷" },
+  { code: "de", label: "독일어", flag: "🇩🇪" },
+];
+
 export const currentUser = {
+  /** myPosts 의 authorId 와 같아야 합니다 — 이 값으로 "내 글"인지 판단합니다. */
+  id: "seojun",
   name: "서준",
   handle: "@seojun.learns",
   flag: "🇰🇷",
@@ -682,10 +695,59 @@ export const initialRoomMessages: RoomMessage[] = [
   { id: "rm-4", name: "지훈", text: "듣고만 있어도 도움이 많이 되네요" },
 ];
 
-export const savedPhrases = [
-  { phrase: "That makes sense.", meaning: "그 말 이해돼요 / 일리가 있어요", source: "Maya와의 대화", due: "오늘" },
-  { phrase: "Could you say that again?", meaning: "다시 한번 말해주시겠어요?", source: "보이스룸", due: "내일" },
-  { phrase: "여백을 조금 더 주면 좋겠어요.", meaning: "It would be nice to add more whitespace.", source: "Aiko의 게시물", due: "3일 후" },
+/** 복습함에 담기는 한 항목. 교정·게시물 어디서 저장해도 같은 모양으로 들어옵니다. */
+export type SavedPhrase = {
+  id: string;
+  phrase: string;
+  meaning: string;
+  source: string;
+  due: string;
+};
+
+export const savedPhrases: SavedPhrase[] = [
+  { id: "seed-1", phrase: "That makes sense.", meaning: "그 말 이해돼요 / 일리가 있어요", source: "Maya와의 대화", due: "오늘" },
+  { id: "seed-2", phrase: "Could you say that again?", meaning: "다시 한번 말해주시겠어요?", source: "보이스룸", due: "내일" },
+  { id: "seed-3", phrase: "여백을 조금 더 주면 좋겠어요.", meaning: "It would be nice to add more whitespace.", source: "Aiko의 게시물", due: "3일 후" },
+];
+
+/**
+ * 내가 받은 교정. 학습 탭의 "받은 교정" 지표가 가리키는 실체입니다.
+ * 지금까지는 숫자만 있고 목록이 없어서 눌러도 갈 곳이 없었습니다.
+ */
+export type ReceivedCorrection = {
+  id: string;
+  from: string;
+  flag: string;
+  accent: Accent;
+  before: string;
+  after: string;
+  note: string;
+  source: string;
+  time: string;
+};
+
+export const receivedCorrections: ReceivedCorrection[] = [
+  {
+    id: "corr-1", from: "Maya", flag: "🇨🇦", accent: "coral",
+    before: "I was nervous at first, though.",
+    after: "I was a little nervous at first, though.",
+    note: "‘a little’을 넣으면 부담 없이 자연스럽게 들려요.",
+    source: "Maya와의 대화", time: "2시간 전",
+  },
+  {
+    id: "corr-2", from: "Aiko", flag: "🇯🇵", accent: "rose",
+    before: "I want to improve my speaking more fluent.",
+    after: "I want to speak more fluently.",
+    note: "‘improve’ 뒤에는 명사가 와요. 부사 ‘fluently’로 바꾸면 매끄러워요.",
+    source: "커뮤니티 게시물", time: "어제",
+  },
+  {
+    id: "corr-3", from: "Lucas", flag: "🇪🇸", accent: "amber",
+    before: "Yesterday I have gone to the market.",
+    after: "Yesterday I went to the market.",
+    note: "‘yesterday’ 처럼 끝난 시점을 말할 땐 과거형을 씁니다.",
+    source: "Lucas와의 대화", time: "3일 전",
+  },
 ];
 
 /** 손으로 쓴 3개 + 생성분 97개 = 100개 피드. */

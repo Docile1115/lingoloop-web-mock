@@ -90,11 +90,8 @@ test("server-renders the LingoLoop product metadata and responsive application s
     html,
     /유료|Loop Plus|\bVIP\b|안전한 메시지 요청함|오늘 배운 표현/i,
   );
-  assert.match(
-    html,
-    /class="api-indicator api-(?:ready|checking|offline)" title="mock API 상태"/,
-  );
-  assert.match(html, /Mock API 연결됨|연결 확인 중|오프라인 데모/);
+  // mock API 상태 배지는 제품 화면이 아니라 개발 흔적이라 제거했습니다.
+  assert.doesNotMatch(html, /api-indicator|Mock API 연결됨|연결 확인 중/);
 });
 
 test("keeps conditional core entry points and removes paid or legacy product copy", async () => {
@@ -104,7 +101,10 @@ test("keeps conditional core entry points and removes paid or legacy product cop
   );
 
   assert.match(source, /t\("보이스룸 만들기"\)/);
-  assert.match(source, /t\("프로필 설정"\)/);
+  // 프로필 편집으로 가는 길이 남아 있는지를 봅니다.
+  // 설정 카드 안의 "프로필 설정" 줄은 프로필 화면의 "프로필 편집" 버튼과 같은 곳으로 가서
+  // 중복이라 없앴습니다(유저 지적). 진입점 자체는 그대로입니다.
+  assert.match(source, /t\("프로필 편집"\)/);
   assert.doesNotMatch(
     source,
     /유료|Loop Plus|\bVIP\b|안전한 메시지 요청함|오늘 배운 표현/i,
