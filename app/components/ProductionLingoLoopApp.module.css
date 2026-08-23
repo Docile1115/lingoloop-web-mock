@@ -1,0 +1,1538 @@
+.root {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.loading {
+  display: grid;
+  min-height: 100dvh;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+.loading strong {
+  font-size: 22px;
+}
+
+.loading p {
+  color: var(--subtle);
+}
+
+.brandMark {
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 13px;
+  background: var(--primary);
+  color: var(--primary-text);
+  box-shadow: 0 8px 22px rgba(0, 136, 58, 0.18);
+}
+
+.authPage {
+  display: grid;
+  min-height: 100dvh;
+  grid-template-columns: minmax(0, 1.05fr) minmax(360px, 520px);
+  place-items: center;
+  gap: clamp(40px, 8vw, 120px);
+  padding: clamp(28px, 7vw, 96px);
+  background:
+    radial-gradient(circle at 15% 20%, color-mix(in srgb, var(--primary-soft) 90%, transparent), transparent 32%),
+    var(--canvas);
+}
+
+.authIntro {
+  width: min(100%, 650px);
+}
+
+.authBrand,
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.authBrand {
+  margin-bottom: clamp(48px, 9vh, 96px);
+}
+
+.authBrand strong,
+.brand strong {
+  color: var(--primary-ink);
+}
+
+.eyebrow {
+  color: var(--primary-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.authIntro h1 {
+  margin-top: 13px;
+  font-size: clamp(34px, 4.5vw, 62px);
+  line-height: 1.14;
+  letter-spacing: -0.045em;
+}
+
+.authDescription {
+  max-width: 590px;
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: clamp(16px, 1.5vw, 19px);
+  line-height: 1.75;
+}
+
+.authFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 30px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.authFacts li {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.authFacts svg {
+  color: var(--primary-ink);
+}
+
+.authCard {
+  width: min(100%, 500px);
+  padding: clamp(24px, 4vw, 42px);
+  border: 1px solid var(--line-structure);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.authCard > div:nth-of-type(2) {
+  margin: 30px 0 24px;
+}
+
+.authCard h2 {
+  font-size: 25px;
+  letter-spacing: -0.025em;
+}
+
+.authCard h2 + p {
+  margin-top: 8px;
+  color: var(--subtle);
+  line-height: 1.55;
+}
+
+.authTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--sunken);
+}
+
+.authTabs button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--subtle);
+  font-weight: 700;
+}
+
+.authTabs button.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.authForm,
+.profileForm,
+.settingsPanel,
+.roomForm {
+  display: grid;
+  gap: 16px;
+}
+
+.authForm label,
+.profileForm label,
+.settingsPanel label,
+.roomForm label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.authForm input,
+.profileForm input,
+.profileForm textarea,
+.settingsPanel input,
+.settingsPanel select,
+.roomForm input,
+.composeCard textarea,
+.messageForm input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line-structure);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 13px;
+}
+
+.profileForm textarea,
+.composeCard textarea {
+  min-height: 118px;
+  padding-block: 12px;
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.inputWithIcon {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line-structure);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  padding-left: 13px;
+  color: var(--subtle);
+}
+
+.inputWithIcon:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
+.inputWithIcon input {
+  border: 0;
+  background: transparent;
+  outline: 0;
+}
+
+.formError,
+.formNotice,
+.errorBanner {
+  border-radius: var(--r-btn);
+  padding: 11px 13px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.formError,
+.errorBanner {
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.formNotice {
+  border: 1px solid var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.authLegal {
+  display: block;
+  margin-top: 20px;
+  color: var(--subtle);
+  line-height: 1.55;
+}
+
+.primaryButton,
+.secondaryButton,
+.dangerButton {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--r-btn);
+  padding: 0 16px;
+  font-weight: 700;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.primaryButton {
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.primaryButton:hover:not(:disabled) {
+  border-color: var(--primary-strong);
+  background: var(--primary-strong);
+}
+
+.secondaryButton {
+  border: 1px solid var(--line-structure);
+  background: var(--secondary-button);
+  color: var(--ink);
+}
+
+.secondaryButton:hover:not(:disabled) {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.dangerButton {
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.primaryButton:active:not(:disabled),
+.secondaryButton:active:not(:disabled),
+.dangerButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.sidebar {
+  display: flex;
+  width: var(--sidebar-w);
+  flex: 0 0 var(--sidebar-w);
+  flex-direction: column;
+  padding: 24px 14px 18px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.brand {
+  min-height: 46px;
+  border: 0;
+  background: transparent;
+  padding: 2px 10px;
+  text-align: left;
+}
+
+.brand .brandMark {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+
+.sidebar nav {
+  display: grid;
+  gap: 6px;
+  margin-top: 34px;
+}
+
+.sidebar nav button {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 13px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 13px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.sidebar nav button:hover {
+  background: var(--hover-bg);
+  color: var(--ink);
+}
+
+.sidebar nav button.active {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.sidebarSpacer {
+  flex: 1;
+}
+
+.liveStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 12px;
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.liveStatus > span,
+.liveDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--online);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--online) 15%, transparent);
+}
+
+.userButton {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.userButton > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.userButton small {
+  overflow: hidden;
+  color: var(--subtle);
+  text-overflow: ellipsis;
+}
+
+.avatar {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line-structure);
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-weight: 800;
+}
+
+.avatar_small {
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+}
+
+.avatar_medium {
+  width: 48px;
+  height: 48px;
+  font-size: 18px;
+}
+
+.avatar_large {
+  width: 64px;
+  height: 64px;
+  font-size: 24px;
+}
+
+.avatar i {
+  position: absolute;
+  right: -4px;
+  bottom: -2px;
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--surface);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.avatar b {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--online);
+}
+
+.workspace {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.mobileHeader,
+.mobileNav {
+  display: none;
+}
+
+.main {
+  min-width: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 44px clamp(24px, 4vw, 64px) 72px;
+}
+
+.pageSection {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+}
+
+.pageHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.pageHeader > div {
+  display: grid;
+  gap: 7px;
+}
+
+.pageHeader h1 {
+  font-size: clamp(28px, 3vw, 38px);
+  letter-spacing: -0.035em;
+}
+
+.pageHeader h1 + p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.errorBanner {
+  display: flex;
+  width: min(100%, 1080px);
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 auto 20px;
+}
+
+.errorBanner button {
+  display: inline-flex;
+  min-height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: transparent;
+  padding: 0 10px;
+  font-weight: 700;
+}
+
+.sectionLoading {
+  display: flex;
+  min-height: 280px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--subtle);
+}
+
+.sectionLoading svg {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.settingsPanel,
+.roomForm {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  margin-bottom: 20px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface-soft);
+}
+
+.settingsPanel .checkLabel {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+}
+
+.checkLabel input {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--primary);
+}
+
+.partnerGrid,
+.roomGrid,
+.feed,
+.profileGrid {
+  display: grid;
+  gap: 16px;
+}
+
+.partnerGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.partnerCard,
+.postCard,
+.roomCard,
+.profileSummary,
+.profileForm,
+.privacyCard,
+.accountCard,
+.composeCard,
+.emptyState,
+.chatLayout {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.partnerCard {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px;
+}
+
+.partnerCard > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+}
+
+.partnerCard header p,
+.partnerCard header small,
+.postCard small,
+.roomCard small,
+.profileSummary small {
+  color: var(--subtle);
+}
+
+.partnerCard header > div > small {
+  display: block;
+  margin-top: 3px;
+  color: var(--success);
+  font-weight: 700;
+}
+
+.nameLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nameLine svg {
+  color: var(--primary-ink);
+}
+
+.score {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--primary-border);
+  border-radius: 12px;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.score strong {
+  font-size: 19px;
+}
+
+.score small {
+  color: inherit;
+  white-space: nowrap;
+}
+
+.partnerBio {
+  min-height: 48px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.languagePair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 13px;
+  border-radius: 13px;
+  background: var(--surface-soft);
+}
+
+.languagePair > span:not(:nth-child(2)) {
+  display: grid;
+  gap: 4px;
+}
+
+.languagePair > span:nth-child(2) {
+  color: var(--subtle);
+}
+
+.languagePair small {
+  color: var(--subtle);
+}
+
+.reasonList,
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.reasonList span,
+.tags span {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  border-radius: var(--r-pill);
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.reasonList svg {
+  color: var(--success);
+}
+
+.partnerCard > footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: auto;
+}
+
+.composeCard {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 18px;
+}
+
+.composeCard header,
+.composeCard footer,
+.profileForm header,
+.privacyCard header,
+.accountCard header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.composeCard header button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+}
+
+.composeCard footer small {
+  color: var(--subtle);
+}
+
+.feed {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.postCard {
+  display: grid;
+  align-content: start;
+  gap: 15px;
+  padding: 18px;
+}
+
+.postCard > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+
+.postCard > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.postCard > header small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.postAvatar {
+  position: relative;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-weight: 800;
+}
+
+.postAvatar i {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.languageTag {
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.postCard > p {
+  white-space: pre-wrap;
+  line-height: 1.72;
+  overflow-wrap: anywhere;
+}
+
+.postCard > footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--subtle);
+}
+
+.postCard > footer button,
+.postCard > footer span {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.chatLayout {
+  display: grid;
+  height: min(70dvh, 720px);
+  min-height: 520px;
+  grid-template-columns: minmax(240px, 30%) minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.chatList {
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--surface-soft);
+  padding: 8px;
+}
+
+.chatList button {
+  display: grid;
+  width: 100%;
+  min-height: 66px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  padding: 8px;
+  text-align: left;
+}
+
+.chatList button.active {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
+.chatList button > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.chatList button small {
+  overflow: hidden;
+  color: var(--subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatList time {
+  align-self: start;
+  color: var(--subtle);
+  font-size: 10px;
+}
+
+.thread {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.thread > header {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 16px;
+}
+
+.thread > header > span {
+  display: grid;
+  gap: 2px;
+}
+
+.thread > header small {
+  color: var(--subtle);
+}
+
+.thread > header i {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--success);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.messages {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 18px;
+  background: var(--surface-soft);
+}
+
+.messages > div {
+  display: grid;
+  max-width: min(76%, 560px);
+  gap: 4px;
+}
+
+.messages > div p {
+  border-radius: 15px;
+  padding: 10px 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.messages > div small {
+  color: var(--subtle);
+  font-size: 10px;
+}
+
+.mine {
+  align-self: flex-end;
+  justify-items: end;
+}
+
+.mine p {
+  border-bottom-right-radius: 4px !important;
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.theirs {
+  align-self: flex-start;
+}
+
+.theirs p {
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 4px !important;
+  background: var(--surface);
+}
+
+.threadEmpty {
+  margin: auto;
+  color: var(--subtle);
+}
+
+.messageForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding: 10px;
+}
+
+.messageForm .primaryButton {
+  width: 48px;
+  padding: 0;
+}
+
+.voiceNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-bottom: 18px;
+  border: 1px solid var(--primary-border);
+  border-radius: var(--r-md);
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  padding: 13px 15px;
+}
+
+.voiceNotice > span {
+  display: grid;
+  gap: 3px;
+}
+
+.voiceNotice small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.roomForm {
+  grid-template-columns: 1fr 1fr auto auto;
+}
+
+.roomGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.roomCard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  padding: 18px;
+}
+
+.roomCard > button {
+  grid-column: 1 / -1;
+}
+
+.roomIcon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.roomCard > div {
+  display: grid;
+  gap: 5px;
+}
+
+.roomCard p,
+.roomCard span {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.profileGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profileSummary,
+.profileForm,
+.privacyCard,
+.accountCard {
+  padding: 20px;
+}
+
+.profileSummary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.profileSummary > div:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.profileSummary > div:nth-child(2) small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.syncBadge {
+  display: inline-flex;
+  min-height: 34px;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: var(--r-pill);
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.profileForm {
+  grid-row: span 2;
+}
+
+.profileForm header,
+.privacyCard header,
+.accountCard header {
+  justify-content: flex-start;
+  padding-bottom: 8px;
+}
+
+.privacyCard,
+.accountCard {
+  display: grid;
+  align-content: start;
+  gap: 13px;
+}
+
+.privacyCard > p,
+.accountCard > p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.scopeButtons {
+  display: grid;
+  gap: 7px;
+}
+
+.scopeButtons button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 0 12px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.scopeButtons button.active {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.emptyState {
+  display: grid;
+  min-height: 260px;
+  grid-column: 1 / -1;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 32px;
+  text-align: center;
+}
+
+.emptyState > span:first-child {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.emptyState p {
+  max-width: 460px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.emptyState button {
+  margin-top: 5px;
+}
+
+.toast {
+  position: fixed;
+  z-index: 50;
+  right: 24px;
+  bottom: 24px;
+  max-width: min(420px, calc(100vw - 32px));
+  border: 1px solid var(--line-structure);
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--surface);
+  padding: 13px 16px;
+  box-shadow: var(--shadow-lg);
+}
+
+@media (max-width: 940px) {
+  .authPage {
+    grid-template-columns: 1fr;
+    gap: 36px;
+    align-content: center;
+  }
+
+  .authIntro {
+    text-align: center;
+  }
+
+  .authBrand,
+  .authFacts {
+    justify-content: center;
+  }
+
+  .authBrand {
+    margin-bottom: 34px;
+  }
+
+  .authDescription {
+    margin-inline: auto;
+  }
+
+  .partnerGrid,
+  .feed,
+  .roomGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsPanel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .roomForm {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .root {
+    min-height: 100dvh;
+  }
+
+  .authPage {
+    min-height: 100dvh;
+    align-content: start;
+    gap: 28px;
+    padding: 28px 16px calc(28px + env(safe-area-inset-bottom));
+  }
+
+  .authIntro {
+    text-align: left;
+  }
+
+  .authBrand {
+    justify-content: flex-start;
+    margin-bottom: 30px;
+  }
+
+  .authIntro h1 {
+    font-size: 34px;
+  }
+
+  .authFacts {
+    justify-content: flex-start;
+  }
+
+  .authFacts li {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .authCard {
+    padding: 22px 18px;
+    border-radius: 18px;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .workspace {
+    height: 100dvh;
+  }
+
+  .mobileHeader {
+    position: sticky;
+    z-index: 20;
+    top: 0;
+    display: flex;
+    min-height: calc(58px + env(safe-area-inset-top));
+    flex: 0 0 auto;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    padding: env(safe-area-inset-top) 14px 8px;
+    backdrop-filter: blur(16px);
+  }
+
+  .mobileHeader .brand {
+    min-height: 44px;
+    padding: 0;
+    font-size: 18px;
+  }
+
+  .mobileHeader .brandMark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .liveDot {
+    margin: 0 9px 17px 0;
+  }
+
+  .main {
+    padding: 24px 14px calc(78px + env(safe-area-inset-bottom));
+  }
+
+  .pageHeader {
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .pageHeader h1 {
+    font-size: 27px;
+  }
+
+  .pageHeader h1 + p {
+    font-size: 13px;
+  }
+
+  .pageHeader > button {
+    min-width: 44px;
+    flex: 0 0 auto;
+    padding-inline: 12px;
+  }
+
+  .settingsPanel,
+  .roomForm,
+  .profileGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsPanel,
+  .roomForm {
+    padding: 14px;
+  }
+
+  .partnerCard,
+  .postCard,
+  .roomCard,
+  .profileSummary,
+  .profileForm,
+  .privacyCard,
+  .accountCard,
+  .composeCard {
+    border-radius: 14px;
+  }
+
+  .partnerCard {
+    gap: 15px;
+    padding: 16px;
+  }
+
+  .partnerCard > header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .partnerCard > footer {
+    gap: 8px;
+  }
+
+  .partnerCard > footer button {
+    padding-inline: 10px;
+    font-size: 13px;
+  }
+
+  .feed {
+    gap: 12px;
+  }
+
+  .postCard {
+    gap: 13px;
+    padding: 15px;
+  }
+
+  .chatLayout {
+    height: calc(100dvh - 190px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    min-height: 480px;
+    grid-template-columns: 92px minmax(0, 1fr);
+    border-radius: 14px;
+  }
+
+  .chatList {
+    padding: 5px;
+  }
+
+  .chatList button {
+    min-height: 68px;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 3px;
+    padding: 6px 3px;
+    text-align: center;
+  }
+
+  .chatList button > span strong {
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chatList button small,
+  .chatList time {
+    display: none;
+  }
+
+  .thread > header {
+    padding-inline: 10px;
+  }
+
+  .thread > header i {
+    display: none;
+  }
+
+  .messages {
+    padding: 12px 9px;
+  }
+
+  .messages > div {
+    max-width: 86%;
+  }
+
+  .messageForm {
+    padding: 8px;
+  }
+
+  .mobileNav {
+    position: fixed;
+    z-index: 30;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    min-height: calc(58px + env(safe-area-inset-bottom));
+    grid-template-columns: repeat(5, 1fr);
+    border-top: 1px solid var(--line-structure);
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    padding: 4px 4px env(safe-area-inset-bottom);
+    backdrop-filter: blur(18px);
+  }
+
+  .mobileNav button {
+    display: flex;
+    min-width: 0;
+    min-height: 50px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--subtle);
+    padding: 3px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .mobileNav button.active {
+    background: var(--primary-soft);
+    color: var(--primary-ink);
+  }
+
+  .toast {
+    right: 16px;
+    bottom: calc(70px + env(safe-area-inset-bottom));
+    left: 16px;
+    text-align: center;
+  }
+
+  .errorBanner {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 420px) {
+  .authFacts li:nth-child(3) {
+    display: none;
+  }
+
+  .pageHeader > button {
+    font-size: 0;
+  }
+
+  .pageHeader > button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .partnerCard > header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .score {
+    grid-column: 1 / -1;
+    grid-template-columns: auto auto;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .languagePair {
+    grid-template-columns: 1fr;
+  }
+
+  .languagePair > span:nth-child(2) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primaryButton,
+  .secondaryButton,
+  .dangerButton {
+    transition: none;
+  }
+
+  .sectionLoading svg {
+    animation: none;
+  }
+}

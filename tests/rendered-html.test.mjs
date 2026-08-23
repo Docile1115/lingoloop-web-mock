@@ -5,7 +5,7 @@ import test from "node:test";
 const expectedTitle =
   "LingoLoop — 함께 말하고, 함께 배우는 언어 교환 | LingoLoop";
 const expectedDescription =
-  "파트너 매칭, 커뮤니티 교정, 학습형 채팅과 음성 라운지를 경험하는 반응형 언어 교환 서비스 데모입니다.";
+  "Firebase Identity Platform 인증과 Firestore 영구 저장으로 파트너 매칭, 커뮤니티와 대화를 이어가는 언어 교환 서비스입니다.";
 
 let workerPromise;
 
@@ -19,7 +19,7 @@ function loadWorker() {
   return workerPromise;
 }
 
-async function fetchApp(path = "/", init = {}) {
+async function fetchApp(path = "/", init = {}, bindings = {}) {
   const worker = await loadWorker();
   return worker.fetch(
     new Request(new URL(path, "http://lingoloop.test"), init),
@@ -27,6 +27,7 @@ async function fetchApp(path = "/", init = {}) {
       ASSETS: {
         fetch: async () => new Response("Not found", { status: 404 }),
       },
+      ...bindings,
     },
     {
       waitUntil() {},
@@ -35,33 +36,7 @@ async function fetchApp(path = "/", init = {}) {
   );
 }
 
-function assertCommonApiHeaders(response, requestId) {
-  assert.match(
-    response.headers.get("content-type") ?? "",
-    /^application\/json\b/i,
-  );
-  assert.equal(response.headers.get("cache-control"), "no-store");
-  assert.equal(response.headers.get("access-control-allow-origin"), "*");
-  assert.equal(response.headers.get("x-request-id"), requestId);
-}
-
-function assertMeta(meta, requestId) {
-  assert.equal(meta.requestId, requestId);
-  assert.equal(meta.mock, true);
-  assert.equal(typeof meta.timestamp, "string");
-  assert.ok(Number.isFinite(Date.parse(meta.timestamp)), "meta.timestamp must be an ISO date");
-}
-
-function assertNonEmptyStringArray(value, label) {
-  assert.ok(Array.isArray(value), `${label} must be an array`);
-  assert.ok(value.length > 0, `${label} must not be empty`);
-  assert.ok(
-    value.every((item) => typeof item === "string" && item.length > 0),
-    `${label} must contain non-empty strings`,
-  );
-}
-
-test("server-renders the LingoLoop product metadata and responsive application shell", async () => {
+test("운영 메타데이터와 인증 확인 화면을 서버 렌더링한다", async () => {
   const response = await fetchApp("/", {
     headers: { accept: "text/html" },
   });
@@ -79,822 +54,126 @@ test("server-renders the LingoLoop product metadata and responsive application s
     html,
     /<meta(?=[^>]*\bname="application-name")(?=[^>]*\bcontent="LingoLoop")[^>]*>/i,
   );
-
-  assert.match(html, /<a class="skip-link" href="#main-content">본문으로 건너뛰기<\/a>/);
-  assert.match(html, /<aside class="desktop-sidebar" aria-label="주요 메뉴">/);
-  assert.match(html, /<main id="main-content" class="main-content">/);
-  assert.match(html, /<nav class="mobile-nav" aria-label="모바일 주요 메뉴">/);
-  assert.match(html, /조건 바꾸기/);
-  assert.match(html, /오늘의 파트너/);
-  assert.doesNotMatch(
-    html,
-    /유료|Loop Plus|\bVIP\b|안전한 메시지 요청함|오늘 배운 표현/i,
-  );
-  assert.match(
-    html,
-    /class="api-indicator api-(?:ready|checking|offline)" title="mock API 상태"/,
-  );
-  assert.match(html, /Mock API 연결됨|연결 확인 중|오프라인 데모/);
+  assert.match(html, /LingoLoop/);
+  assert.match(html, /안전한 로그인 상태를 확인하고 있어요\./);
+  assert.doesNotMatch(html, /Mock API 연결됨|오프라인 데모|웹 mock|mock API 프로토타입/i);
 });
 
-test("keeps conditional core entry points and removes paid or legacy product copy", async () => {
+test("운영 화면 진입점은 fixture 기반 앱 대신 Production 앱을 사용한다", async () => {
+  const [page, productionApp] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/components/ProductionLingoLoopApp.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(page, /import ProductionLingoLoopApp from/);
+  assert.match(page, /return <ProductionLingoLoopApp \/>/);
+  assert.doesNotMatch(page, /import LingoLoopApp from/);
+  assert.match(productionApp, /\/api\/auth\/me/);
+  assert.match(productionApp, /\/api\/auth\/register/);
+  assert.match(productionApp, /\/api\/auth\/login/);
+  assert.doesNotMatch(productionApp, /demo-data|initialPosts|initialConversations/);
+});
+
+test("API 프록시는 설정이 없을 때 mock으로 후퇴하지 않고 닫힌 상태로 실패한다", async () => {
+  const response = await fetchApp("/api/health", {
+    headers: { accept: "application/json" },
+  });
+
+  assert.equal(response.status, 503);
+  assert.match(
+    response.headers.get("content-type") ?? "",
+    /^application\/json\b/i,
+  );
+  assert.equal(response.headers.get("cache-control"), "no-store");
+
+  const payload = await response.json();
+  assert.equal(payload.error.code, "API_NOT_CONFIGURED");
+  assert.equal(payload.meta.mock, false);
+  assert.equal(payload.meta.persistent, false);
+  assert.ok(Number.isFinite(Date.parse(payload.meta.timestamp)));
+});
+
+test("웹 Worker는 same-origin 요청을 운영 API로만 전달한다", async () => {
   const source = await readFile(
-    new URL("../app/components/LingoLoopApp.tsx", import.meta.url),
+    new URL("../worker/index.ts", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /t\("보이스룸 만들기"\)/);
-  assert.match(source, /t\("프로필 설정"\)/);
-  assert.doesNotMatch(
-    source,
-    /유료|Loop Plus|\bVIP\b|안전한 메시지 요청함|오늘 배운 표현/i,
-  );
+  assert.match(source, /LINGOLOOP_API_URL/);
+  assert.match(source, /PROXY_SHARED_SECRET/);
+  assert.match(source, /headers\.set\("x-lingoloop-proxy", proxySecret\)/);
+  assert.match(source, /url\.pathname\.startsWith\("\/api\/"\)/);
+  assert.doesNotMatch(source, /handleMockApi|\.\.\/mock-api/);
 });
 
-test("locks the mobile navigation and partner-card cascade contracts", async () => {
-  const [source, css] = await Promise.all([
-    readFile(
-      new URL("../app/components/LingoLoopApp.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  ]);
-
-  const topbarStart = source.indexOf('<div className="topbar-actions">');
-  const topbarEnd = source.indexOf("</div>", topbarStart);
-  assert.ok(topbarStart >= 0 && topbarEnd > topbarStart, "topbar actions must exist");
-  const topbarActions = source.slice(topbarStart, topbarEnd);
-  assert.match(topbarActions, /section === "community"/);
-  assert.match(topbarActions, /label=\{t\("글쓰기"\)\}/);
-  assert.match(topbarActions, /className="top-compose-button"/);
-  assert.match(topbarActions, /setModal\(\{ type: "compose" \}\)/);
-
-  assert.match(
-    css,
-    /\.partner-grid\s*>\s*\.partner-card\s*\{[^}]*width:\s*77vw;[^}]*max-width:\s*300px;/,
-  );
-  assert.doesNotMatch(
-    css,
-    /(?:^|\n)\s*\.partner-card\s*\{[^}]*width:\s*77vw;/,
-    "the legacy mobile carousel rule must not leak into the partner stack",
+test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선언한다", async () => {
+  const source = await readFile(
+    new URL("../backend/server.mjs", import.meta.url),
+    "utf8",
   );
 
-  const integrationGuardStart = css.indexOf("Mobile integration guard");
-  const controlSystemStart = css.lastIndexOf("Mobile control system");
-  assert.ok(integrationGuardStart >= 0, "the mobile integration guard must exist");
-  assert.ok(controlSystemStart >= 0, "the final mobile control system must exist");
-  assert.ok(
-    controlSystemStart > css.lastIndexOf(".swipe-button { width: 72px; height: 72px; }"),
-    "the mobile control system must come after broad desktop partner rules",
-  );
-  assert.ok(
-    controlSystemStart > integrationGuardStart,
-    "the control system must be the final mobile normalization layer",
-  );
-  const mobileGuard = css.slice(integrationGuardStart, controlSystemStart);
-  const mobileControls = css.slice(controlSystemStart);
-  assert.match(mobileGuard, /--page-pad-x:\s*16px;/);
-  assert.match(
-    mobileControls,
-    /--mobile-topbar-total:\s*calc\(59px \+ env\(safe-area-inset-top\)\);/,
-  );
-  assert.match(
-    mobileControls,
-    /--mobile-nav-total:\s*calc\(68px \+ env\(safe-area-inset-bottom\)\);/,
-  );
-  assert.match(
-    mobileControls,
-    /\.partner-stack\s*>\s*\.partner-card\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*none;[^}]*flex:\s*none;/,
-  );
-  assert.match(
-    mobileControls,
-    /\.swipe-button\s*\{\s*width:\s*56px;\s*height:\s*56px;\s*\}/,
-  );
-  assert.match(mobileControls, /--mobile-tap:\s*44px;/);
-  assert.match(mobileControls, /--mobile-control-gap:\s*var\(--sp-2\);/);
-  assert.match(mobileControls, /--mobile-action-gap:\s*var\(--sp-3\);/);
-  assert.match(mobileControls, /--mobile-group-gap:\s*var\(--sp-4\);/);
-  assert.match(mobileControls, /\.mobile-nav\s*\{[^}]*height:\s*var\(--mobile-nav-total\);/);
-  assert.match(
-    mobileControls,
-    /\.mobile-nav button\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*var\(--mobile-tap\);/,
-  );
-  assert.match(
-    mobileControls,
-    /\.partner-header-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*gap:\s*var\(--mobile-control-gap\);/,
-  );
-  assert.match(
-    mobileControls,
-    /\.post-actions\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(56px, 1fr\)\);[^}]*gap:\s*var\(--mobile-control-gap\);/,
-  );
+  assert.match(source, /applicationDefault\(\)/);
+  assert.match(source, /auth\.createSessionCookie/);
+  assert.match(source, /auth\.verifySessionCookie/);
+  assert.match(source, /httpOnly: true/);
+  assert.match(source, /secure: COOKIE_SECURE/);
+  assert.match(source, /sameSite: "lax"/);
+  assert.match(source, /mock: false/);
+  assert.match(source, /persistent: true/);
 
-  const pagePadding = 16;
-  const tapSize = 44;
-  const controlGap = 8;
-  const groupGap = 16;
-  const swipeSize = 56;
-  for (const viewport of [320, 360, 390]) {
-    const contentWidth = viewport - pagePadding * 2;
-    const pairedActionWidth = (contentWidth - controlGap) / 2;
-    const navigationCellWidth = viewport / 5;
-    assert.ok(
-      pairedActionWidth >= tapSize,
-      `${viewport}px must keep both header actions at least ${tapSize}px wide`,
-    );
-    assert.ok(
-      navigationCellWidth >= tapSize,
-      `${viewport}px must keep all five navigation targets tappable`,
-    );
-    assert.ok(
-      swipeSize * 2 + groupGap <= contentWidth,
-      `${viewport}px must fit both partner actions without horizontal overflow`,
-    );
+  for (const collection of [
+    "profiles",
+    "matchingPreferences",
+    "dailyMatches",
+    "likes",
+    "follows",
+    "posts",
+    "reactions",
+    "conversations",
+    "messages",
+    "voiceRooms",
+    "dmPolicies",
+    "reports",
+    "aiUsage",
+  ]) {
+    assert.match(source, new RegExp(`collection\\("${collection}"\\)`));
+  }
+
+  for (const route of [
+    "/api/auth/register",
+    "/api/auth/login",
+    "/api/auth/me",
+    "/api/profile",
+    "/api/matching/daily",
+    "/api/posts",
+    "/api/conversations",
+    "/api/conversations/:conversationId/accept",
+    "/api/rooms",
+    "/api/reports",
+  ]) {
+    assert.ok(source.includes(`"${route}"`), `${route} 운영 route가 필요합니다`);
   }
 });
 
-test("keeps mobile safety copy readable and owns DM request state at the app root", async () => {
-  const [source, css] = await Promise.all([
+test("AI와 음성 기능은 구성되지 않은 상태를 실제 기능처럼 위장하지 않는다", async () => {
+  const [backend, productionApp] = await Promise.all([
+    readFile(new URL("../backend/server.mjs", import.meta.url), "utf8"),
     readFile(
-      new URL("../app/components/LingoLoopApp.tsx", import.meta.url),
+      new URL("../app/components/ProductionLingoLoopApp.tsx", import.meta.url),
       "utf8",
     ),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
-  const lastDeclaredFontSize = (selector) => {
-    let result;
-    const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
-    for (const match of css.matchAll(rulePattern)) {
-      const selectors = match[1]
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .split(",")
-        .map((item) => item.trim());
-      if (!selectors.includes(selector)) continue;
-      const declaration = match[2].match(/font-size:\s*(\d+)px;/);
-      if (declaration) result = Number(declaration[1]);
-    }
-    return result;
-  };
-
-  const readableSafetySizes = new Map([
-    [".dm-request-banner strong", 13],
-    [".dm-request-banner small", 12],
-    [".request-composer-lock strong", 13],
-    [".request-composer-lock small", 12],
-    [".dm-scope-setting .choice-row button", 12],
-    [".dm-scope-setting > small", 12],
-    [".verification-step strong", 13],
-    [".data-sync-status strong", 13],
-    [".verification-step small", 12],
-    [".data-sync-status small", 12],
-    [".verification-step > button", 12],
-    [".report-case-head small", 12],
-    [".report-case-head strong", 13],
-    [".report-status-card > p", 12],
-    [".report-timeline span", 12],
-    [".report-receipt-card small", 12],
-    [".report-receipt-card strong", 13],
-    [".reporter-protection-note strong", 13],
-    [".reporter-protection-note small", 12],
-  ]);
-
-  for (const [selector, expected] of readableSafetySizes) {
-    assert.equal(
-      lastDeclaredFontSize(selector),
-      expected,
-      `${selector} must finish the cascade at ${expected}px`,
-    );
-  }
-
-  const chatsViewStart = source.indexOf("function ChatsView(");
-  assert.ok(chatsViewStart > 0, "ChatsView must exist");
-  const rootSource = source.slice(0, chatsViewStart);
-  const chatsViewSource = source.slice(chatsViewStart);
-  assert.match(
-    rootSource,
-    /const \[requestConversationIds, setRequestConversationIds\] = useState<Set<string>>\(\(\) => new Set\(\["chat-aiko"\]\)\);/,
-  );
-  assert.match(rootSource, /requestIds=\{requestConversationIds\}/);
-  assert.match(rootSource, /onDismissRequest=\{dismissChatRequest\}/);
-  assert.doesNotMatch(
-    chatsViewSource,
-    /const \[requestIds, setRequestIds\] = useState/,
-    "DM request ownership must not move back into ChatsView",
-  );
-
-  const dismissStart = rootSource.indexOf("const dismissChatRequest = (id: string) => {");
-  const dismissEnd = rootSource.indexOf("const publishPost", dismissStart);
-  assert.ok(dismissStart >= 0 && dismissEnd > dismissStart, "dismiss handler must exist at the app root");
-  const dismissHandler = rootSource.slice(dismissStart, dismissEnd);
-  assert.match(
-    dismissHandler,
-    /const remaining = conversations\.filter\(\(conversation\) => conversation\.id !== id\);/,
-  );
-  assert.match(dismissHandler, /setConversations\(remaining\);/);
-  assert.match(dismissHandler, /setRequestConversationIds\(\(current\) => \{/);
-  assert.match(dismissHandler, /delete next\[id\];/);
-  assert.match(chatsViewSource, /onDismissRequest\(id\);/);
-});
-
-test("removes every starter-preview marker from the rendered product", async () => {
-  const response = await fetchApp("/", {
-    headers: { accept: "text/html" },
-  });
-  const html = await response.text();
-
-  assert.doesNotMatch(
-    html,
-    /Starter Project|Your site is taking shape|Building your site|react-loading-skeleton|codex-preview|_sites-preview|SkeletonPreview/i,
-  );
-});
-
-test("mock API health endpoint returns the versioned success envelope", async () => {
-  const requestId = "health-contract-test";
-  const response = await fetchApp("/api/health", {
-    headers: { "x-request-id": requestId },
-  });
-
-  assert.equal(response.status, 200);
-  assertCommonApiHeaders(response, requestId);
-
-  const body = await response.json();
-  assert.deepEqual(body.data, {
-    service: "language-exchange-mock-api",
-    version: "0.1.0",
-    status: "ok",
-    environment: "mock",
-    uptime: "stateless-worker",
-  });
-  assertMeta(body.meta, requestId);
-});
-
-test("mock API list endpoint paginates its stable partner collection", async () => {
-  const requestId = "partners-contract-test";
-  const response = await fetchApp("/api/partners?cursor=0&limit=2", {
-    headers: { "x-request-id": requestId },
-  });
-
-  assert.equal(response.status, 200);
-  assertCommonApiHeaders(response, requestId);
-
-  const body = await response.json();
-  assert.equal(body.data.length, 2);
-  assert.deepEqual(
-    body.data.map(({ id, name }) => ({ id, name })),
-    [
-      { id: "user-maya", name: "Maya" },
-      { id: "user-ren", name: "Ren" },
-    ],
-  );
-  assert.deepEqual(body.meta.pagination, {
-    cursor: 0,
-    limit: 2,
-    nextCursor: "2",
-    total: 15,
-  });
-  assertMeta(body.meta, requestId);
-});
-
-test("mock API exposes and updates matching preferences as a non-persistent mock", async (t) => {
-  await t.test("gets the current preferences", async () => {
-    const requestId = "matching-preferences-get-test";
-    const response = await fetchApp("/api/matching/preferences", {
-      headers: { "x-request-id": requestId },
-    });
-
-    assert.equal(response.status, 200);
-    assertCommonApiHeaders(response, requestId);
-
-    const body = await response.json();
-    assert.deepEqual(Object.keys(body.data).sort(), [
-      "nextRefreshAt",
-      "persisted",
-      "preferences",
-    ]);
-    assert.deepEqual(Object.keys(body.data.preferences).sort(), [
-      "ageMax",
-      "ageMin",
-      "availability",
-      "intents",
-      "interests",
-      "onlineOnly",
-      "partnerGender",
-      "partnerLevel",
-      "preferredCountries",
-      "targetLanguages",
-      "verifiedOnly",
-    ]);
-    assertNonEmptyStringArray(
-      body.data.preferences.targetLanguages,
-      "preferences.targetLanguages",
-    );
-    assert.ok(Array.isArray(body.data.preferences.preferredCountries));
-    assert.ok(Array.isArray(body.data.preferences.interests));
-    assert.ok(Array.isArray(body.data.preferences.availability));
-    assert.ok(
-      body.data.preferences.availability.every((item) =>
-        /^(?:weekday|weekend)-(?:morning|evening)$/.test(item),
-      ),
-    );
-    assert.match(
-      body.data.preferences.partnerLevel,
-      /^(?:any|beginner|intermediate|advanced)$/,
-    );
-    assert.equal(typeof body.data.preferences.onlineOnly, "boolean");
-    assert.equal(body.data.persisted, false);
-    assert.ok(Number.isFinite(Date.parse(body.data.nextRefreshAt)));
-    assertMeta(body.meta, requestId);
-  });
-
-  await t.test("returns normalized preferences after an update", async () => {
-    const requestId = "matching-preferences-post-test";
-    const preferences = {
-      targetLanguages: ["en", "ja"],
-      preferredCountries: ["US", "JP"],
-      interests: ["travel", "music"],
-      availability: ["weekday-evening"],
-      partnerLevel: "intermediate",
-      onlineOnly: true,
-      partnerGender: "same",
-      ageMin: 24,
-      ageMax: 36,
-      verifiedOnly: true,
-      intents: ["language-exchange", "friendship"],
-    };
-    const response = await fetchApp("/api/matching/preferences", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": requestId,
-      },
-      body: JSON.stringify(preferences),
-    });
-
-    assert.equal(response.status, 200);
-    assertCommonApiHeaders(response, requestId);
-
-    const body = await response.json();
-    assert.deepEqual(body.data.preferences, preferences);
-    assert.equal(body.data.persisted, false);
-    assert.ok(Number.isFinite(Date.parse(body.data.nextRefreshAt)));
-    assertMeta(body.meta, requestId);
-  });
-
-  await t.test("rejects an empty target language selection", async () => {
-    const requestId = "matching-preferences-validation-test";
-    const response = await fetchApp("/api/matching/preferences", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": requestId,
-      },
-      body: JSON.stringify({ targetLanguages: [] }),
-    });
-
-    assert.equal(response.status, 422);
-    assertCommonApiHeaders(response, requestId);
-    const body = await response.json();
-    assert.equal(body.error.code, "VALIDATION_ERROR");
-    assert.equal(body.error.details.field, "targetLanguages");
-    assertMeta(body.meta, requestId);
-  });
-});
-
-test("mock API returns 12 deterministic dated matches and rejects invalid dates", async (t) => {
-  const conditions =
-    "targetLanguages=en,ja&preferredCountries=US,JP,CA&interests=design,coffee,travel&availability=weekday-evening,weekend-morning&partnerLevel=any&onlineOnly=false";
-  const dailyPath = (date) =>
-    `/api/matching/daily?date=${date}&${conditions}`;
-
-  await t.test("returns the same explained partners for the same date and conditions", async () => {
-    const requestIds = ["daily-matching-first-test", "daily-matching-repeat-test"];
-    const responses = await Promise.all(
-      requestIds.map((requestId) =>
-        fetchApp(dailyPath("2026-08-11"), {
-          headers: { "x-request-id": requestId },
-        }),
-      ),
-    );
-
-    const bodies = [];
-    for (const [index, response] of responses.entries()) {
-      assert.equal(response.status, 200);
-      assertCommonApiHeaders(response, requestIds[index]);
-      const body = await response.json();
-      assert.equal(body.data.date, "2026-08-11");
-      assert.equal(body.data.recommendations.length, 12);
-      assert.equal(new Set(body.data.recommendations.map((item) => item.partner.id)).size, 12);
-      for (const recommendation of body.data.recommendations) {
-        assert.equal(typeof recommendation.partner?.id, "string");
-        assert.equal(typeof recommendation.partner?.name, "string");
-        assert.equal(typeof recommendation.score, "number");
-        assert.ok(recommendation.score >= 0 && recommendation.score <= 100);
-        assert.equal(typeof recommendation.meetsAllPreferences, "boolean");
-        assertNonEmptyStringArray(
-          recommendation.matchReasons,
-          "recommendation.matchReasons",
-        );
-        assert.equal(typeof recommendation.icebreaker, "string");
-        assert.ok(recommendation.icebreaker.length > 0);
-      }
-      assert.equal(body.data.discovery.includedToday, 12);
-      assert.equal(body.data.discovery.additionalViewsAvailable, false);
-      assert.equal(typeof body.data.preferencesApplied, "object");
-      assertNonEmptyStringArray(
-        body.data.preferencesApplied.targetLanguages,
-        "preferencesApplied.targetLanguages",
-      );
-      assert.ok(Array.isArray(body.data.preferencesApplied.availability));
-      assert.ok(Number.isFinite(Date.parse(body.data.nextRefreshAt)));
-      assertMeta(body.meta, requestIds[index]);
-      bodies.push(body);
-    }
-
-    assert.deepEqual(
-      bodies[1].data.recommendations,
-      bodies[0].data.recommendations,
-    );
-    assert.deepEqual(
-      bodies[1].data.preferencesApplied,
-      bodies[0].data.preferencesApplied,
-    );
-  });
-
-  await t.test("rotates the deterministic partner across dates when candidates exist", async () => {
-    const dates = [
-      "2026-08-11",
-      "2026-08-12",
-      "2026-08-13",
-      "2026-08-14",
-      "2026-08-15",
-      "2026-08-16",
-      "2026-08-17",
-      "2026-08-18",
-    ];
-    const partnerIds = [];
-
-    for (const [index, date] of dates.entries()) {
-      const requestId = `daily-matching-rotation-${index}`;
-      const response = await fetchApp(dailyPath(date), {
-        headers: { "x-request-id": requestId },
-      });
-      assert.equal(response.status, 200);
-      assertCommonApiHeaders(response, requestId);
-      const body = await response.json();
-      assert.equal(body.data.date, date);
-      assert.equal(body.data.recommendations.length, 12);
-      partnerIds.push(body.data.recommendations.map((item) => item.partner.id).join(","));
-      assertMeta(body.meta, requestId);
-    }
-
-    assert.ok(
-      new Set(partnerIds).size > 1,
-      "different dates should rotate among eligible deterministic partners",
-    );
-  });
-
-  await t.test("rejects a non-existent calendar date", async () => {
-    const requestId = "daily-matching-validation-test";
-    const response = await fetchApp("/api/matching/daily?date=2026-02-30", {
-      headers: { "x-request-id": requestId },
-    });
-
-    assert.equal(response.status, 400);
-    assertCommonApiHeaders(response, requestId);
-    const body = await response.json();
-    assert.equal(body.error.code, "INVALID_DATE");
-    assertMeta(body.meta, requestId);
-  });
-
-  await t.test("defaults an omitted date to the current Seoul calendar day", async () => {
-    const requestId = "daily-matching-default-date-test";
-    const response = await fetchApp(`/api/matching/daily?${conditions}`, {
-      headers: { "x-request-id": requestId },
-    });
-    assert.equal(response.status, 200);
-    assertCommonApiHeaders(response, requestId);
-    const body = await response.json();
-    assert.match(body.data.date, /^\d{4}-\d{2}-\d{2}$/);
-    assert.equal(body.data.recommendations.length, 12);
-    assert.deepEqual(body.data.discovery.hardConstraints, ["targetLanguages"]);
-    assert.ok(
-      body.data.recommendations.every((item) =>
-        item.partner.nativeLanguages.some((language) => ["en", "ja"].includes(language)),
-      ),
-    );
-    assertMeta(body.meta, requestId);
-  });
-});
-
-test("mock API coaches a conversation and validates its stage", async (t) => {
-  await t.test("returns topics, openers, and follow-up questions", async () => {
-    const requestId = "conversation-support-post-test";
-    const response = await fetchApp("/api/conversation-support", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": requestId,
-      },
-      body: JSON.stringify({
-        partnerId: "user-maya",
-        stage: "first-message",
-        draft: "Nice to meet you. I like design too!",
-      }),
-    });
-
-    assert.equal(response.status, 200);
-    assertCommonApiHeaders(response, requestId);
-    const body = await response.json();
-    assert.equal(body.data.partner.id, "user-maya");
-    assert.equal(body.data.stage, "first-message");
-    assert.equal(body.data.topics.length, 3);
-    assert.equal(body.data.suggestedOpeners.length, 3);
-    assert.equal(body.data.followUpQuestions.length, 3);
-    assertNonEmptyStringArray(body.data.topics, "conversation-support.topics");
-    assertNonEmptyStringArray(
-      body.data.suggestedOpeners,
-      "conversation-support.suggestedOpeners",
-    );
-    assertNonEmptyStringArray(
-      body.data.followUpQuestions,
-      "conversation-support.followUpQuestions",
-    );
-    assert.equal(typeof body.data.improvedDraft, "string");
-    assert.ok(body.data.improvedDraft.length > 0);
-    if (body.data.translation !== undefined) {
-      assert.equal(typeof body.data.translation.language, "string");
-      assert.equal(typeof body.data.translation.text, "string");
-    }
-    assert.equal(typeof body.data.tip, "string");
-    assert.ok(body.data.tip.length > 0);
-    assertMeta(body.meta, requestId);
-  });
-
-  await t.test("rejects an unknown conversation stage", async () => {
-    const requestId = "conversation-support-validation-test";
-    const response = await fetchApp("/api/conversation-support", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": requestId,
-      },
-      body: JSON.stringify({
-        partnerId: "user-maya",
-        stage: "awkward-silence",
-      }),
-    });
-
-    assert.equal(response.status, 422);
-    assertCommonApiHeaders(response, requestId);
-    const body = await response.json();
-    assert.equal(body.error.code, "VALIDATION_ERROR");
-    assert.equal(body.error.details.field, "stage");
-    assertMeta(body.meta, requestId);
-  });
-});
-
-test("mock API creates a normalized chat message without persistence", async () => {
-  const requestId = "message-contract-test";
-  const response = await fetchApp("/api/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-request-id": requestId,
-    },
-    body: JSON.stringify({
-      conversationId: "conversation-maya",
-      text: "  Nice to meet you!  ",
-    }),
-  });
-
-  assert.equal(response.status, 201);
-  assertCommonApiHeaders(response, requestId);
-
-  const body = await response.json();
-  assert.equal(body.data.conversationId, "conversation-maya");
-  assert.match(body.data.message.id, /^msg-[0-9a-f-]{36}$/i);
-  assert.deepEqual(
-    {
-      senderId: body.data.message.senderId,
-      type: body.data.message.type,
-      text: body.data.message.text,
-      status: body.data.message.status,
-    },
-    {
-      senderId: "user-me",
-      type: "text",
-      text: "Nice to meet you!",
-      status: "sent",
-    },
-  );
-  assert.ok(Number.isFinite(Date.parse(body.data.message.sentAt)));
-  assertMeta(body.meta, requestId);
-});
-
-test("mock API keeps translation available as an unmetered free capability", async () => {
-  const requestId = "free-translation-contract-test";
-  const response = await fetchApp("/api/translate", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-request-id": requestId },
-    body: JSON.stringify({ text: "안녕하세요", targetLanguage: "en" }),
-  });
-
-  assert.equal(response.status, 200);
-  assertCommonApiHeaders(response, requestId);
-  const body = await response.json();
-  assert.equal(body.data.translatedText, "Hello");
-  assert.deepEqual(
-    {
-      tier: body.data.entitlement.tier,
-      charged: body.data.entitlement.charged,
-      metered: body.data.entitlement.metered,
-      paywall: body.data.entitlement.paywall,
-    },
-    { tier: "free", charged: false, metered: false, paywall: false },
-  );
-  assertMeta(body.meta, requestId);
-});
-
-test("mock API exposes DM privacy, request inbox actions, and reinstall-safe sync policy", async (t) => {
-  await t.test("reads and updates who may message", async () => {
-    const update = await fetchApp("/api/dm/privacy", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-request-id": "dm-privacy-test" },
-      body: JSON.stringify({ whoCanMessage: "matches", routeOthersToRequests: true }),
-    });
-    assert.equal(update.status, 200);
-    const body = await update.json();
-    assert.equal(body.data.settings.whoCanMessage, "matches");
-    assert.equal(body.data.settings.routeOthersToRequests, true);
-    assert.equal(body.data.persisted, false);
-  });
-
-  await t.test("lists pending requests and accepts one explicitly", async () => {
-    const list = await fetchApp("/api/dm/requests?status=pending", {
-      headers: { "x-request-id": "dm-requests-list-test" },
-    });
-    assert.equal(list.status, 200);
-    const listBody = await list.json();
-    assert.ok(listBody.data.length >= 2);
-    assert.ok(listBody.data.some((item) => item.risk.level === "high"));
-
-    const accepted = await fetchApp("/api/dm/requests", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-request-id": "dm-request-action-test" },
-      body: JSON.stringify({ requestId: "dm-request-chloe", action: "accept" }),
-    });
-    assert.equal(accepted.status, 200);
-    const acceptedBody = await accepted.json();
-    assert.equal(acceptedBody.data.request.status, "accepted");
-    assert.equal(acceptedBody.data.conversationCreated, true);
-  });
-
-  await t.test("documents automatic server sync and reinstall recovery", async () => {
-    const response = await fetchApp("/api/dm/sync", {
-      headers: { "x-request-id": "dm-sync-test" },
-    });
-    assert.equal(response.status, 200);
-    const body = await response.json();
-    assert.equal(body.data.storage, "server");
-    assert.equal(body.data.automaticSync, true);
-    assert.equal(body.data.reinstallRecovery, true);
-  });
-});
-
-test("mock API exposes activation verification and re-signup protection state", async () => {
-  const requestId = "verification-contract-test";
-  const response = await fetchApp("/api/account/verification", {
-    headers: { "x-request-id": requestId },
-  });
-  assert.equal(response.status, 200);
-  assertCommonApiHeaders(response, requestId);
-  const body = await response.json();
-  assert.equal(body.data.accountStatus, "active");
-  assert.equal(body.data.assuranceLevel, "phone");
-  assert.deepEqual(body.data.requiredForActivation, ["email", "phone"]);
-  assert.equal(body.data.reSignupProtection.enabled, true);
-  assertMeta(body.meta, requestId);
-});
-
-test("mock API accepts a safety report with the documented receipt", async () => {
-  const requestId = "report-contract-test";
-  const response = await fetchApp("/api/reports", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-request-id": requestId,
-    },
-    body: JSON.stringify({
-      targetType: "user",
-      targetId: "user-example",
-      reason: "spam",
-      details: "  반복 홍보 메시지  ",
-    }),
-  });
-
-  assert.equal(response.status, 201);
-  assertCommonApiHeaders(response, requestId);
-
-  const body = await response.json();
-  assert.match(body.data.id, /^report-[0-9a-f-]{36}$/i);
-  assert.equal(body.data.targetType, "user");
-  assert.equal(body.data.targetId, "user-example");
-  assert.equal(body.data.reason, "spam");
-  assert.equal(body.data.details, "반복 홍보 메시지");
-  assert.equal(body.data.status, "received");
-  assert.equal(body.data.reporterAccountStatus, "active");
-  assert.ok(Number.isFinite(Date.parse(body.data.nextUpdateBy)));
-  assert.match(body.data.safetyMessage, /신고가 접수되었습니다/);
-  assertMeta(body.meta, requestId);
-
-  const statusRequestId = "report-status-contract-test";
-  const statusResponse = await fetchApp(`/api/reports/${body.data.id}`, {
-    headers: { "x-request-id": statusRequestId },
-  });
-  assert.equal(statusResponse.status, 200);
-  assertCommonApiHeaders(statusResponse, statusRequestId);
-  const statusBody = await statusResponse.json();
-  assert.equal(statusBody.data.id, body.data.id);
-  assert.equal(statusBody.data.reporterAccountStatus, "active");
-  assert.equal(statusBody.data.statusHistory[0].status, "received");
-  assertMeta(statusBody.meta, statusRequestId);
-});
-
-test("mock API returns structured errors for invalid routes, methods, and payloads", async (t) => {
-  await t.test("unknown route", async () => {
-    const requestId = "not-found-contract-test";
-    const response = await fetchApp("/api/not-a-route", {
-      headers: { "x-request-id": requestId },
-    });
-    assert.equal(response.status, 404);
-    assertCommonApiHeaders(response, requestId);
-    const body = await response.json();
-    assert.equal(body.error.code, "NOT_FOUND");
-    assert.match(body.error.message, /API 경로를 찾을 수 없습니다/);
-    assertMeta(body.meta, requestId);
-  });
-
-  await t.test("unsupported method", async () => {
-    const requestId = "method-contract-test";
-    const response = await fetchApp("/api/partners", {
-      method: "POST",
-      headers: { "x-request-id": requestId },
-    });
-    assert.equal(response.status, 405);
-    assert.equal(response.headers.get("allow"), "GET");
-    assertCommonApiHeaders(response, requestId);
-    const body = await response.json();
-    assert.equal(body.error.code, "METHOD_NOT_ALLOWED");
-    assert.deepEqual(body.error.details, { allowed: ["GET"] });
-    assertMeta(body.meta, requestId);
-  });
-
-  await t.test("invalid message payload", async () => {
-    const requestId = "validation-contract-test";
-    const response = await fetchApp("/api/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": requestId,
-      },
-      body: JSON.stringify({ conversationId: "conversation-maya", text: "" }),
-    });
-    assert.equal(response.status, 422);
-    assertCommonApiHeaders(response, requestId);
-    const body = await response.json();
-    assert.equal(body.error.code, "VALIDATION_ERROR");
-    assert.deepEqual(body.error.details, { field: "text" });
-    assertMeta(body.meta, requestId);
-  });
-});
-
-test("mock API answers CORS preflight requests without a response body", async () => {
-  const requestId = "cors-contract-test";
-  const response = await fetchApp("/api/messages", {
-    method: "OPTIONS",
-    headers: {
-      origin: "https://mobile.lingoloop.example",
-      "access-control-request-method": "POST",
-      "access-control-request-headers": "content-type,x-request-id",
-      "x-request-id": requestId,
-    },
-  });
-
-  assert.equal(response.status, 204);
-  assert.equal(await response.text(), "");
-  assert.equal(response.headers.get("access-control-allow-origin"), "*");
-  assert.equal(
-    response.headers.get("access-control-allow-methods"),
-    "GET, POST, OPTIONS",
-  );
-  assert.equal(
-    response.headers.get("access-control-allow-headers"),
-    "Content-Type, Authorization, X-Request-ID",
-  );
-  assert.equal(
-    response.headers.get("access-control-expose-headers"),
-    "X-Request-ID",
-  );
-  assert.equal(response.headers.get("access-control-max-age"), "86400");
-  assert.equal(response.headers.get("x-request-id"), requestId);
+  assert.match(backend, /OPENAI_MODEL = process\.env\.OPENAI_MODEL \|\| "gpt-5-nano"/);
+  assert.match(backend, /AI_NOT_CONFIGURED/);
+  assert.match(backend, /store: false/);
+  assert.match(backend, /AI_TRANSLATION_DAILY_LIMIT/);
+  assert.match(backend, /AI_SUPPORT_DAILY_LIMIT/);
+  assert.match(backend, /collection\("aiUsage"\)/);
+  assert.match(backend, /audioTransport: "not-configured"/);
+  assert.match(productionApp, /실시간 음성은 아직 연결되지 않았습니다/);
+  assert.doesNotMatch(backend, /handleMockApi|translationFree|mock translation/i);
 });

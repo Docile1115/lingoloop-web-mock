@@ -1,10 +1,11 @@
-/** LingoLoop Cloudflare Worker entry point with same-origin mock API routing. */
+/** LingoLoop entry point with a same-origin proxy to the persistent Cloud Run API. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { handleMockApi } from "../mock-api/router";
 
 interface Env {
   ASSETS: Fetcher;
+  LINGOLOOP_API_URL?: string;
+  PROXY_SHARED_SECRET?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -19,6 +20,56 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
+function runtimeSetting(env: Env, key: "LINGOLOOP_API_URL" | "PROXY_SHARED_SECRET"): string | undefined {
+  // Vinext's Node production adapter does not pass a Worker bindings object.
+  // Keep Worker bindings support, but fall back to Cloud Run process env safely.
+  const binding = env?.[key];
+  if (binding) return binding;
+  return process.env[key];
+}
+
+async function proxyApi(request: Request, env: Env): Promise<Response> {
+  const apiUrl = runtimeSetting(env, "LINGOLOOP_API_URL");
+  const proxySecret = runtimeSetting(env, "PROXY_SHARED_SECRET");
+  if (!apiUrl || !proxySecret) {
+    return Response.json(
+      {
+        error: {
+          code: "API_NOT_CONFIGURED",
+          message: "운영 API 연결이 구성되지 않았습니다.",
+        },
+        meta: {
+          requestId: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          mock: false,
+          persistent: false,
+        },
+      },
+      { status: 503, headers: { "cache-control": "no-store" } },
+    );
+  }
+
+  const sourceUrl = new URL(request.url);
+  const upstreamUrl = new URL(sourceUrl.pathname + sourceUrl.search, apiUrl.endsWith("/") ? apiUrl : `${apiUrl}/`);
+  const headers = new Headers(request.headers);
+  headers.set("x-lingoloop-proxy", proxySecret);
+  headers.set("x-forwarded-host", sourceUrl.host);
+  headers.set("x-forwarded-proto", sourceUrl.protocol.replace(":", ""));
+  headers.delete("host");
+  headers.delete("content-length");
+
+  const method = request.method.toUpperCase();
+  // Node's fetch requires `duplex` for a streamed Request body. The API accepts
+  // small JSON payloads only, so buffering here keeps the adapter portable.
+  const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
+  return fetch(upstreamUrl, {
+    method,
+    headers,
+    body,
+    redirect: "manual",
+  });
+}
+
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).
 // To route SVGs through the optimizer (with security headers), set
@@ -29,8 +80,9 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    const mockApiResponse = await handleMockApi(request);
-    if (mockApiResponse) return mockApiResponse;
+    if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+      return proxyApi(request, env);
+    }
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
