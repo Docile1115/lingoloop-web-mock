@@ -22,7 +22,7 @@ LingoLoop는 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화�
 | DM 정책 | 수신 범위 설정 저장, 매칭·좋아요·팔로우 관계 확인, 허용되지 않은 DM의 요청함 분기 또는 차단 |
 | 보이스룸 | 방 제목·언어·참여자 수 등 룸 메타데이터 생성·조회 |
 | 신고 | 신고 내용과 처리 상태를 Firestore에 접수·조회 |
-| AI 지원 | `OPENAI_API_KEY`가 구성된 환경에서 GPT-5 nano 번역·대화 지원 |
+| AI 지원 | Gemini 2.5 Flash-Lite 번역, 메시지별 번역 보기, 대화 주제·추천 문장 지원 |
 
 API 성공 응답에는 다음 메타데이터가 포함됩니다.
 
@@ -45,7 +45,7 @@ API 성공 응답에는 다음 메타데이터가 포함됩니다.
 - 운영자용 신고 심사 화면, 자동 제재, 이의제기·긴급 대응 워크플로
 - WebSocket 기반 실시간 전달. 현재 대화 화면은 주기적으로 새 메시지를 조회
 - 정교한 스팸·스캠 탐지, 기기 지문, 다단계 rate limit과 콘텐츠 모더레이션
-- `OPENAI_API_KEY`가 없는 환경의 번역·대화 지원. 이 경우 API는 가짜 결과 대신 `503`을 반환
+- Gemini 인증 키가 없는 개발 환경에서는 번역·대화 지원 API가 가짜 결과 대신 `503`을 반환
 
 즉, 계정·프로필·게시물·대화·매칭 설정은 실제 저장되지만 “앱 출시 준비 완료”를 뜻하지는 않습니다. 개인정보 처리방침, 이용약관, 데이터 보존·삭제 정책, CS 운영, 보안 점검과 스토어 심사는 별도로 완료해야 합니다.
 
@@ -63,25 +63,24 @@ flowchart LR
         ApiRun["Cloud Run · lingoloop-api\nNode.js/Express"]
         Identity["Identity Platform\n이메일 계정"]
         Firestore[("Firestore Native\n운영 데이터")]
+        Gemini["Vertex AI Gemini\n2.5 Flash-Lite"]
         Secrets["Secret Manager"]
         Logs["Cloud Logging"]
     end
-
-    OpenAI["OpenAI Responses API\nGPT-5 nano · 선택 연동"]
 
     Web -->|"HTTPS"| WebRun
     Native -.->|"향후 HTTPS API"| ApiRun
     WebRun -->|"same-origin /api/*\n내부 공유 비밀"| ApiRun
     ApiRun --> Identity
     ApiRun --> Firestore
-    ApiRun -.->|"키가 구성된 경우만"| OpenAI
+    ApiRun -->|"서비스 계정 결속 인증 키\nVertex AI API"| Gemini
     Secrets --> WebRun
     Secrets --> ApiRun
     WebRun --> Logs
     ApiRun --> Logs
 ```
 
-브라우저는 Firestore나 Identity Platform을 직접 호출하지 않습니다. 모든 데이터 요청은 웹 서비스의 same-origin `/api/*` 프록시를 거쳐 API 서비스로 전달됩니다. API 서비스만 전용 서비스 계정으로 Firestore를 사용하며, 브라우저에는 Identity API 키·OpenAI 키·프록시 공유 비밀을 노출하지 않습니다.
+브라우저는 Firestore나 Identity Platform을 직접 호출하지 않습니다. 모든 데이터 요청은 웹 서비스의 same-origin `/api/*` 프록시를 거쳐 API 서비스로 전달됩니다. API 서비스만 전용 서비스 계정으로 Firestore를 사용하며, 브라우저에는 Identity API 키·Gemini 키·프록시 공유 비밀을 노출하지 않습니다.
 
 ## 데이터 모델
 
@@ -111,6 +110,8 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 - 룸 문서는 음성 연결 자체가 아니라 목록과 참가 상태를 위한 메타데이터입니다.
 - 무료 베타 AI 사용량은 사용자·서울 날짜별로 저장하며 기본 한도는 번역 100회, 대화 지원 30회입니다.
 
+운영 모델은 Google이 안정 버전 중 가장 비용 효율적인 모델로 안내하는 `gemini-2.5-flash-lite`입니다. 표준 유료 요금은 2026-08 기준 텍스트 입력 100만 토큰당 USD 0.10, 출력 100만 토큰당 USD 0.40이며, 경량 번역·추천에는 사고 토큰이 발생하지 않도록 `thinkingBudget: 0`을 사용합니다. Vertex AI는 이 모델의 종료일을 **2026-10-20**으로 안내하므로 그 전에 다음 Flash-Lite 안정 모델로 전환해야 합니다. 배포 전 [공식 가격표](https://cloud.google.com/vertex-ai/generative-ai/pricing)와 [모델 수명 주기](https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash-lite)를 다시 확인합니다.
+
 ## 인증과 보안 경계
 
 - 회원가입·로그인은 서버가 Identity Platform REST API와 통신합니다.
@@ -118,7 +119,8 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 - `/api/*`는 웹 프록시의 `x-lingoloop-proxy` 공유 비밀을 요구합니다. `/healthz/`만 인프라 상태 확인을 위해 공개합니다.
 - 상태를 바꾸는 요청은 허용된 `APP_ORIGIN`을 검사하며 JSON 본문은 64KB로 제한합니다.
 - API 키와 공유 비밀은 이미지나 Git에 넣지 않고 Secret Manager에서 런타임에 주입합니다.
-- OpenAI 호출은 `store: false`로 요청하며 안전 식별자는 원문 UID 대신 해시를 사용합니다.
+- Gemini 인증 키는 API 런타임 서비스 계정에 결속되고 Vertex AI API로 제한하며, Secret Manager에서 API 서비스에만 주입합니다.
+- LingoLoop는 AI 요청·응답을 별도 컬렉션에 저장하지 않고 일일 사용 횟수만 기록합니다. 사용자가 보낸 메시지는 기존 대화 보존 정책에 따라 Firestore에 저장되며, Gemini 측 데이터 처리는 선택한 유료 API 약관을 따릅니다.
 - Cloud Run API 서비스 계정에는 필요한 최소 Firestore·Identity 권한만 부여해야 합니다.
 
 공유 비밀은 브라우저 사용자를 인증하는 수단이 아닙니다. 사용자 권한 검사는 반드시 검증된 세션 쿠키와 리소스 소유권으로 수행합니다.
@@ -186,8 +188,8 @@ $env:APP_ORIGIN = "http://localhost:5174"
 $env:IDENTITY_API_KEY = "your-identity-platform-api-key"
 $env:PROXY_SHARED_SECRET = "a-long-random-secret"
 $env:COOKIE_SECURE = "false"
-$env:OPENAI_MODEL = "gpt-5-nano"
-# 선택: $env:OPENAI_API_KEY = "..."
+$env:GEMINI_MODEL = "gemini-2.5-flash-lite"
+# 선택: $env:GEMINI_API_KEY = "..."
 
 npm --prefix backend start
 ```
@@ -215,8 +217,9 @@ npm run dev
 | `IDENTITY_API_KEY` | 예 | Identity Platform REST API 키. Secret Manager로 주입 |
 | `PROXY_SHARED_SECRET` | 예 | 웹 프록시와 API 사이 공유 비밀 |
 | `COOKIE_SECURE` | 운영 예 | 운영은 기본값 `true`, 로컬 HTTP만 `false` |
-| `OPENAI_API_KEY` | 아니요 | 번역·대화 지원을 사용할 때만 주입 |
-| `OPENAI_MODEL` | 아니요 | 기본값 `gpt-5-nano` |
+| `GEMINI_API_KEY` | 아니요 | 서비스 계정 결속 Gemini 인증 키. Secret Manager로 API 서비스에만 주입 |
+| `GEMINI_MODEL` | 아니요 | 기본값 `gemini-2.5-flash-lite` |
+| `GEMINI_LOCATION` | 아니요 | Vertex AI 위치. 기본값 `global` |
 | `AI_TRANSLATION_DAILY_LIMIT` | 아니요 | 사용자당 번역 일일 한도. 기본값 `100` |
 | `AI_SUPPORT_DAILY_LIMIT` | 아니요 | 사용자당 대화 지원 일일 한도. 기본값 `30` |
 | `PORT` | 아니요 | Cloud Run이 주입하며 기본값 `8080` |
@@ -240,8 +243,9 @@ npm run dev
 1. Firestore Native `(default)` 데이터베이스
 2. Identity Platform 이메일·비밀번호 로그인
 3. 제한된 Identity Platform API 키
-4. Secret Manager의 Identity API 키와 프록시 공유 비밀
-5. 웹·API 전용 서비스 계정과 최소 IAM 권한
+4. Vertex AI API와 API 런타임 서비스 계정에 결속된 Gemini 인증 키
+5. Secret Manager의 Identity API 키, Gemini 키와 프록시 공유 비밀
+6. 웹·API 전용 서비스 계정과 최소 IAM 권한
 
 API를 먼저 배포한 뒤 반환된 URL을 웹의 `LINGOLOOP_API_URL`에 설정합니다. 비밀은 `--set-env-vars`가 아니라 Cloud Run의 Secret Manager 참조로 연결합니다.
 
@@ -251,8 +255,8 @@ gcloud run deploy lingoloop-api `
   --region asia-northeast1 `
   --source backend `
   --service-account lingoloop-api-runtime@YOUR_PROJECT.iam.gserviceaccount.com `
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=YOUR_PROJECT,APP_ORIGIN=https://YOUR_WEB_URL,COOKIE_SECURE=true,OPENAI_MODEL=gpt-5-nano" `
-  --set-secrets "IDENTITY_API_KEY=lingoloop-identity-api-key:latest,PROXY_SHARED_SECRET=lingoloop-proxy-shared-secret:latest" `
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=YOUR_PROJECT,APP_ORIGIN=https://YOUR_WEB_URL,COOKIE_SECURE=true,GEMINI_MODEL=gemini-2.5-flash-lite,GEMINI_LOCATION=global" `
+  --set-secrets "IDENTITY_API_KEY=lingoloop-identity-api-key:1,PROXY_SHARED_SECRET=lingoloop-proxy-shared-secret:1,GEMINI_API_KEY=lingoloop-gemini-api-key:1" `
   --allow-unauthenticated
 ```
 
@@ -294,7 +298,8 @@ node --check backend/server.mjs
 app/                     # React UI와 운영 API 클라이언트
 backend/
   Dockerfile             # API Cloud Run 이미지
-  server.mjs             # 인증·Firestore·OpenAI API
+  gemini.mjs             # Gemini 호출·응답 경계
+  server.mjs             # 인증·Firestore·운영 API
 worker/index.ts           # 웹 요청과 same-origin API 프록시
 public/                   # 정적 자산
 tests/                    # 렌더링·계약 검사
@@ -307,7 +312,7 @@ mock-api/                 # 레거시 목업 참고 코드(운영 미사용)
 - 개인정보 처리방침, 국외 이전, 메시지 보존 기간과 계정 삭제 처리
 - 신고 증거 접근 권한, 운영자 감사 로그, 사람의 최종 제재 원칙
 - 백업·PITR·복구 훈련과 데이터 삭제 보호
-- 예산 알림, Cloud Run 최대 인스턴스, OpenAI 사용량 한도
+- 예산 알림, Cloud Run 최대 인스턴스, Gemini 사용량·월 지출 한도
 - 이메일 인증 강제 시점, 전화번호 인증 도입 범위와 재가입 방지 정책
 - 부하·침투·접근성 테스트 및 앱스토어 정책 검토
 

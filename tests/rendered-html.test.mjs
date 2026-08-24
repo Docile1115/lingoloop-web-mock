@@ -158,22 +158,30 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
   }
 });
 
-test("AI와 음성 기능은 구성되지 않은 상태를 실제 기능처럼 위장하지 않는다", async () => {
-  const [backend, productionApp] = await Promise.all([
+test("Gemini AI는 운영 API와 실제 대화 UI에 연결되고 음성 미구성 상태는 정직하게 표시한다", async () => {
+  const [backend, productionApp, backendDockerfile] = await Promise.all([
     readFile(new URL("../backend/server.mjs", import.meta.url), "utf8"),
     readFile(
       new URL("../app/components/ProductionLingoLoopApp.tsx", import.meta.url),
       "utf8",
     ),
+    readFile(new URL("../backend/Dockerfile", import.meta.url), "utf8"),
   ]);
 
-  assert.match(backend, /OPENAI_MODEL = process\.env\.OPENAI_MODEL \|\| "gpt-5-nano"/);
+  assert.match(backend, /GEMINI_MODEL = process\.env\.GEMINI_MODEL \|\| "gemini-2\.5-flash-lite"/);
   assert.match(backend, /AI_NOT_CONFIGURED/);
-  assert.match(backend, /store: false/);
+  assert.match(backend, /generateGeminiContent/);
+  assert.match(backend, /aiplatform\.googleapis\.com/);
+  assert.match(backend, /google-vertex-ai/);
+  assert.match(backendDockerfile, /gemini\.mjs/);
+  assert.match(backend, /responseJsonSchema/);
   assert.match(backend, /AI_TRANSLATION_DAILY_LIMIT/);
   assert.match(backend, /AI_SUPPORT_DAILY_LIMIT/);
   assert.match(backend, /collection\("aiUsage"\)/);
   assert.match(backend, /audioTransport: "not-configured"/);
+  assert.match(productionApp, /"\/api\/translate"/);
+  assert.match(productionApp, /"\/api\/conversation-support"/);
+  assert.match(productionApp, /AI 대화 도움/);
   assert.match(productionApp, /실시간 음성은 아직 연결되지 않았습니다/);
-  assert.doesNotMatch(backend, /handleMockApi|translationFree|mock translation/i);
+  assert.doesNotMatch(backend, /api\.openai\.com|OPENAI_API_KEY|gpt-5-nano|handleMockApi|translationFree|mock translation/i);
 });

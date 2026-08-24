@@ -3,13 +3,19 @@ import express from "express";
 import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { extractGeminiText, GeminiProviderError, generateGeminiContent } from "./gemini.mjs";
 import { decideDmRoute } from "./policy.mjs";
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
 const IDENTITY_API_KEY = process.env.IDENTITY_API_KEY;
 const PROXY_SHARED_SECRET = process.env.PROXY_SHARED_SECRET;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5-nano";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+const GEMINI_LOCATION = process.env.GEMINI_LOCATION || "global";
+const GEMINI_API_BASE_URL =
+  process.env.GEMINI_API_BASE_URL ||
+  `https://aiplatform.googleapis.com/v1/projects/${encodeURIComponent(PROJECT_ID)}/locations/${encodeURIComponent(GEMINI_LOCATION)}/publishers/google/models`;
+const GEMINI_PROVIDER = "google-vertex-ai";
 const AI_TRANSLATION_DAILY_LIMIT = Number(process.env.AI_TRANSLATION_DAILY_LIMIT || 100);
 const AI_SUPPORT_DAILY_LIMIT = Number(process.env.AI_SUPPORT_DAILY_LIMIT || 30);
 const PORT = Number(process.env.PORT || 8080);
@@ -524,16 +530,6 @@ async function conversationView(conversation, uid, includeMessages = false) {
   };
 }
 
-function extractOpenAIText(body) {
-  if (typeof body.output_text === "string") return body.output_text;
-  for (const item of body.output || []) {
-    for (const content of item.content || []) {
-      if (content.type === "output_text" && typeof content.text === "string") return content.text;
-    }
-  }
-  throw new ApiError(502, "AI_EMPTY_RESPONSE", "AI 응답을 읽지 못했습니다.");
-}
-
 async function consumeDailyQuota(uid, feature, limit) {
   const date = todayInSeoul();
   const reference = db.collection("aiUsage").doc(uid).collection("days").doc(date);
@@ -567,36 +563,36 @@ async function consumeDailyQuota(uid, feature, limit) {
   });
 }
 
-async function openAIResponse(payload, uid, { feature, dailyLimit }) {
-  if (!OPENAI_API_KEY) {
-    throw new ApiError(503, "AI_NOT_CONFIGURED", "AI 기능에 필요한 OpenAI API 키가 아직 연결되지 않았습니다.");
+async function geminiResponse(payload, uid, { feature, dailyLimit }) {
+  if (!GEMINI_API_KEY) {
+    throw new ApiError(503, "AI_NOT_CONFIGURED", "AI 기능에 필요한 Gemini API 키가 아직 연결되지 않았습니다.");
   }
   const quota = await consumeDailyQuota(uid, feature, dailyLimit);
-  let response;
   try {
-    response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        authorization: "Bearer " + OPENAI_API_KEY,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        store: false,
-        reasoning: { effort: "minimal" },
-        max_output_tokens: 800,
-        safety_identifier: crypto.createHash("sha256").update(uid).digest("hex"),
-        ...payload,
-      }),
-      signal: AbortSignal.timeout(45_000),
+    const body = await generateGeminiContent({
+      apiKey: GEMINI_API_KEY,
+      model: GEMINI_MODEL,
+      baseUrl: GEMINI_API_BASE_URL,
+      ...payload,
     });
-  } catch {
-    throw new ApiError(503, "AI_PROVIDER_UNAVAILABLE", "AI 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    return { body, quota };
+  } catch (error) {
+    if (error instanceof GeminiProviderError) {
+      throw new ApiError(error.status, error.code, error.message);
+    }
+    throw error;
   }
-  const body = await response.json().catch(() => ({}));
-  if (response.status === 429) throw new ApiError(429, "AI_PROVIDER_RATE_LIMITED", "AI 요청이 많습니다. 잠시 후 다시 시도해 주세요.");
-  if (!response.ok) throw new ApiError(502, "AI_PROVIDER_ERROR", "AI 요청을 처리하지 못했습니다.");
-  return { body, quota };
+}
+
+function geminiText(body) {
+  try {
+    return extractGeminiText(body);
+  } catch (error) {
+    if (error instanceof GeminiProviderError) {
+      throw new ApiError(error.status, error.code, error.message);
+    }
+    throw error;
+  }
 }
 
 const authAttempts = new Map();
@@ -678,7 +674,11 @@ app.get("/api/health", async (req, res) => {
     environment: "production",
     storage: "firestore",
     authentication: "identity-platform",
-    ai: OPENAI_API_KEY ? { configured: true, model: OPENAI_MODEL } : { configured: false, model: OPENAI_MODEL },
+    ai: {
+      configured: Boolean(GEMINI_API_KEY),
+      provider: GEMINI_PROVIDER,
+      model: GEMINI_MODEL,
+    },
   });
 });
 
@@ -796,7 +796,7 @@ app.get("/api/bootstrap", requireUser, async (req, res) => {
       persistentCommunity: true,
       persistentMessages: true,
       identityPlatform: true,
-      aiConfigured: Boolean(OPENAI_API_KEY),
+      aiConfigured: Boolean(GEMINI_API_KEY),
       realtimeVoice: false,
     },
   });
@@ -1378,15 +1378,20 @@ app.post("/api/translate", requireUser, async (req, res) => {
   const text = safeString(req.body?.text, "text", { min: 1, max: 2000 });
   const targetLanguage = safeString(req.body?.targetLanguage, "targetLanguage", { min: 2, max: 10 });
   const sourceLanguage = optionalString(req.body?.sourceLanguage, "sourceLanguage", 10) || "auto";
-  const { body: aiBody, quota } = await openAIResponse(
+  const { body: aiBody, quota } = await geminiResponse(
     {
       instructions: "Translate the user's text faithfully. Return only the translated text, without notes or quotation marks.",
       input: "Source language: " + sourceLanguage + "\nTarget language: " + targetLanguage + "\nText:\n" + text,
+      generationConfig: {
+        maxOutputTokens: 2048,
+        temperature: 0.1,
+        responseMimeType: "text/plain",
+      },
     },
     req.auth.uid,
     { feature: "translation", dailyLimit: AI_TRANSLATION_DAILY_LIMIT },
   );
-  const translatedText = extractOpenAIText(aiBody).trim();
+  const translatedText = geminiText(aiBody);
   return success(res, req, {
     sourceText: text,
     sourceLanguage,
@@ -1394,8 +1399,8 @@ app.post("/api/translate", requireUser, async (req, res) => {
     translatedText,
     alternatives: [],
     confidence: null,
-    provider: "openai",
-    model: OPENAI_MODEL,
+    provider: GEMINI_PROVIDER,
+    model: GEMINI_MODEL,
     entitlement: { tier: "free-beta", charged: false, metered: true, paywall: false, usage: quota },
   });
 });
@@ -1419,43 +1424,51 @@ app.post("/api/conversation-support", requireUser, async (req, res) => {
     },
     required: ["topics", "suggestedOpeners", "followUpQuestions", "improvedDraft", "tip"],
   };
-  const { body: aiBody, quota } = await openAIResponse(
+  const { body: aiBody, quota } = await geminiResponse(
     {
       instructions: "You support a safe language exchange conversation. Keep suggestions friendly, non-romantic, concise, and appropriate for the learner's level.",
       input: JSON.stringify({
         stage,
         draft,
         partner: {
-          name: partner.name,
           nativeLanguages: partner.nativeLanguages,
           learningLanguages: partner.learningLanguages,
           interests: partner.interests,
         },
       }),
-      text: {
-        format: {
-          type: "json_schema",
-          name: "conversation_support",
-          strict: true,
-          schema,
-        },
+      generationConfig: {
+        maxOutputTokens: 1200,
+        temperature: 0.4,
+        responseMimeType: "application/json",
+        responseJsonSchema: schema,
       },
     },
     req.auth.uid,
     { feature: "conversationSupport", dailyLimit: AI_SUPPORT_DAILY_LIMIT },
   );
+  const supportText = geminiText(aiBody);
   let support;
   try {
-    support = JSON.parse(extractOpenAIText(aiBody));
+    support = JSON.parse(supportText);
   } catch {
+    throw new ApiError(502, "AI_INVALID_RESPONSE", "AI 응답 형식을 확인하지 못했습니다.");
+  }
+  const listFields = [support.topics, support.suggestedOpeners, support.followUpQuestions];
+  if (
+    !listFields.every(
+      (items) => Array.isArray(items) && items.length === 3 && items.every((item) => typeof item === "string" && item.trim().length > 0),
+    ) ||
+    typeof support.improvedDraft !== "string" ||
+    typeof support.tip !== "string"
+  ) {
     throw new ApiError(502, "AI_INVALID_RESPONSE", "AI 응답 형식을 확인하지 못했습니다.");
   }
   return success(res, req, {
     partner,
     stage,
     ...support,
-    provider: "openai",
-    model: OPENAI_MODEL,
+    provider: GEMINI_PROVIDER,
+    model: GEMINI_MODEL,
     entitlement: { tier: "free-beta", charged: false, metered: true, paywall: false, usage: quota },
   });
 });

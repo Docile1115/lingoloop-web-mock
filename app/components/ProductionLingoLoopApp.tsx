@@ -19,6 +19,7 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   User,
   UsersRound,
   X,
@@ -146,6 +147,34 @@ type DmPrivacy = {
   filterSuspectedSpam: boolean;
   allowVoiceMessagesInRequests: boolean;
   readReceipts: boolean;
+};
+
+type AiUsage = {
+  remaining: number;
+  limit: number;
+  resetsAt: string;
+};
+
+type TranslationResult = {
+  translatedText: string;
+  provider: string;
+  model: string;
+  entitlement: { usage: AiUsage };
+};
+
+type ConversationSupport = {
+  topics: string[];
+  suggestedOpeners: string[];
+  followUpQuestions: string[];
+  improvedDraft: string;
+  tip: string;
+  provider: string;
+  model: string;
+  entitlement: { usage: AiUsage };
+};
+
+type FeatureFlags = {
+  aiConfigured: boolean;
 };
 
 type ApiEnvelope<T> = {
@@ -360,6 +389,12 @@ function OperationalApp({
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
+  const [aiConfigured, setAiConfigured] = useState(false);
+  const [translatedMessages, setTranslatedMessages] = useState<Record<string, string>>({});
+  const [translatingMessageId, setTranslatingMessageId] = useState("");
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiSupport, setAiSupport] = useState<ConversationSupport | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [postDraft, setPostDraft] = useState("");
   const [roomFormOpen, setRoomFormOpen] = useState(false);
@@ -386,7 +421,7 @@ function OperationalApp({
   const loadData = useCallback(async () => {
     try {
       const [bootstrap, matchData, postData, conversationData, roomData, preferenceData, privacyData] = await Promise.all([
-        apiRequest<{ currentUser: UserProfile }>("/api/bootstrap"),
+        apiRequest<{ currentUser: UserProfile; featureFlags: FeatureFlags }>("/api/bootstrap"),
         apiRequest<{ recommendations: MatchRecommendation[] }>("/api/matching/daily"),
         apiRequest<Post[]>("/api/posts"),
         apiRequest<Conversation[]>("/api/conversations"),
@@ -407,6 +442,7 @@ function OperationalApp({
       setRooms(roomData || []);
       setPreferences(preferenceData.preferences);
       setPrivacy(privacyData.settings);
+      setAiConfigured(Boolean(bootstrap.featureFlags?.aiConfigured));
       setSelectedConversationId((current) => current || conversationData[0]?.id || "");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "운영 데이터를 불러오지 못했습니다.");
@@ -441,6 +477,12 @@ function OperationalApp({
     };
   }, [selectedConversationId, loadMessages]);
 
+  const selectConversation = (conversationId: string) => {
+    setSelectedConversationId(conversationId);
+    setAiPanelOpen(false);
+    setAiSupport(null);
+  };
+
   const startConversation = async (partner: UserProfile) => {
     setBusy(true);
     try {
@@ -449,7 +491,7 @@ function OperationalApp({
         body: JSON.stringify({ partnerId: partner.id }),
       });
       setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)]);
-      setSelectedConversationId(conversation.id);
+      selectConversation(conversation.id);
       setMessages(conversation.messages || []);
       setTab("chats");
       showToast(partner.name + "님과 실제 대화방을 만들었어요.");
@@ -502,6 +544,59 @@ function OperationalApp({
       setError(caught instanceof Error ? caught.message : "메시지를 보내지 못했습니다.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const translateMessage = async (message: Message) => {
+    if (translatedMessages[message.id]) {
+      setTranslatedMessages((current) => {
+        const next = { ...current };
+        delete next[message.id];
+        return next;
+      });
+      return;
+    }
+    setTranslatingMessageId(message.id);
+    setError("");
+    try {
+      const result = await apiRequest<TranslationResult>("/api/translate", {
+        method: "POST",
+        body: JSON.stringify({
+          text: message.text,
+          sourceLanguage: "auto",
+          targetLanguage: user.nativeLanguages[0] || "ko",
+        }),
+      });
+      setTranslatedMessages((current) => ({ ...current, [message.id]: result.translatedText }));
+      showToast("번역 완료 · 오늘 " + result.entitlement.usage.remaining + "회 남음");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "메시지를 번역하지 못했습니다.");
+    } finally {
+      setTranslatingMessageId("");
+    }
+  };
+
+  const requestConversationSupport = async () => {
+    const partner = selectedConversation?.partner;
+    if (!partner) return;
+    setAiPanelOpen(true);
+    setAiBusy(true);
+    setError("");
+    try {
+      const result = await apiRequest<ConversationSupport>("/api/conversation-support", {
+        method: "POST",
+        body: JSON.stringify({
+          partnerId: partner.id,
+          stage: messageDraft.trim() ? "draft" : messages.length ? "ongoing" : "first-message",
+          draft: messageDraft.trim(),
+        }),
+      });
+      setAiSupport(result);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "AI 대화 도움을 불러오지 못했습니다.");
+      setAiPanelOpen(false);
+    } finally {
+      setAiBusy(false);
     }
   };
 
@@ -784,7 +879,7 @@ function OperationalApp({
                 <div className={styles.chatLayout}>
                   <aside className={styles.chatList}>
                     {conversations.map((conversation) => conversation.partner ? (
-                      <button key={conversation.id} type="button" className={selectedConversationId === conversation.id ? styles.active : ""} onClick={() => setSelectedConversationId(conversation.id)}>
+                      <button key={conversation.id} type="button" className={selectedConversationId === conversation.id ? styles.active : ""} onClick={() => selectConversation(conversation.id)}>
                         <Avatar profile={conversation.partner} size="small" />
                         <span><strong>{conversation.partner.name}</strong><small>{conversation.preview}</small></span>
                         <time>{relativeTime(conversation.updatedAt)}</time>
@@ -794,18 +889,75 @@ function OperationalApp({
                   <article className={styles.thread}>
                     {selectedConversation?.partner ? (
                       <>
-                        <header><Avatar profile={selectedConversation.partner} size="small" /><span><strong>{selectedConversation.partner.name}</strong><small>{selectedConversation.partner.status === "online" ? "접속 중" : "오프라인"}</small></span><i><Database size={15} /> 자동 저장</i></header>
+                        <header>
+                          <Avatar profile={selectedConversation.partner} size="small" />
+                          <span><strong>{selectedConversation.partner.name}</strong><small>{selectedConversation.partner.status === "online" ? "접속 중" : "오프라인"}</small></span>
+                          <div className={styles.threadActions}>
+                            <i><Database size={15} /> 자동 저장</i>
+                            <button
+                              type="button"
+                              className={styles.aiButton}
+                              onClick={() => {
+                                if (aiPanelOpen) setAiPanelOpen(false);
+                                else if (aiSupport) setAiPanelOpen(true);
+                                else void requestConversationSupport();
+                              }}
+                              disabled={!aiConfigured || aiBusy}
+                              title={aiConfigured ? "대화 주제와 문장을 추천받기" : "AI 기능이 아직 연결되지 않았습니다"}
+                            >
+                              <Sparkles size={15} /> AI 도움
+                            </button>
+                          </div>
+                        </header>
                         <div className={styles.messages}>
                           {messages.length ? messages.map((message) => (
                             <div key={message.id} className={message.senderId === user.id ? styles.mine : styles.theirs}>
-                              <p>{message.text}</p><small>{relativeTime(message.sentAt)}</small>
+                              <p>
+                                <span>{message.text}</span>
+                                {translatedMessages[message.id] ? <em className={styles.translation}>{translatedMessages[message.id]}</em> : null}
+                              </p>
+                              <footer className={styles.messageMeta}>
+                                <small>{relativeTime(message.sentAt)}</small>
+                                {message.senderId !== user.id && aiConfigured ? (
+                                  <button type="button" onClick={() => void translateMessage(message)} disabled={translatingMessageId === message.id}>
+                                    <Languages size={12} />
+                                    {translatingMessageId === message.id ? "번역 중" : translatedMessages[message.id] ? "원문만" : "번역"}
+                                  </button>
+                                ) : null}
+                              </footer>
                             </div>
                           )) : <p className={styles.threadEmpty}>첫 메시지를 보내 대화를 시작해 보세요.</p>}
                         </div>
-                        <form className={styles.messageForm} onSubmit={sendMessage}>
-                          <input value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} maxLength={4000} placeholder="메시지 입력" />
-                          <button type="submit" className={styles.primaryButton} disabled={busy || !messageDraft.trim()} aria-label="전송"><Send size={18} /></button>
-                        </form>
+                        <div className={styles.composerArea}>
+                          {aiPanelOpen ? (
+                            <section className={styles.aiPanel} aria-label="AI 대화 도움">
+                              <header>
+                                <strong><Sparkles size={15} /> AI 대화 도움</strong>
+                                <button type="button" onClick={() => setAiPanelOpen(false)} aria-label="AI 도움 닫기"><X size={16} /></button>
+                              </header>
+                              {aiBusy ? <p className={styles.aiLoading}><RefreshCw size={15} /> 대화 주제를 만드는 중…</p> : null}
+                              {!aiBusy && aiSupport ? (
+                                <div className={styles.aiContent}>
+                                  <p className={styles.aiTip}>{aiSupport.tip}</p>
+                                  <div className={styles.aiTopics}>{aiSupport.topics.map((topic) => <span key={topic}>{topic}</span>)}</div>
+                                  <div className={styles.aiSuggestions}>
+                                    {[...aiSupport.suggestedOpeners, ...aiSupport.followUpQuestions].map((suggestion, index) => (
+                                      <button key={index + "-" + suggestion} type="button" onClick={() => setMessageDraft(suggestion)}>{suggestion}</button>
+                                    ))}
+                                    {aiSupport.improvedDraft && aiSupport.improvedDraft !== messageDraft ? (
+                                      <button type="button" onClick={() => setMessageDraft(aiSupport.improvedDraft)}>다듬은 문장: {aiSupport.improvedDraft}</button>
+                                    ) : null}
+                                  </div>
+                                  <small>추천 문장을 누르면 입력창에 넣습니다 · 오늘 {aiSupport.entitlement.usage.remaining}회 남음</small>
+                                </div>
+                              ) : null}
+                            </section>
+                          ) : null}
+                          <form className={styles.messageForm} onSubmit={sendMessage}>
+                            <input value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} maxLength={4000} placeholder="메시지 입력" />
+                            <button type="submit" className={styles.primaryButton} disabled={busy || !messageDraft.trim()} aria-label="전송"><Send size={18} /></button>
+                          </form>
+                        </div>
                       </>
                     ) : null}
                   </article>
