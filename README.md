@@ -53,6 +53,11 @@ API 성공 응답에는 다음 메타데이터가 포함됩니다.
 
 ```mermaid
 flowchart LR
+    subgraph Delivery["지속적 배포"]
+        GitHub["GitHub · main"]
+        Actions["GitHub Actions\n검증 · 순차 배포 · 상태 확인"]
+    end
+
     subgraph Clients["클라이언트"]
         Web["PC · 모바일 반응형 웹"]
         Native["향후 React Native 앱"]
@@ -66,8 +71,15 @@ flowchart LR
         Gemini["Vertex AI Gemini\n2.5 Flash-Lite"]
         Secrets["Secret Manager"]
         Logs["Cloud Logging"]
+        Wif["Workload Identity Federation\n키 없는 GitHub 인증"]
+        Build["Cloud Build\n전용 빌드 계정"]
     end
 
+    GitHub -->|"main push"| Actions
+    Actions -->|"OIDC"| Wif
+    Wif -->|"단기 권한"| Build
+    Build -->|"API 먼저"| ApiRun
+    Build -->|"API 성공 후 웹"| WebRun
     Web -->|"HTTPS"| WebRun
     Native -.->|"향후 HTTPS API"| ApiRun
     WebRun -->|"same-origin /api/*\n내부 공유 비밀"| ApiRun
@@ -279,6 +291,29 @@ curl.exe https://YOUR_WEB_URL/api/health
 ```
 
 두 번째 요청은 웹 프록시를 통과해야 하며 `meta.mock`이 `false`여야 합니다. 회원가입, 프로필 수정, 게시물·메시지 작성 후 다시 로그인해 데이터가 복원되는지도 서로 다른 두 테스트 계정으로 검증합니다.
+
+### `main` 자동 배포
+
+`.github/workflows/deploy-cloud-run.yml`은 `main`에 새 커밋이 푸시될 때마다 다음 순서로 운영 배포를 실행합니다.
+
+1. 웹·API 의존성을 잠금 파일대로 설치
+2. 타입 검사, 린트, 웹 빌드·계약 테스트와 API 테스트
+3. GitHub OIDC로 `lingoloop-github-deployer` 계정의 단기 권한 발급
+4. 전용 `lingoloop-build` 계정으로 API 소스 빌드·배포
+5. API 상태가 정상이면 웹 소스 빌드·배포
+6. 웹 프록시를 통해 Firestore·Identity Platform·Vertex AI 연결과 `mock: false` 확인
+
+동시에 여러 커밋이 들어와도 운영 배포는 하나씩 실행되므로 API만 바뀐 중간 상태를 피합니다. 장기 서비스 계정 JSON 키나 애플리케이션 비밀은 GitHub에 저장하지 않으며, 실제 비밀은 기존 Cloud Run의 Secret Manager 참조를 유지합니다. 수동 재배포가 필요하면 GitHub Actions의 `Deploy production to Cloud Run`에서 `Run workflow`를 실행하되 `main`을 선택합니다.
+
+저장소에는 다음 GitHub Actions 변수가 설정되어 있어야 합니다.
+
+| 변수 | 현재 값/형식 |
+| --- | --- |
+| `GCP_PROJECT_ID` | `lingoloop-prod-20260823` |
+| `GCP_REGION` | `asia-northeast1` |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/254296987362/locations/global/workloadIdentityPools/github-actions/providers/lingoloop-main` |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | `lingoloop-github-deployer@lingoloop-prod-20260823.iam.gserviceaccount.com` |
+| `GCP_BUILD_SERVICE_ACCOUNT` | `projects/lingoloop-prod-20260823/serviceAccounts/lingoloop-build@lingoloop-prod-20260823.iam.gserviceaccount.com` |
 
 ## 검증
 

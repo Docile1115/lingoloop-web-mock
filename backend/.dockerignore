@@ -5,3 +5,4 @@ tests
 .env
 .env.*
 !.env.example
+gha-creds-*.json

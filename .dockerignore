@@ -15,4 +15,5 @@ work
 
 *.log
 *.tsbuildinfo
+gha-creds-*.json
 README.md
