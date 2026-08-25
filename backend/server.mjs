@@ -423,33 +423,50 @@ function matchCandidate(candidate, me, preferences, date) {
       (preferences.partnerGender === "women" && candidate.gender === "woman") ||
       (preferences.partnerGender === "men" && candidate.gender === "man"));
   let score = 35;
+  // 매칭 이유는 화면에 그대로 나오는 문구입니다. 서버가 한국어 문장으로 만들어 보내면
+  // 클라이언트가 번역할 수 없으므로, 사람이 읽는 문장(matchReasons)과 함께
+  // 코드+값(matchReasonCodes)을 보냅니다. 화면은 코드가 있으면 자기 언어로 그립니다.
   const reasons = [];
+  const reasonCodes = [];
   if (matchedLanguages.length) {
     score += 25;
-    reasons.push(matchedLanguages.map((code) => LANGUAGES.find((item) => item.code === code)?.nativeName || code).join(" · ") + " 원어민 파트너예요");
+    const names = matchedLanguages.map((code) => LANGUAGES.find((item) => item.code === code)?.nativeName || code).join(" · ");
+    reasons.push(names + " 원어민 파트너예요");
+    reasonCodes.push({ code: "native-speaker", languages: names });
   }
   if (preferences.preferredCountries.includes(candidate.country?.code)) {
     score += 10;
     reasons.push("희망 지역인 " + (candidate.country?.flag || "") + " " + (candidate.country?.name || "") + "에 있어요");
+    reasonCodes.push({ code: "preferred-country", flag: candidate.country?.flag || "", country: candidate.country?.name || "" });
   }
   if (matchedInterests.length) {
     score += Math.min(12, matchedInterests.length * 4);
-    reasons.push(matchedInterests.slice(0, 2).join(" · ") + " 관심사가 같아요");
+    const interests = matchedInterests.slice(0, 2).join(" · ");
+    reasons.push(interests + " 관심사가 같아요");
+    reasonCodes.push({ code: "shared-interests", interests });
   }
   if (matchedAvailability.length) {
     score += 8;
     reasons.push("선호하는 학습 시간대가 겹쳐요");
+    reasonCodes.push({ code: "time-overlap" });
   }
   if (matchedIntents.length) score += 6;
   if (candidate.verified) score += 4;
   if (candidate.status === "online") score += 4;
   score += stableHash(date + ":" + candidate.id) % 5;
-  if (!exact) reasons.unshift("일부 조건을 넓혀 찾은 가까운 파트너예요");
-  if (reasons.length < 2) reasons.push("새로운 실제 회원과 첫 언어 교환을 시작해 보세요");
+  if (!exact) {
+    reasons.unshift("일부 조건을 넓혀 찾은 가까운 파트너예요");
+    reasonCodes.unshift({ code: "broadened" });
+  }
+  if (reasons.length < 2) {
+    reasons.push("새로운 실제 회원과 첫 언어 교환을 시작해 보세요");
+    reasonCodes.push({ code: "first-exchange" });
+  }
   return {
     partner: publicProfile(candidate),
     score: Math.min(99, score),
     matchReasons: reasons.slice(0, 4),
+    matchReasonCodes: reasonCodes.slice(0, 4),
     icebreaker: "Hi " + candidate.name + "! What would you like to practice today?",
     meetsAllPreferences: exact,
   };
