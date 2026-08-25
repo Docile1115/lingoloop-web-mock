@@ -135,10 +135,8 @@ type MatchingPreferences = {
 
 type DmPrivacy = {
   whoCanMessage: string;
+  /** 수신 범위 밖에서 온 대화를 요청함으로 보낼지. 끄면 아예 막습니다. */
   routeOthersToRequests: boolean;
-  filterSuspectedSpam: boolean;
-  allowVoiceMessagesInRequests: boolean;
-  readReceipts: boolean;
 };
 
 type AiUsage = {
@@ -220,6 +218,18 @@ const LANGUAGE_LABELS: Record<string, string> = {
   fr: "Français",
   de: "Deutsch",
 };
+
+/** 서버가 받는 신고 사유. 목록이 어긋나면 422 로 되돌아옵니다. */
+const REPORT_REASONS: Array<{ value: string; label: string }> = [
+  { value: "spam", label: msg("스팸·광고") },
+  { value: "scam", label: msg("사기·금전 요구") },
+  { value: "harassment", label: msg("괴롭힘·욕설") },
+  { value: "dating", label: msg("데이트 목적 접근") },
+  { value: "sexual_content", label: msg("성적인 내용") },
+  { value: "hate", label: msg("혐오 표현") },
+  { value: "impersonation", label: msg("사칭") },
+  { value: "other", label: msg("기타") },
+];
 
 /** 서버가 learningLanguages.level 로 저장하는 값들. 화면에는 사람이 읽는 말로 보여줍니다. */
 const LEVEL_LABELS: Record<string, string> = {
@@ -505,6 +515,42 @@ function matchReasonText(reason: { code: string; languages?: string; interests?:
   return t("새로운 실제 회원과 첫 언어 교환을 시작해 보세요");
 }
 
+/** 신고 사유를 고르는 창. 사유 없이 보내면 운영이 판단할 근거가 없습니다. */
+function ReportDialog({ title, onCancel, onSubmit }: { title: string; onCancel: () => void; onSubmit: (reason: string) => void }) {
+  const [reason, setReason] = useState("spam");
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div className={styles.confirmBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <div className={styles.confirmCard} role="dialog" aria-modal="true" aria-label={title}>
+        <h2>{title}</h2>
+        <p>{t("가장 가까운 사유를 골라주세요. 접수 내역은 운영팀만 봅니다.")}</p>
+        <div className={styles.reasonGrid} role="radiogroup" aria-label={t("신고 사유")}>
+          {REPORT_REASONS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              role="radio"
+              aria-checked={reason === item.value}
+              className={reason === item.value ? styles.selected : ""}
+              onClick={() => setReason(item.value)}
+            >
+              {t(item.label as MessageKey)}
+            </button>
+          ))}
+        </div>
+        <div className={styles.confirmActions}>
+          <button type="button" className={styles.secondaryButton} onClick={onCancel}>{t("취소")}</button>
+          <button type="button" className={styles.dangerButton} onClick={() => onSubmit(reason)}>{t("신고하기")}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LanguagePicker() {
   const { locale, setLocale } = useLocale();
   return (
@@ -565,9 +611,12 @@ function OperationalApp({
   const [postPendingDelete, setPostPendingDelete] = useState<Post | null>(null);
   /* 차단은 되돌릴 수 있지만 대화가 사라지므로 한 번 묻습니다. */
   const [partnerPendingBlock, setPartnerPendingBlock] = useState<UserProfile | null>(null);
+  /* 신고 대상. 사유를 고른 뒤에 접수합니다. */
+  const [reportTargetState, setReportTargetState] = useState<{ type: "user" | "post" | "message"; id: string; name: string } | null>(null);
   const [blockedPartners, setBlockedPartners] = useState<Array<{ blockedId: string; partner: UserProfile }>>([]);
   /* 요청함 — 수신 범위 밖에서 온 대화. 화면이 없으면 영영 안 보입니다. */
   const [requests, setRequests] = useState<Conversation[]>([]);
+  const [countries, setCountries] = useState<Country[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -578,6 +627,7 @@ function OperationalApp({
     city: initialUser.city || "",
     // 매칭은 "내가 쓰는 말"과 "배우려는 말"이 서로 맞물릴 때만 성립합니다.
     // 이 둘을 고칠 수 없으면 모두가 가입 기본값에 묶여 추천이 영영 비게 됩니다.
+    countryCode: initialUser.country?.code || "KR",
     nativeLanguage: initialUser.nativeLanguages?.[0] || "ko",
     learningLanguage: initialUser.learningLanguages?.[0]?.code || "en",
     learningLevel: initialUser.learningLanguages?.[0]?.level || "beginner",
@@ -603,7 +653,7 @@ function OperationalApp({
   const loadData = useCallback(async () => {
     try {
       const [bootstrap, matchData, postData, conversationData, requestData, preferenceData, privacyData] = await Promise.all([
-        apiRequest<{ currentUser: UserProfile; featureFlags: FeatureFlags }>("/api/bootstrap"),
+        apiRequest<{ currentUser: UserProfile; featureFlags: FeatureFlags; countries: Country[] }>("/api/bootstrap"),
         apiRequest<{ recommendations: MatchRecommendation[] }>("/api/matching/daily"),
         apiRequest<Post[]>("/api/posts"),
         apiRequest<Conversation[]>("/api/conversations"),
@@ -625,6 +675,7 @@ function OperationalApp({
       setPreferences(preferenceData.preferences);
       setPrivacy(privacyData.settings);
       setAiConfigured(Boolean(bootstrap.featureFlags?.aiConfigured));
+      setCountries(bootstrap.countries || []);
       setSelectedConversationId((current) => current || conversationData[0]?.id || "");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("운영 데이터를 불러오지 못했습니다."));
@@ -843,11 +894,14 @@ function OperationalApp({
   };
 
   /** 신고는 접수 화면이 따로 없으므로 사유를 other 로 보내고 접수만 확인시킵니다. */
-  const reportTarget = async (targetType: "user" | "post" | "message", targetId: string) => {
+  const submitReport = async (reason: string) => {
+    if (!reportTargetState) return;
+    const { type: targetType, id: targetId } = reportTargetState;
+    setReportTargetState(null);
     try {
       await apiRequest("/api/reports", {
         method: "POST",
-        body: JSON.stringify({ targetType, targetId, reason: "other" }),
+        body: JSON.stringify({ targetType, targetId, reason }),
       });
       showToast(t("신고를 접수했어요. 운영팀이 확인합니다."));
     } catch (caught) {
@@ -925,6 +979,7 @@ function OperationalApp({
           name: profileDraft.name,
           bio: profileDraft.bio,
           city: profileDraft.city,
+          countryCode: profileDraft.countryCode,
           age: Number(profileDraft.age),
           nativeLanguages: [profileDraft.nativeLanguage],
           learningLanguages: [
@@ -958,15 +1013,15 @@ function OperationalApp({
     }
   };
 
-  const savePrivacy = async (scope: string) => {
+  const savePrivacy = async (patch: Partial<DmPrivacy>) => {
     if (!privacy) return;
     try {
       const result = await apiRequest<{ settings: DmPrivacy }>("/api/dm/privacy", {
         method: "POST",
-        body: JSON.stringify({ ...privacy, whoCanMessage: scope }),
+        body: JSON.stringify({ ...privacy, ...patch }),
       });
       setPrivacy(result.settings);
-      showToast(t("DM 수신 범위를 계정에 저장했어요."));
+      showToast(t("DM 설정을 계정에 저장했어요."));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("DM 설정을 저장하지 못했습니다."));
     }
@@ -999,7 +1054,7 @@ function OperationalApp({
         <OverflowMenu
           label={t("파트너 메뉴")}
           items={[
-            { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: () => void reportTarget("user", recommendation.partner.id) },
+            { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: () => setReportTargetState({ type: "user", id: recommendation.partner.id, name: recommendation.partner.name }) },
             { id: "block", label: t("차단하기"), icon: Ban, danger: true, onSelect: () => setPartnerPendingBlock(recommendation.partner) },
           ]}
         />
@@ -1128,7 +1183,7 @@ function OperationalApp({
                         items={post.authorId === user.id
                           ? [{ id: "delete", label: t("삭제하기"), icon: Trash2, danger: true, onSelect: () => setPostPendingDelete(post) }]
                           : [
-                              { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: () => void reportTarget("post", post.id) },
+                              { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: () => setReportTargetState({ type: "post", id: post.id, name: post.author.name }) },
                               { id: "block", label: t("이 사람 차단하기"), icon: Ban, danger: true, onSelect: () => setPartnerPendingBlock({ id: post.authorId, name: post.author.name } as UserProfile) },
                             ]}
                       />
@@ -1275,6 +1330,12 @@ function OperationalApp({
                   <label>{t("나이")}<input type="number" min={18} max={100} value={profileDraft.age} onChange={(event) => setProfileDraft({ ...profileDraft, age: Number(event.target.value) })} required /></label>
                   {/* 이 두 줄이 매칭의 전제입니다 — 내가 쓰는 말과 배우려는 말이 맞물려야 파트너가 잡힙니다. */}
                   <SelectField
+                    label={t("사는 곳")}
+                    value={profileDraft.countryCode}
+                    options={countries.map((country) => ({ value: country.code, label: country.flag + " " + tx(country.name) }))}
+                    onChange={(next) => setProfileDraft({ ...profileDraft, countryCode: next })}
+                  />
+                  <SelectField
                     label={t("내가 쓰는 말")}
                     value={profileDraft.nativeLanguage}
                     options={Object.entries(LANGUAGE_LABELS).map(([code, label]) => ({ value: code, label }))}
@@ -1304,9 +1365,21 @@ function OperationalApp({
                       ["mutual-follows", msg("서로 팔로우")],
                       ["everyone", msg("모든 사용자")],
                     ].map(([value, label]) => (
-                      <button key={value} type="button" className={privacy?.whoCanMessage === value ? styles.active : ""} onClick={() => void savePrivacy(value)}>{t(label as MessageKey)}</button>
+                      <button key={value} type="button" className={privacy?.whoCanMessage === value ? styles.active : ""} onClick={() => void savePrivacy({ whoCanMessage: value })}>{t(label as MessageKey)}</button>
                     ))}
                   </div>
+                  <label className={styles.checkLabel}>
+                    <input
+                      type="checkbox"
+                      aria-label={t("범위 밖 대화는 요청함으로")}
+                      checked={Boolean(privacy?.routeOthersToRequests)}
+                      onChange={(event) => void savePrivacy({ routeOthersToRequests: event.target.checked })}
+                    />
+                    <span aria-hidden="true">
+                      <strong>{t("범위 밖 대화는 요청함으로")}</strong>
+                      <small>{t("끄면 범위 밖에서 온 대화는 아예 만들어지지 않아요.")}</small>
+                    </span>
+                  </label>
                 </article>
                 <article className={styles.blockCard}>
                   <header><Ban size={19} /><strong>{t("차단한 사용자")}</strong></header>
@@ -1341,6 +1414,13 @@ function OperationalApp({
           return <button key={item.id} type="button" className={tab === item.id ? styles.active : ""} onClick={() => setTab(item.id)}><Icon size={20} /><span>{t(item.mobileLabel as MessageKey)}</span></button>;
         })}
       </nav>
+      {reportTargetState ? (
+        <ReportDialog
+          title={t("{name}님을 신고할까요?", { name: reportTargetState.name })}
+          onCancel={() => setReportTargetState(null)}
+          onSubmit={(reason) => void submitReport(reason)}
+        />
+      ) : null}
       {partnerPendingBlock ? (
         <ConfirmDialog
           title={t("{name}님을 차단할까요?", { name: partnerPendingBlock.name })}

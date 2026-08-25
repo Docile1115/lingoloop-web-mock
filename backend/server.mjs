@@ -56,6 +56,21 @@ const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", true);
 
+const COUNTRIES = [
+  { code: "KR", name: "대한민국", flag: "🇰🇷" },
+  { code: "US", name: "미국", flag: "🇺🇸" },
+  { code: "JP", name: "일본", flag: "🇯🇵" },
+  { code: "CN", name: "중국", flag: "🇨🇳" },
+  { code: "GB", name: "영국", flag: "🇬🇧" },
+  { code: "CA", name: "캐나다", flag: "🇨🇦" },
+  { code: "AU", name: "호주", flag: "🇦🇺" },
+  { code: "FR", name: "프랑스", flag: "🇫🇷" },
+  { code: "DE", name: "독일", flag: "🇩🇪" },
+  { code: "ES", name: "스페인", flag: "🇪🇸" },
+  { code: "BR", name: "브라질", flag: "🇧🇷" },
+  { code: "VN", name: "베트남", flag: "🇻🇳" },
+];
+
 const LANGUAGES = [
   { code: "ko", name: "Korean", nativeName: "한국어", flag: "🇰🇷" },
   { code: "en", name: "English", nativeName: "English", flag: "🇺🇸" },
@@ -83,9 +98,6 @@ const DEFAULT_MATCHING_PREFERENCES = {
 const DEFAULT_DM_PRIVACY = {
   whoCanMessage: "matches",
   routeOthersToRequests: true,
-  filterSuspectedSpam: true,
-  allowVoiceMessagesInRequests: false,
-  readReceipts: true,
 };
 
 class ApiError extends Error {
@@ -379,6 +391,13 @@ function normalizedPreferences(body = {}) {
     intents: stringArray(body.intents, "intents", ["language-exchange", "friendship"], 4, 32),
     onlineOnly: optionalBoolean(body.onlineOnly, "onlineOnly", false),
   };
+}
+
+function countryFromCode(code, fallback) {
+  if (code === undefined) return fallback;
+  const found = COUNTRIES.find((item) => item.code === String(code).toLocaleUpperCase());
+  if (!found) throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 국가입니다.", { field: "countryCode" });
+  return found;
 }
 
 function preferenceVersion(preferences) {
@@ -833,6 +852,8 @@ app.post("/api/auth/logout", async (req, res) => {
 
 app.get("/api/languages", async (req, res) => success(res, req, LANGUAGES));
 
+app.get("/api/countries", async (req, res) => success(res, req, COUNTRIES));
+
 app.get("/api/bootstrap", requireUser, async (req, res) => {
   await db.collection("profiles").doc(req.auth.uid).update({
     status: "online",
@@ -843,6 +864,7 @@ app.get("/api/bootstrap", requireUser, async (req, res) => {
   return success(res, req, {
     currentUser: publicProfile(profile),
     languages: LANGUAGES,
+    countries: COUNTRIES,
     unread: { conversations: 0, notifications: 0, requests: 0 },
     featureFlags: {
       persistentProfiles: true,
@@ -873,6 +895,9 @@ app.patch("/api/profile", requireUser, async (req, res) => {
     name: req.body?.name === undefined ? current.name : safeString(req.body.name, "name", { min: 2, max: 40 }),
     bio: req.body?.bio === undefined ? current.bio : safeString(req.body.bio, "bio", { min: 0, max: 500 }),
     city: req.body?.city === undefined ? current.city : safeString(req.body.city, "city", { min: 0, max: 80 }),
+    // 국가는 목록에 있는 코드만 받습니다 — 이름·국기를 사용자가 정하게 두면
+    // 매칭의 preferredCountries 와 어긋나고 아무 문자열이나 들어옵니다.
+    country: countryFromCode(req.body?.countryCode, current.country),
     nativeLanguages: stringArray(req.body?.nativeLanguages, "nativeLanguages", current.nativeLanguages, 3, 10),
     learningLanguages: Array.isArray(req.body?.learningLanguages)
       ? req.body.learningLanguages.slice(0, 3).map((item) => ({
@@ -1380,17 +1405,6 @@ app.post("/api/dm/privacy", requireUser, async (req, res) => {
       "routeOthersToRequests",
       Boolean(current.routeOthersToRequests),
     ),
-    filterSuspectedSpam: optionalBoolean(
-      req.body?.filterSuspectedSpam,
-      "filterSuspectedSpam",
-      Boolean(current.filterSuspectedSpam),
-    ),
-    allowVoiceMessagesInRequests: optionalBoolean(
-      req.body?.allowVoiceMessagesInRequests,
-      "allowVoiceMessagesInRequests",
-      Boolean(current.allowVoiceMessagesInRequests),
-    ),
-    readReceipts: optionalBoolean(req.body?.readReceipts, "readReceipts", Boolean(current.readReceipts)),
     updatedAt: nowIso(),
   };
   await db.collection("dmPolicies").doc(req.auth.uid).set(settings);
