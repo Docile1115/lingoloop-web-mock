@@ -161,9 +161,38 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     document.documentElement.lang = locale;
-    // 탭 제목은 서버가 요청 언어로 그려둡니다. 앱에서 언어를 바꾸면
-    // 그대로 두면 어긋나므로 여기서 다시 맞춥니다.
-    document.title = SITE_METADATA[locale].title;
+
+    // 탭 제목은 서버가 한국어로 그려두므로 사용자가 고른 언어로 다시 맞춥니다.
+    //
+    // 다만 <title> 은 리액트가 스트리밍 메타데이터 경계 안에서 들고 있고, 그 경계는
+    // 본문보다 늦게 하이드레이션됩니다. 마운트 직후에 덮어쓰면 리액트가 나중에
+    // 서버 HTML 과 다른 값을 발견하고 "고쳐지지 않는다"고 경고합니다.
+    // load 이후로 미뤄 하이드레이션이 끝난 뒤에 손댑니다.
+    // 탭 제목은 서버가 한국어로 그려두므로 사용자가 고른 언어로 다시 맞춥니다.
+    //
+    // <title> 은 리액트가 스트리밍 메타데이터 경계 안에서 들고 있고, 그 경계는 본문보다
+    // 늦게 하이드레이션됩니다. 마운트 직후에 덮어쓰면 리액트가 서버 HTML 과 다른 값을
+    // 발견하고 "고쳐지지 않는다"고 경고합니다. load 이후 두 프레임까지 미루면 그때는
+    // 경계가 이미 하이드레이션돼 있습니다.
+    //
+    // 혹시 그보다 늦게 하이드레이션되더라도 손해는 "제목이 한국어로 남는다" 뿐입니다
+    // — 리액트가 자기 값으로 되돌릴 뿐 화면이 깨지지는 않습니다.
+    let raf1 = 0, raf2 = 0;
+    const apply = () => {
+      raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => { document.title = SITE_METADATA[locale].title; });
+      });
+    };
+    if (document.readyState === "complete") {
+      apply();
+    } else {
+      window.addEventListener("load", apply, { once: true });
+    }
+    return () => {
+      window.removeEventListener("load", apply);
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
   }, [locale]);
 
   const value = useMemo<LocaleContextValue>(

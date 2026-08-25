@@ -4,8 +4,9 @@ import type { Locale } from "./keys-locale";
  * 브라우저 탭 제목과 검색 결과에 나가는 문구.
  *
  * 화면 안쪽 문구와 달리 이것들은 **서버에서** 만들어집니다. 그래서 화면용 t() 를
- * 쓸 수 없고(t 는 브라우저에 있는 현재 언어를 읽습니다), 요청의 Accept-Language 로
- * 고릅니다. 사용자가 앱에서 언어를 바꾸면 마운트 뒤에 document.title 을 다시 맞춥니다.
+ * 쓸 수 없습니다(t 는 브라우저에 있는 현재 언어를 읽습니다).
+ * 서버는 한국어로 그리고, 사용자가 고른 언어는 마운트 뒤 document.title 로 맞춥니다
+ * — 이유는 app/layout.tsx 의 generateMetadata 주석에 적어 두었습니다.
  */
 export const SITE_METADATA: Record<Locale, { title: string; description: string; ogDescription: string; keywords: string[] }> = {
   ko: {
@@ -30,16 +31,3 @@ export const SITE_METADATA: Record<Locale, { title: string; description: string;
     keywords: ["言語交換", "言語パートナー", "会話練習", "language exchange", "LingoLoop"],
   },
 };
-
-/**
- * Accept-Language 헤더에서 우리가 아는 언어를 고릅니다.
- * "ja,en-US;q=0.9" 처럼 여러 개가 우선순위와 함께 오므로 앞에서부터 처음 맞는 것을 씁니다.
- */
-export function localeFromAcceptLanguage(header: string | null | undefined): Locale {
-  if (!header) return "ko";
-  for (const part of header.split(",")) {
-    const tag = part.split(";")[0].trim().slice(0, 2).toLowerCase();
-    if (tag === "ko" || tag === "en" || tag === "ja") return tag;
-  }
-  return "ko";
-}
