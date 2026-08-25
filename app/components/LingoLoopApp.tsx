@@ -53,13 +53,13 @@ import {
   SlidersHorizontal,
   Smile,
   Sparkles,
-  Star,
   Timer,
   Target,
   Trash2,
   Trophy,
   Users,
   User,
+  UserPlus,
   UsersRound,
   Volume2,
   WandSparkles,
@@ -491,7 +491,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [sentLikes, setSentLikes] = useState<ApiReceivedLike[]>([]);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [safetyReports, setSafetyReports] = useState<SafetyReportInfo[]>([]);
-  const [savedPartnerIds, setSavedPartnerIds] = useState<Set<string>>(new Set());
   /* 숨긴 사람은 서버에 보관하지 않습니다(차단과 달리 상대에게 아무 영향이 없는,
      이 기기의 취향입니다). 대신 이 기기에는 남겨야 합니다 — 예전에는 새로고침하면
      숨긴 사람이 그대로 돌아왔고 설정의 "숨긴 사용자" 목록도 비어 있었습니다. */
@@ -609,11 +608,16 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       const stored = readStoredJson<string[]>(hiddenStorageKey, (value): value is string[] =>
         Array.isArray(value) && value.every((item) => typeof item === "string"));
       if (stored?.length) setHiddenAuthorIds(new Set(stored));
+      hiddenRestored.current = true;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [hiddenStorageKey]);
 
+  /* 복원하기 전에는 쓰지 않습니다. 마운트 직후의 빈 Set 이 먼저 저장되면
+     복원할 값을 스스로 지워버립니다. */
+  const hiddenRestored = useRef(false);
   useEffect(() => {
+    if (!hiddenRestored.current) return;
     try {
       window.localStorage.setItem(hiddenStorageKey, JSON.stringify([...hiddenAuthorIds]));
     } catch {
@@ -701,15 +705,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       authorId,
       t("{author}님의 글을 숨겼어요", { author: name }),
       t("{author}님의 글을 다시 봅니다", { author: name }),
-    );
-
-  /** 관심 파트너 저장 — 다시 누르면 빠집니다. */
-  const savePartner = (id: string, name: string) =>
-    toggleIn(
-      setSavedPartnerIds,
-      id,
-      t("{name}님을 관심 파트너로 저장했어요", { name }),
-      t("{name}님을 관심 목록에서 뺐어요", { name }),
     );
 
   /** 대화방을 실제로 목록에서 뺍니다. 나간 방을 고르고 있었다면 남은 첫 방으로 옮깁니다. */
@@ -1005,6 +1000,28 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     if (iSignaled && theyLiked) return "matched";
     if (iSignaled) return "signaled";
     return "none";
+  };
+
+  /**
+   * 팔로우.
+   *
+   * 커뮤니티에 "팔로잉" 탭이 있고 DM 설정에도 "서로 팔로우" 가 있는데, 정작
+   * 팔로우할 자리가 없었습니다. 두 기능 모두 영영 비어 있는 셈이었습니다.
+   */
+  const toggleFollow = async (partner: Partner) => {
+    const wasFollowing = followingIds.includes(partner.id);
+    setFollowingIds((current) => (wasFollowing ? current.filter((id) => id !== partner.id) : [...current, partner.id]));
+    try {
+      const result = await api<{ following: boolean }>(`/api/partners/${encodeURIComponent(partner.id)}/follow`, { method: "POST" });
+      setFollowingIds((current) => {
+        const without = current.filter((id) => id !== partner.id);
+        return result.following ? [...without, partner.id] : without;
+      });
+      showToast(result.following ? t("{name}님을 팔로우했어요", { name: partner.name }) : t("{name}님 팔로우를 해제했어요", { name: partner.name }));
+    } catch (caught) {
+      setFollowingIds((current) => (wasFollowing ? [...current.filter((id) => id !== partner.id), partner.id] : current.filter((id) => id !== partner.id)));
+      showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."));
+    }
   };
 
   const restartPartners = () => {
@@ -1492,8 +1509,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onBack={closeDetail}
                 onStartChat={(partner) => { closeDetail(); startChat(partner); }}
                 onReport={() => setModal({ type: "report", target: detail.partner.name, targetId: detail.partner.id })}
-                saved={savedPartnerIds.has(detail.partner.id)}
-                onSavePartner={savePartner}
+                following={followingIds.includes(detail.partner.id)}
+                onToggleFollow={(partner) => void toggleFollow(partner)}
                 connection={connectionWith(detail.partner)}
                 onSignal={(partner) => { signalPartner(partner); closeDetail(); }}
               />
@@ -1682,6 +1699,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           savedItems={savedItems}
           likesReceived={likesReceived}
           sentLikes={sentLikes}
+          followingIds={followingIds}
+          onToggleFollow={(partner) => void toggleFollow(partner)}
           onOpenPost={(post) => { setModal(null); openPost(post); }}
           roomMessages={roomMessages}
           onSendRoomMessage={(text) => setRoomMessages((list) => [...list, { id: `rm-${list.length + 1}-${text.length}`, name: currentUser.name, text, mine: true }])}
@@ -1699,7 +1718,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           onJumpPartner={(position) => { setPartnerIndex(position); setModal(null); }}
           onOpenPartnerProfile={(partner) => { setModal(null); openProfile(partner); }}
           onAcceptLike={(partner) => { setModal(null); startChat(partner); showToast(t("{name}님과 대화가 열렸어요", { name: partner.name })); }}
-          onUpdateGoal={(goal) => setProfile((current) => ({ ...current, goal }))}
+          onUpdateGoal={(goal) => void saveProfile({ ...profile, goal })}
         />
       ) : null}
 
@@ -2309,8 +2328,8 @@ function ProfileDetailView({
   onBack,
   onStartChat,
   onReport,
-  saved,
-  onSavePartner,
+  following,
+  onToggleFollow,
   connection,
   onSignal,
 }: {
@@ -2318,8 +2337,10 @@ function ProfileDetailView({
   onBack: () => void;
   onStartChat: (partner: Partner) => void;
   onReport: () => void;
-  saved: boolean;
-  onSavePartner: (id: string, name: string) => void;
+  /* 예전에는 "관심 파트너 저장" 이 따로 있었는데 어디에도 남지 않았습니다.
+     같은 뜻이면서 서버에 남는 팔로우로 합쳤습니다. */
+  following: boolean;
+  onToggleFollow: (partner: Partner) => void;
   /** 이 사람과 지금 어떤 사이인지. 대화를 열 수 있는지가 여기서 갈립니다. */
   connection: "chatting" | "matched" | "signaled" | "none";
   onSignal: (partner: Partner) => void;
@@ -2366,8 +2387,8 @@ function ProfileDetailView({
             <Heart size={16} /> {connection === "signaled" ? t("마음 보냄") : t("대화하고 싶어요")}
           </button>
         )}
-        <button className={saved ? "primary-button" : "secondary-button"} type="button" onClick={() => onSavePartner(partner.id, partner.name)}>
-          <Star size={16} /> {saved ? t("저장됨") : t("저장")}
+        <button className={following ? "primary-button" : "secondary-button"} type="button" aria-pressed={following} onClick={() => onToggleFollow(partner)}>
+          <UserPlus size={16} /> {following ? t("팔로잉") : t("팔로우")}
         </button>
         <button className="secondary-button" type="button" onClick={onReport}>
           <Flag size={16} /> {t("신고")}
@@ -3749,6 +3770,8 @@ function ModalLayer({
   savedItems,
   likesReceived,
   sentLikes,
+  followingIds,
+  onToggleFollow,
   onOpenPost,
   roomMessages,
   onSendRoomMessage,
@@ -3788,6 +3811,8 @@ function ModalLayer({
   savedItems: SavedPhrase[];
   likesReceived: ApiReceivedLike[];
   sentLikes: ApiReceivedLike[];
+  followingIds: string[];
+  onToggleFollow: (partner: Partner) => void;
   onOpenPost: (post: FeedPost) => void;
   roomMessages: RoomMessage[];
   onSendRoomMessage: (text: string) => void;
@@ -3830,7 +3855,7 @@ function ModalLayer({
     <div className={`modal-backdrop ${closing ? "is-closing" : ""}`.trim()} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
       <div className={`modal modal-${modal.type}`} role="dialog" aria-modal="true" aria-label={modalLabel(modal.type)}>
         <button className="modal-close" type="button" onClick={requestClose} aria-label={t("닫기")}><X size={20} /></button>
-        {modal.type === "profile" ? <ProfileModal partner={modal.partner} onStartChat={onStartChat} onReport={() => onReport(modal.partner.name)} onToast={onToast} /> : null}
+        {modal.type === "profile" ? <ProfileModal partner={modal.partner} following={followingIds.includes(modal.partner.id)} onToggleFollow={onToggleFollow} onStartChat={onStartChat} onReport={() => onReport(modal.partner.name)} /> : null}
         {modal.type === "filters" ? <MatchingPreferencesModal initial={matchPreferences} onClose={onClose} onSave={onSaveMatchPreferences} onToast={onToast} /> : null}
         {modal.type === "compose" ? <ComposeModal onPublish={onPublish} onToast={onToast} /> : null}
         {modal.type === "search" ? <SearchModal directory={directory} posts={posts} savedItems={savedItems} onOpenProfile={onOpenProfile} onOpenPost={onOpenPost} onToast={onToast} /> : null}
@@ -4102,14 +4127,14 @@ function PartnerListModal({
   );
 }
 
-function ProfileModal({ partner, onStartChat, onReport, onToast }: { partner: Partner; onStartChat: (partner: Partner) => void; onReport: () => void; onToast: (message: string) => void }) {
+function ProfileModal({ partner, following, onToggleFollow, onStartChat, onReport }: { partner: Partner; following: boolean; onToggleFollow: (partner: Partner) => void; onStartChat: (partner: Partner) => void; onReport: () => void }) {
   return (
     <div className="profile-modal-content">
       <div className={`profile-cover cover-${partner.accent}`}><span className="cover-pattern" /></div>
       <div className="profile-modal-head">
         <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} />
         <div><span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={18} className="verified" /> : null}</span><p>{partner.handle} · {partner.city}</p></div>
-        <div className="profile-head-actions"><button className="primary-button" type="button" onClick={() => onStartChat(partner)}><MessageCircle size={17} /> {t("대화 시작")}</button><button className="secondary-button" type="button" onClick={onReport}><Flag size={16} /> {t("신고")}</button></div>
+        <div className="profile-head-actions"><button className="primary-button" type="button" onClick={() => onStartChat(partner)}><MessageCircle size={17} /> {t("대화 시작")}</button><button className={following ? "secondary-button active" : "secondary-button"} type="button" aria-pressed={following} onClick={() => onToggleFollow(partner)}><UserPlus size={16} /> {following ? t("팔로잉") : t("팔로우")}</button><button className="secondary-button" type="button" onClick={onReport}><Flag size={16} /> {t("신고")}</button></div>
       </div>
       <div className="profile-match-strip"><span><Sparkles size={17} /><b>{partner.compatibility}%</b> {t("교환 궁합")}</span><span><Timer size={17} /><b>{partner.balance}</b></span><span><ShieldCheck size={17} />{t("안전 프로필 확인됨")}</span></div>
       <div className="profile-modal-grid">
@@ -4118,7 +4143,7 @@ function ProfileModal({ partner, onStartChat, onReport, onToast }: { partner: Pa
           <section><h3>{t("언어 교환")}</h3><div className="profile-language-grid"><span><small>{t("가르칠 수 있어요")}</small><strong>{partner.flag} {tx(partner.native)}</strong><em>{t("원어민")}</em></span><span><small>{t("배우고 있어요")}</small><strong>🇰🇷 {tx(partner.learning)}</strong><em>{partner.level}</em></span></div></section>
           <section><h3>{t("관심사")}</h3><div className="interest-row large">{partner.interests.map((item) => <span key={item}>{item}</span>)}</div></section>
         </div>
-        <aside className="profile-details"><h3>{t("잘 맞는 이유")}</h3><p><Clock3 size={16} /><span><strong>{t("활동 시간")}</strong><small>{partner.activeTime}</small></span></p><p><Trophy size={16} /><span><strong>{t("학습 목표")}</strong><small>{partner.goal}</small></span></p><p><PenLine size={16} /><span><strong>{t("교정 스타일")}</strong><small>{t("중요한 오류를 대화 후에")}</small></span></p><button type="button" onClick={() => onToast(t("파트너를 관심 목록에 저장했어요"))}><Star size={16} /> {t("관심 파트너로 저장")}</button></aside>
+        <aside className="profile-details"><h3>{t("잘 맞는 이유")}</h3><p><Clock3 size={16} /><span><strong>{t("활동 시간")}</strong><small>{partner.activeTime}</small></span></p><p><Trophy size={16} /><span><strong>{t("학습 목표")}</strong><small>{partner.goal}</small></span></p><p><PenLine size={16} /><span><strong>{t("교정 스타일")}</strong><small>{t("중요한 오류를 대화 후에")}</small></span></p></aside>
       </div>
     </div>
   );

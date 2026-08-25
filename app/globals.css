@@ -1772,7 +1772,7 @@ p {
   margin-top: var(--sp-2);
 }
 
-.post-tags button { padding: 0; border: 0; background: transparent; color: var(--subtle); font-size: 13px; }
+.post-tags button { display: inline-flex; min-height: 24px; align-items: center; padding: 0; border: 0; background: transparent; color: var(--subtle); font-size: 13px; }
 
 .post-visual {
   position: relative;
@@ -2253,7 +2253,7 @@ p {
 .exchange-banner small { margin-top: 2px; color: var(--muted); font-size: 12px; }
 .balance-bar { height: 5px; overflow: hidden; border-radius: var(--r-pill); background: var(--line); }
 .balance-bar i { display: block; height: 100%; border-radius: var(--r-pill); background: var(--primary); }
-.exchange-banner > button { display: flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 13px; font-weight: 600; }
+.exchange-banner > button { display: flex; min-height: 24px; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 13px; font-weight: 600; }
 
 .conversation-coach {
   flex: 0 0 auto;
@@ -2276,7 +2276,7 @@ p {
 .spinning { animation: coach-spin .8s linear infinite; }
 @keyframes coach-spin { to { transform: rotate(360deg); } }
 
-.coach-grid { display: grid; grid-template-columns: minmax(0, .95fr) minmax(260px, 1.05fr); gap: var(--sp-2); margin-top: var(--sp-2); }
+.coach-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: var(--sp-2); margin-top: var(--sp-2); }
 .coach-label { display: flex; align-items: center; gap: var(--sp-1); color: var(--muted); font-size: 12px; font-weight: 700; }
 .coach-topic-list { display: flex; min-width: 0; flex-direction: column; gap: var(--sp-1); }
 .coach-topic-list > button { display: grid; min-height: 28px; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2); border: var(--bw-thin) solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--subtle); font-size: 12px; text-align: left; }
@@ -2285,7 +2285,7 @@ p {
 .coach-response-card { min-width: 0; padding: var(--sp-2) var(--sp-2); border: var(--bw-hair) solid var(--line); border-radius: var(--r-btn); background: var(--surface); }
 .coach-response-card > p { margin-top: var(--sp-1); color: var(--muted); font-size: 13px; font-weight: 600; line-height: 1.4; }
 .coach-followups { display: flex; gap: var(--sp-1); margin-top: var(--sp-1); overflow-x: auto; scrollbar-width: none; }
-.coach-followups button { flex: 0 0 auto; padding: var(--sp-1) var(--sp-1); border: 0; border-radius: var(--r-sm); background: var(--sunken); color: var(--muted); font-size: 12px; }
+.coach-followups button { flex: 0 0 auto; min-height: 24px; padding: var(--sp-1) var(--sp-1); border: 0; border-radius: var(--r-sm); background: var(--sunken); color: var(--muted); font-size: 12px; }
 .coach-actions { display: flex; justify-content: flex-end; gap: var(--sp-1); margin-top: var(--sp-2); }
 .coach-actions button { display: inline-flex; min-height: 25px; align-items: center; justify-content: center; gap: var(--sp-1); padding: 0 8px; border: var(--bw-thin) solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 600; }
 .coach-actions button:last-child { border-color: var(--primary); background: var(--primary); color: var(--primary-text); }
@@ -2345,11 +2345,14 @@ p {
   gap: var(--sp-2);
   margin-top: var(--sp-1);
   opacity: 0;
+  /* 보이지 않는 동안에는 클릭도 받지 않습니다 — 이 줄은 아래 입력창과 겹쳐 있어서
+     그대로 두면 안 보이는 버튼이 입력창을 누르려는 손을 가로챕니다. */
+  pointer-events: none;
   transition: opacity .18s ease;
 }
 
-.message-row:hover .message-tools { opacity: 1; }
-.message-tools button { display: flex; align-items: center; gap: var(--sp-1); padding: 0; border: 0; background: transparent; color: var(--subtle); font-size: 12px; }
+.message-row:hover .message-tools { opacity: 1; pointer-events: auto; }
+.message-tools button { display: flex; min-width: 24px; min-height: 24px; align-items: center; justify-content: center; gap: var(--sp-1); padding: 0; border: 0; background: transparent; color: var(--subtle); font-size: 12px; }
 
 .voice-message { display: flex; min-width: 190px; align-items: center; gap: var(--sp-2); padding: 0; border: 0; background: transparent; color: inherit; }
 .play-dot { display: inline-flex; width: 24px; height: 24px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 50%; background: var(--sunken); color: var(--ink); }
@@ -2422,7 +2425,7 @@ p {
 }
 
 .message-input:focus-within { border-color: var(--line-structure); box-shadow: 0 0 0 3px rgba(161, 161, 161, .08); }
-.message-input textarea { width: 100%; max-height: 74px; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 1.4; }
+.message-input textarea { width: 100%; min-height: 24px; max-height: 74px; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 1.4; }
 .message-input button { display: inline-flex; align-items: center; justify-content: center; padding: var(--sp-1); border: 0; background: transparent; color: var(--muted); }
 .send-button { display: inline-flex; width: 39px; height: 39px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: var(--r-btn); background: var(--primary); color: var(--primary-text); }
 .send-button:disabled { background: var(--line-structure); color: var(--muted); }
@@ -3831,7 +3834,7 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   .message-area { padding: var(--sp-1) var(--sp-3) var(--sp-3); }
   .message-stack { max-width: 79%; }
   .message-bubble p { font-size: 13px; }
-  .message-tools { opacity: 1; }
+  .message-tools { opacity: 1; pointer-events: auto; }   /* 터치에는 hover 가 없습니다 */
   .message-tools button:nth-child(n+3) { display: none; }
   .voice-message { min-width: 170px; }
   .message-composer { padding: var(--sp-2) var(--sp-2) calc(var(--sp-2) + env(safe-area-inset-bottom)); }
@@ -5200,6 +5203,10 @@ label > svg { flex: none; }
 
 /* 밑줄 링크 — 문장 안에서 누를 수 있음을 알립니다 */
 .link-underline {
+  /* 밑줄 링크도 눌러야 하는 표적입니다 — 글자 높이(18px)만큼만 두면 24px 에 못 미칩니다. */
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
   padding: 0;
   border: 0;
   background: transparent;
@@ -5346,7 +5353,7 @@ label > svg { flex: none; }
    주고받은 마음
    ───────────────────────────────────────────── */
 
-.partner-header-actions { display: flex; gap: var(--sp-2); }
+.partner-header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); }
 
 .likes-entry { position: relative; }
 
