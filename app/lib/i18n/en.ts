@@ -320,6 +320,7 @@ export const en: Record<MessageKey, string> = {
   "배우는 중이에요": "Learning",
   "배우려는 말": "Language I want to learn",
   "배울 언어": "Language to learn",
+  "배울 언어는 반드시 맞춰서 찾고, 나머지는 가까운 사람까지 함께 보여드려요.": "We only require the language to match — for everything else we also show close fits.",
   "번역": "Translate",
   "번역 닫기": "Hide translation",
   "번역 중": "Translating",

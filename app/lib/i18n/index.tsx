@@ -164,12 +164,6 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
     // 탭 제목은 서버가 한국어로 그려두므로 사용자가 고른 언어로 다시 맞춥니다.
     //
-    // 다만 <title> 은 리액트가 스트리밍 메타데이터 경계 안에서 들고 있고, 그 경계는
-    // 본문보다 늦게 하이드레이션됩니다. 마운트 직후에 덮어쓰면 리액트가 나중에
-    // 서버 HTML 과 다른 값을 발견하고 "고쳐지지 않는다"고 경고합니다.
-    // load 이후로 미뤄 하이드레이션이 끝난 뒤에 손댑니다.
-    // 탭 제목은 서버가 한국어로 그려두므로 사용자가 고른 언어로 다시 맞춥니다.
-    //
     // <title> 은 리액트가 스트리밍 메타데이터 경계 안에서 들고 있고, 그 경계는 본문보다
     // 늦게 하이드레이션됩니다. 마운트 직후에 덮어쓰면 리액트가 서버 HTML 과 다른 값을
     // 발견하고 "고쳐지지 않는다"고 경고합니다. load 이후 두 프레임까지 미루면 그때는
@@ -211,6 +205,21 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
 export function useLocale(): LocaleContextValue {
   return useContext(LocaleContext);
+}
+
+/**
+ * 언어가 바뀔 때 이 컴포넌트를 다시 그리게 합니다.
+ *
+ * 화면들은 훅이 아니라 모듈 함수 t() 로 문구를 읽습니다(그래야 컴포넌트마다 배선을
+ * 하지 않아도 됩니다). 대신 t() 는 구독을 하지 않으므로, 언어만 바뀌어서는 아무것도
+ * 다시 그려지지 않습니다. I18nProvider 가 다시 그려져도 children 은 부모가 만들어
+ * 넘긴 같은 요소라 리액트가 하위를 통째로 건너뜁니다 — 그래서 언어를 바꿔도 화면은
+ * 그대로 있다가, 나중에 관계없는 렌더가 일어날 때야 슬그머니 바뀝니다.
+ *
+ * 앱의 최상위 화면 컴포넌트에서 이 훅을 한 번 부르면 그 아래가 전부 다시 그려집니다.
+ */
+export function useLocaleRerender(): Locale {
+  return useSyncExternalStore(subscribe, () => currentLocale, serverLocale);
 }
 
 /** 훅 형태가 필요할 때(메모이제이션된 자식 등). 평소에는 모듈 함수 t 를 쓰면 됩니다. */
