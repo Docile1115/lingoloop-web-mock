@@ -92,7 +92,9 @@ import {
   type RoomMessage,
   receivedCorrections,
 } from "@/app/lib/demo-data";
-import { I18nProvider, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
+import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
+import { SignIn } from "./SignIn";
+import { api, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, languageName } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -523,21 +525,22 @@ function IconButton({
   );
 }
 
-function LingoLoopScreens() {
+function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: () => void }) {
+  setSignedInId(me.id);
   const [section, setSection] = useState<Section>("discover");
   const [modal, setModal] = useState<ModalState>(null);
-  const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
+  const [posts, setPosts] = useState<FeedPost[]>([]);
   /* 내 글은 피드와 다른 목록입니다. 상수로 두면 좋아요·삭제가 화면에 남지 않습니다. */
-  const [myPostList, setMyPostList] = useState<FeedPost[]>(() => myPosts.map((post) => ({ ...post })));
-  const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
-  const [selectedChatId, setSelectedChatId] = useState(initialConversations[0].id);
+  const [myPostList, setMyPostList] = useState<FeedPost[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedChatId, setSelectedChatId] = useState("");
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [conversationDrafts, setConversationDrafts] = useState<Record<string, string>>({});
-  const [requestConversationIds, setRequestConversationIds] = useState<Set<string>>(() => new Set(["chat-aiko"]));
+  const [requestConversationIds, setRequestConversationIds] = useState<Set<string>>(() => new Set());
   const [feedTab, setFeedTab] = useState<"recommended" | "learning" | "following">("recommended");
   const [translatedPosts, setTranslatedPosts] = useState<Set<string>>(new Set());
   const [postTranslations, setPostTranslations] = useState<Record<string, string>>({});
-  const [openCorrections, setOpenCorrections] = useState<Set<string>>(new Set(["post-1"]));
+  const [openCorrections, setOpenCorrections] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [roomHandRaised, setRoomHandRaised] = useState(false);
   const [roomMicOn, setRoomMicOn] = useState(false);
@@ -546,7 +549,10 @@ function LingoLoopScreens() {
   const [exchangeLength, setExchangeLength] = useState(15);
   const [settings, setSettings] = useState<AppSettings>({ dmRequests: true, hideLocation: true, correctionAlerts: true, autoSync: true, dmScope: "matches" });
   const [matchPreferences, setMatchPreferences] = useState<MatchPreferences>(defaultMatchPreferences);
-  const [dailyRecommendations, setDailyRecommendations] = useState<DailyMatchRecommendation[]>(() => fallbackDailyRecommendations(defaultMatchPreferences));
+  const [dailyRecommendations, setDailyRecommendations] = useState<DailyMatchRecommendation[]>([]);
+  /* 첫 불러오기가 끝나기 전에는 "아무것도 없음" 과 구분해야 합니다. */
+  const [loading, setLoading] = useState(true);
+  const [livePartners, setLivePartners] = useState<Partner[]>([]);
   const [detail, setDetail] = useState<DetailRoute>(null);
   const [partnerIndex, setPartnerIndex] = useState(0);
   const [signaledPartners, setSignaledPartners] = useState<string[]>([]);
@@ -565,13 +571,61 @@ function LingoLoopScreens() {
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profile, setProfile] = useState<ProfileDraft>({
-    name: currentUser.name,
-    bio: currentUser.bio,
+    name: me.name,
+    bio: me.bio,
     goal: t("부담 없는 일상 대화"),
     visibility: "public",
   });
   const [replySort, setReplySort] = useState<"popular" | "recent">("popular");
   const toastTimer = useRef<number | null>(null);
+
+  /**
+   * 서버에서 화면에 필요한 것을 한 번에 받아옵니다.
+   *
+   * 예전에는 fixture 를 들고 시작했습니다. 이제는 빈 화면으로 시작해 여기서 채웁니다 —
+   * 실패하면 가짜 데이터로 되돌아가지 않고 빈 상태를 그대로 보여줍니다. 가짜를
+   * 섞으면 사용자는 자기 데이터가 사라졌는지 서버가 죽었는지 알 수 없습니다.
+   */
+  const reload = useCallback(async () => {
+    try {
+      const [postList, conversationList, requestList] = await Promise.all([
+        api<ApiPost[]>("/api/posts"),
+        api<ApiConversation[]>("/api/conversations"),
+        api<ApiConversation[]>("/api/conversations?box=requests"),
+      ]);
+      const feed = (postList || []).map(toFeedPost);
+      setPosts(feed);
+      setMyPostList(feed.filter((post) => post.authorId === me.id));
+
+      const rooms = [...(conversationList || []), ...(requestList || [])];
+      setConversations(rooms.map((room) => toConversation(room)));
+      setRequestConversationIds(new Set((requestList || []).map((room) => room.id)));
+      setSelectedChatId((current) => (rooms.some((room) => room.id === current) ? current : rooms[0]?.id ?? ""));
+    } catch {
+      /* 실패해도 빈 화면을 유지합니다. 오류는 아래 개별 동작에서 알립니다. */
+    } finally {
+      setLoading(false);
+    }
+  }, [me.id]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void reload(), 0);
+    return () => window.clearTimeout(timer);
+  }, [reload]);
+
+  /** 고른 대화의 메시지를 채웁니다. 목록만으로는 말풍선을 그릴 수 없습니다. */
+  useEffect(() => {
+    if (!selectedChatId) return;
+    let cancelled = false;
+    api<ApiMessage[]>(`/api/conversations/${encodeURIComponent(selectedChatId)}/messages`)
+      .then((rows) => {
+        if (cancelled) return;
+        const messages = (rows || []).map((row) => toChatMessage(row, me.id));
+        setConversations((current) => current.map((room) => (room.id === selectedChatId ? { ...room, messages } : room)));
+      })
+      .catch(() => { /* 대화를 못 읽어도 목록은 그대로 둡니다. */ });
+    return () => { cancelled = true; };
+  }, [selectedChatId, me.id]);
 
   const selectedConversation = conversations.find((item) => item.id === selectedChatId) ?? conversations[0];
   /* 내비게이션 배지는 실제 안 읽은 수의 합입니다. 대화를 열면 그 방의 안 읽음이 0이 되어 함께 줄어듭니다. */
@@ -1055,28 +1109,23 @@ function LingoLoopScreens() {
     );
     setDraft("");
 
-    /* 프런트 fixture 대화만 mock 백엔드 대화와 짝이 있습니다. 짝이 없는 새 대화를
-       임의의 방(conversation-maya)으로 보내면 다른 사람 대화에 기록되므로 호출하지 않습니다. */
-    const apiConversationId = {
-      "chat-maya": "conversation-maya",
-      "chat-lucas": "conversation-sofia",
-      "chat-aiko": "conversation-ren",
-      "chat-group": "conversation-sofia",
-    }[selectedConversation.id];
-    if (!apiConversationId) {
-      showToast(t("메시지를 보냈어요 · 새 대화는 이 기기에만 저장돼요"));
-      return;
-    }
+    // 화면에는 먼저 붙이고 서버에 보냅니다. 실패하면 방금 붙인 것을 걷어내
+    // "보낸 줄 알았는데 안 갔다" 를 만들지 않습니다.
     try {
-      const response = await fetch("/api/messages", {
+      await api("/api/conversations/" + encodeURIComponent(selectedConversation.id) + "/messages", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ conversationId: apiConversationId, text, type: "text" }),
+        body: JSON.stringify({ text, type: "text" }),
       });
-      if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-      showToast(t("메시지를 보냈어요 · mock API 동기화 완료"));
-    } catch {
-      showToast(t("메시지를 기기에 저장했어요 · 오프라인 데모"));
+    } catch (caught) {
+      setConversations((items) =>
+        items.map((conversation) =>
+          conversation.id === selectedConversation.id
+            ? { ...conversation, messages: conversation.messages.filter((message) => message.id !== newMessage.id) }
+            : conversation,
+        ),
+      );
+      setDraft(text);
+      showToast(caught instanceof Error ? caught.message : t("메시지를 보내지 못했어요."));
     }
   };
 
@@ -1110,30 +1159,27 @@ function LingoLoopScreens() {
     }
   };
 
-  const publishPost = (text: string, options: PublishOptions) => {
-    const post: FeedPost = {
-      id: `post-${Date.now()}`,
-      authorId: currentUser.id,
-      author: currentUser.name,
-      handle: currentUser.handle,
-      flag: currentUser.flag,
-      accent: currentUser.accent,
-      time: t("방금"),
-      language: t("영어"),
-      level: currentUser.level,
-      text,
-      translation: t("이 게시물은 데모 번역을 요청하면 한국어로 표시됩니다."),
-      tags: options.requestCorrection ? [t("#교정해주세요"), t("#오늘의연습"), t("#영어")] : [t("#오늘의연습"), t("#영어")],
-      likes: 0,
-      comments: 0,
-      corrections: 0,
-      visibility: options.visibility,
-    };
-    setPosts((items) => [post, ...items]);
-    setMyPostList((items) => [post, ...items]);
-    setModal(null);
-    setSection("community");
-    showToast(options.requestCorrection ? t("커뮤니티에 게시했어요 · 원어민 교정을 요청했어요") : t("커뮤니티에 게시했어요"));
+  const publishPost = async (text: string, options: PublishOptions) => {
+    try {
+      const saved = await api<ApiPost>("/api/posts", {
+        method: "POST",
+        body: JSON.stringify({
+          text,
+          language: me.learningLanguages?.[0]?.code ?? "en",
+          targetLanguage: me.nativeLanguages?.[0] ?? "ko",
+          visibility: options.visibility,
+          requestCorrection: options.requestCorrection,
+        }),
+      });
+      const post = toFeedPost(saved);
+      setPosts((items) => [post, ...items]);
+      setMyPostList((items) => [post, ...items]);
+      setModal(null);
+      setSection("community");
+      showToast(options.requestCorrection ? t("커뮤니티에 게시했어요 · 원어민 교정을 요청했어요") : t("커뮤니티에 게시했어요"));
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : t("글을 올리지 못했어요."));
+    }
   };
 
   const createVoiceRoom = (details: { title: string; topic: string; language: string; level: string }) => {
@@ -1266,8 +1312,8 @@ function LingoLoopScreens() {
         <div className="sidebar-spacer" />
         <div className="sidebar-profile-row">
           <button className="sidebar-profile" type="button" aria-label={t("내 프로필")} onClick={() => goToSection("learn")}>
-            <Avatar name={currentUser.name} flag={currentUser.flag} accent="violet" size="sm" online />
-            <span><strong>{currentUser.name}</strong><small>{tx(currentUser.native)} → {tx(currentUser.learning)}</small></span>
+            <Avatar name={profile.name} flag={me.country?.flag ?? "🌐"} accent="violet" size="sm" online />
+            <span><strong>{profile.name}</strong><small>{tx(languageName(me.nativeLanguages?.[0] ?? "ko"))} → {tx(languageName(me.learningLanguages?.[0]?.code ?? "en"))}</small></span>
           </button>
           <MenuPopover
             label={t("내 메뉴")}
@@ -1392,6 +1438,7 @@ function LingoLoopScreens() {
                 onSavePhrase={savePhrase}
                 onCopyLink={copyLink}
                 onDeletePost={deletePost}
+                myLearningLanguage={languageName(me.learningLanguages?.[0]?.code ?? "en")}
               />
             ) : null}
             {!detail && section === "chats" ? (
@@ -1456,6 +1503,7 @@ function LingoLoopScreens() {
                 savedCount={savedItems.length}
                 profileName={profile.name}
                 profileBio={profile.bio}
+                me={me}
                 onOpenTag={(tag) => { setActiveTag(tag); goToSection("community"); }}
                 myPostList={myPostList}
                 onCopyLink={copyLink}
@@ -1695,7 +1743,19 @@ function SelectField({
 }
 
 /** 내 글인가. 새로 쓴 글과 데모의 내 글이 같은 id 를 써야 이 판정이 맞습니다. */
-const isMyPost = (post: FeedPost) => post.authorId === currentUser.id;
+/**
+ * 지금 로그인한 사람의 id.
+ *
+ * 모듈 함수(postMenuItems)도 "내 글인가"를 판단해야 하는데, 컴포넌트 밖이라 상태를
+ * 읽을 수 없습니다. 로그인할 때 한 번 적어두고 여기서 읽습니다 — 브라우저에는
+ * 한 번에 한 사람만 로그인하므로 값이 섞일 일이 없습니다.
+ */
+let signedInId = "";
+export function setSignedInId(id: string) {
+  signedInId = id;
+}
+
+const isMyPost = (post: FeedPost) => post.authorId === signedInId;
 
 /**
  * 게시물 ··· 메뉴 항목.
@@ -2540,6 +2600,7 @@ function CommunityView({
   onSavePhrase,
   onCopyLink,
   onDeletePost,
+  myLearningLanguage,
 }: {
   posts: FeedPost[];
   tab: "recommended" | "learning" | "following";
@@ -2554,6 +2615,8 @@ function CommunityView({
   onSavePhrase: (item: SavedPhrase) => void;
   onCopyLink: (url: string) => void;
   onDeletePost: (post: FeedPost) => void;
+  /** "학습" 탭은 내가 배우는 언어로 쓴 글만 봅니다. */
+  myLearningLanguage: string;
   translated: Set<string>;
   translations: Record<string, string>;
   corrections: Set<string>;
@@ -2572,7 +2635,7 @@ function CommunityView({
     // 숨기거나 차단한 사람의 글은 피드에서 빠집니다 — 그래야 눌린 게 보입니다.
     if (hiddenAuthorIds.has(post.authorId) || blockedAuthorIds.has(post.authorId)) return false;
     if (activeTag) return post.tags.includes(activeTag);
-    if (tab === "learning") return post.language === currentUser.learning;
+    if (tab === "learning") return post.language === myLearningLanguage;
     if (tab === "following") return followingAuthors.includes(post.authorId);
     return true;
   });
@@ -3289,6 +3352,7 @@ function LearnView({
   savedCount,
   profileName,
   profileBio,
+  me,
   onOpenTag,
   myPostList,
   onCopyLink,
@@ -3308,6 +3372,8 @@ function LearnView({
   myPostList: FeedPost[];
   onCopyLink: (url: string) => void;
   onDeletePost: (post: FeedPost) => void;
+  /** 로그인한 사람. 핸들·국기처럼 서버가 주는 값을 그립니다. */
+  me: ApiProfile;
 }) {
   const [profileTab, setProfileTab] = useState("posts");
   const [showAllSaved, setShowAllSaved] = useState(false);
@@ -3317,17 +3383,17 @@ function LearnView({
       <header className="profile-head">
         <div className="profile-head-id">
           <span className="profile-head-name">{profileName}<BadgeCheck size={18} className="verified" /></span>
-          <p className="profile-head-handle">{currentUser.handle}</p>
+          <p className="profile-head-handle">{me.handle}</p>
         </div>
-        <Avatar name={profileName} flag={currentUser.flag} accent="violet" size="xl" online />
+        <Avatar name={profileName} flag={me.country?.flag ?? "🌐"} accent="violet" size="xl" online />
       </header>
 
       <p className="profile-head-bio">{profileBio}</p>
 
       <div className="profile-head-stats">
-        <span><strong>{currentUser.partners}</strong> {t("파트너")}</span>
+        {/* 파트너 수·연속 일수는 서버가 아직 세지 않습니다. 지어낸 숫자를 보여주면
+            사용자가 자기 기록으로 믿게 되므로, 셀 수 있는 것만 둡니다. */}
         <span><strong>{myPostList.length}</strong> {t("게시물")}</span>
-        <span><strong>{currentUser.streak}</strong>{t("일 연속")}</span>
       </div>
 
       <div className="profile-head-actions">
@@ -4609,7 +4675,54 @@ function LanguagePicker() {
 export default function LingoLoopApp() {
   return (
     <I18nProvider>
-      <LingoLoopScreens />
+      <AuthGate />
     </I18nProvider>
   );
+}
+
+/**
+ * 로그인한 사람만 안쪽 화면을 봅니다.
+ *
+ * 세션 확인이 끝나기 전에는 아무것도 그리지 않습니다 — 로그인 화면을 잠깐 보여줬다가
+ * 안쪽으로 바뀌면 이미 로그인한 사람에게는 깜빡임으로 보입니다.
+ */
+function AuthGate() {
+  useLocaleRerender();
+  const [state, setState] = useState<"checking" | "in" | "out">("checking");
+  const [me, setMe] = useState<ApiProfile | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ user: ApiProfile }>("/api/auth/me")
+      .then((result) => {
+        if (cancelled) return;
+        setMe(result.user);
+        setState("in");
+      })
+      .catch(() => {
+        if (!cancelled) setState("out");
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (state === "checking") {
+    return (
+      <main className="signin-page">
+        <section className="signin-intro">
+          <div className="signin-brand">
+            <span className="brand-mark"><Languages size={22} /></span>
+            <span>Lingo<strong>Loop</strong></span>
+          </div>
+          <p>{t("로그인 상태를 확인하고 있어요.")}</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (state === "out" || !me) {
+    return <SignIn onSignedIn={(user) => { setMe(user); setState("in"); }} />;
+  }
+
+  // 계정이 바뀌면 화면 상태를 처음부터 다시 만듭니다.
+  return <LingoLoopScreens key={me.id} me={me} onSignedOut={() => { setMe(null); setState("out"); }} />;
 }

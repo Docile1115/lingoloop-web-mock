@@ -6538,3 +6538,100 @@ label > svg { flex: none; }
 }
 .chat-thread-empty strong { color: var(--ink); font-size: 15px; }
 .chat-thread-empty p { max-width: 280px; font-size: 13px; line-height: 1.6; }
+
+/* ─────────────────────────────────────────────
+   로그인·가입 — 앱 안쪽과 같은 토큰을 씁니다.
+   ───────────────────────────────────────────── */
+.signin-page {
+  display: grid;
+  min-height: 100dvh;
+  align-content: center;
+  gap: var(--sp-7);
+  grid-template-columns: minmax(0, 1fr) min(430px, 100%);
+  padding: var(--sp-6) var(--page-pad-x);
+  background: var(--canvas);
+}
+
+.signin-intro { max-width: 520px; }
+
+.signin-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-6);
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.signin-brand strong { color: var(--primary); }
+
+.signin-intro h1 {
+  margin: 0 0 var(--sp-3);
+  font-size: 38px;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+.signin-intro p { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.65; }
+
+.signin-card {
+  padding: var(--sp-6);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.signin-tabs {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: var(--sp-5);
+  padding: 4px;
+  border-radius: var(--r-btn);
+  background: var(--sunken);
+}
+
+.signin-tabs button {
+  min-height: 38px;
+  border: 0;
+  border-radius: calc(var(--r-btn) - 3px);
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.signin-tabs button.active { background: var(--surface); color: var(--ink); }
+
+.signin-card h2 { margin: 0 0 6px; font-size: 21px; }
+.signin-lead { margin: 0 0 var(--sp-5); color: var(--muted); font-size: 14px; }
+
+.signin-form { display: grid; gap: var(--sp-4); }
+.signin-form label { display: grid; gap: 7px; color: var(--muted); font-size: 13px; font-weight: 600; }
+
+.signin-field {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  border: var(--bw-thin) solid var(--line-structure);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--subtle);
+}
+
+.signin-field:focus-within { border-color: var(--line-strong); }
+.signin-field input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 15px; }
+
+.signin-form .primary-button { min-height: 46px; margin-top: var(--sp-1); }
+.signin-error { margin: 0; color: var(--danger); font-size: 13px; }
+.signin-legal { display: block; margin-top: var(--sp-4); color: var(--subtle); font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 940px) {
+  .signin-page { grid-template-columns: minmax(0, 1fr); gap: var(--sp-6); }
+  .signin-intro { max-width: none; text-align: center; }
+  .signin-brand { justify-content: center; }
+  .signin-intro h1 { font-size: 28px; }
+}

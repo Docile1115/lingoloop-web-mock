@@ -76,7 +76,9 @@ test("지원 언어와 서버 기본값·브라우저 저장 계약이 유지된
   assert.match(runtime, /document\.documentElement\.lang = locale;/);
   assert.match(runtime, /window\.localStorage\.setItem\(STORAGE_KEY, next\);/);
   assert.match(runtime, /document\.title = SITE_METADATA\[locale\]\.title;/);
-  assert.match(app, /<I18nProvider>[\s\S]*<LingoLoopScreens \/>[\s\S]*<\/I18nProvider>/);
+  // 예전 화면은 로그인 게이트를 거쳐 안쪽 화면을 그립니다.
+  assert.match(app, /<I18nProvider>[\s\S]*<AuthGate \/>[\s\S]*<\/I18nProvider>/);
+  assert.match(app, /<LingoLoopScreens key=\{me\.id\}/);
   assert.match(production, /<I18nProvider>[\s\S]*<ProductionLingoLoopScreens \/>[\s\S]*<\/I18nProvider>/);
 });
 
