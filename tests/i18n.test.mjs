@@ -80,13 +80,16 @@ test("지원 언어와 서버 기본값·브라우저 저장 계약이 유지된
   assert.match(production, /<I18nProvider>[\s\S]*<ProductionLingoLoopScreens \/>[\s\S]*<\/I18nProvider>/);
 });
 
-test("서버 렌더 메타데이터도 요청 언어를 따른다", async () => {
+test("서버 렌더 메타데이터는 문서 언어와 한 벌로 유지된다", async () => {
   // 탭 제목·검색 결과 문구는 서버에서 만들어져 t() 를 쓸 수 없습니다.
+  // 요청마다 언어를 바꾸면 처음 흘려보낸 HTML 과 스트리밍 메타데이터가 어긋나므로
+  // 서버는 한 언어로 그리고, 사용자가 고른 언어는 브라우저에서 제목만 다시 맞춥니다.
   const [layout, metadata] = await Promise.all([
     read(join(ROOT, "app/layout.tsx")),
     read(join(I18N, "metadata.ts")),
   ]);
-  assert.match(layout, /localeFromAcceptLanguage\(requestHeaders\.get\("accept-language"\)\)/);
+  assert.match(layout, /const copy = SITE_METADATA\.ko;/);
+  assert.match(layout, /<html lang="ko">/);
   // 주석은 설명이라 남겨둡니다 — 화면에 나가는 문자열만 봅니다.
   const layoutStrings = layout
     .split("\n")
