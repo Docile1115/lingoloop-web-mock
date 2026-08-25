@@ -1104,6 +1104,8 @@
   overflow: hidden;
 }
 
+.threadBack { display: none; }
+
 .chatList {
   overflow-y: auto;
   border-right: 1px solid var(--line);
@@ -1602,6 +1604,32 @@
 
 }
 
+/* 목록과 대화창을 나란히 두려면 둘 다 읽을 만한 너비가 나와야 합니다.
+   940px 아래에서는 사이드바가 남은 채로 대화창이 200~270px 까지 줄어들어
+   (390px 에서는 목록이 92px) 한 번에 하나씩 보여주고 골랐을 때 넘어갑니다. */
+@media (max-width: 940px) {
+  .chatLayout { grid-template-columns: minmax(0, 1fr); }
+  .chatLayout > .thread { display: none; }
+  .chatLayout.threadOpen > .chatList { display: none; }
+  .chatLayout.threadOpen > .thread { display: grid; }
+  .chatList { border-right: 0; }
+
+  .threadBack {
+    display: inline-flex;
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .threadBack:hover { background: var(--sunken); }
+}
+
 @media (max-width: 720px) {
   .root {
     min-height: 100dvh;
@@ -1753,34 +1781,10 @@
   .chatLayout {
     height: calc(100dvh - 190px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     min-height: 480px;
-    grid-template-columns: 92px minmax(0, 1fr);
     border-radius: 14px;
   }
 
-  .chatList {
-    padding: 5px;
-  }
-
-  .chatList button {
-    min-height: 68px;
-    grid-template-columns: 1fr;
-    justify-items: center;
-    gap: 3px;
-    padding: 6px 3px;
-    text-align: center;
-  }
-
-  .chatList button > span strong {
-    max-width: 72px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .chatList button small,
-  .chatList time {
-    display: none;
-  }
+  .chatList { padding: 5px; }
 
   .thread > header {
     padding-inline: 10px;
