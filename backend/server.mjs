@@ -8,6 +8,10 @@ import { decideDmRoute } from "./policy.mjs";
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
 const IDENTITY_API_KEY = process.env.IDENTITY_API_KEY;
+// 기본값은 실제 Identity Platform 입니다. 로컬에서 Auth 에뮬레이터를 붙일 때만
+// 이 값을 바꿔 씁니다 — GEMINI_API_BASE_URL 과 같은 방식입니다.
+const IDENTITY_API_BASE_URL =
+  process.env.IDENTITY_API_BASE_URL || "https://identitytoolkit.googleapis.com";
 const PROXY_SHARED_SECRET = process.env.PROXY_SHARED_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
@@ -287,7 +291,7 @@ async function identityPost(method, payload) {
   let response;
   try {
     response = await fetch(
-      "https://identitytoolkit.googleapis.com/v1/accounts:" + method + "?key=" + encodeURIComponent(IDENTITY_API_KEY),
+      IDENTITY_API_BASE_URL + "/v1/accounts:" + method + "?key=" + encodeURIComponent(IDENTITY_API_KEY),
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -419,33 +423,50 @@ function matchCandidate(candidate, me, preferences, date) {
       (preferences.partnerGender === "women" && candidate.gender === "woman") ||
       (preferences.partnerGender === "men" && candidate.gender === "man"));
   let score = 35;
+  // 매칭 이유는 화면에 그대로 나오는 문구입니다. 서버가 한국어 문장으로 만들어 보내면
+  // 클라이언트가 번역할 수 없으므로, 사람이 읽는 문장(matchReasons)과 함께
+  // 코드+값(matchReasonCodes)을 보냅니다. 화면은 코드가 있으면 자기 언어로 그립니다.
   const reasons = [];
+  const reasonCodes = [];
   if (matchedLanguages.length) {
     score += 25;
-    reasons.push(matchedLanguages.map((code) => LANGUAGES.find((item) => item.code === code)?.nativeName || code).join(" · ") + " 원어민 파트너예요");
+    const names = matchedLanguages.map((code) => LANGUAGES.find((item) => item.code === code)?.nativeName || code).join(" · ");
+    reasons.push(names + " 원어민 파트너예요");
+    reasonCodes.push({ code: "native-speaker", languages: names });
   }
   if (preferences.preferredCountries.includes(candidate.country?.code)) {
     score += 10;
     reasons.push("희망 지역인 " + (candidate.country?.flag || "") + " " + (candidate.country?.name || "") + "에 있어요");
+    reasonCodes.push({ code: "preferred-country", flag: candidate.country?.flag || "", country: candidate.country?.name || "" });
   }
   if (matchedInterests.length) {
     score += Math.min(12, matchedInterests.length * 4);
-    reasons.push(matchedInterests.slice(0, 2).join(" · ") + " 관심사가 같아요");
+    const interests = matchedInterests.slice(0, 2).join(" · ");
+    reasons.push(interests + " 관심사가 같아요");
+    reasonCodes.push({ code: "shared-interests", interests });
   }
   if (matchedAvailability.length) {
     score += 8;
     reasons.push("선호하는 학습 시간대가 겹쳐요");
+    reasonCodes.push({ code: "time-overlap" });
   }
   if (matchedIntents.length) score += 6;
   if (candidate.verified) score += 4;
   if (candidate.status === "online") score += 4;
   score += stableHash(date + ":" + candidate.id) % 5;
-  if (!exact) reasons.unshift("일부 조건을 넓혀 찾은 가까운 파트너예요");
-  if (reasons.length < 2) reasons.push("새로운 실제 회원과 첫 언어 교환을 시작해 보세요");
+  if (!exact) {
+    reasons.unshift("일부 조건을 넓혀 찾은 가까운 파트너예요");
+    reasonCodes.unshift({ code: "broadened" });
+  }
+  if (reasons.length < 2) {
+    reasons.push("새로운 실제 회원과 첫 언어 교환을 시작해 보세요");
+    reasonCodes.push({ code: "first-exchange" });
+  }
   return {
     partner: publicProfile(candidate),
     score: Math.min(99, score),
     matchReasons: reasons.slice(0, 4),
+    matchReasonCodes: reasonCodes.slice(0, 4),
     icebreaker: "Hi " + candidate.name + "! What would you like to practice today?",
     meetsAllPreferences: exact,
   };
@@ -884,7 +905,11 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
   const version = preferenceVersion(preferences);
   const dailyReference = db.collection("dailyMatches").doc(req.auth.uid).collection("days").doc(date);
   const dailySnapshot = await dailyReference.get();
-  if (dailySnapshot.exists && dailySnapshot.data().preferenceVersion === version) {
+  // 하루치 추천은 캐시해 매일 같은 얼굴을 보여줍니다. 다만 "추천 0명"까지 캐시하면
+  // 가입 첫날 아직 아무도 없던 사람은 그날 내내 빈 화면을 봅니다 — 한 시간 뒤 딱 맞는
+  // 파트너가 가입해도요. 빈 결과일 때만 다시 계산합니다.
+  const storedRecommendations = dailySnapshot.exists ? dailySnapshot.data().recommendations || [] : [];
+  if (dailySnapshot.exists && dailySnapshot.data().preferenceVersion === version && storedRecommendations.length > 0) {
     const stored = dailySnapshot.data();
     const profileMap = await profilesByIds((stored.recommendations || []).map((item) => item.partnerId));
     const recommendations = (stored.recommendations || [])
@@ -1006,6 +1031,27 @@ app.post("/api/posts", requireUser, async (req, res) => {
   };
   await db.collection("posts").doc(post.id).create(post);
   return success(res, req, post, 201);
+});
+
+/**
+ * 내 글 삭제. 남의 글은 지울 수 없으므로 작성자를 서버에서 확인합니다
+ * (화면이 메뉴를 숨기는 것만으로는 권한이 되지 않습니다).
+ * 좋아요 하위 컬렉션도 함께 지워 고아 문서를 남기지 않습니다.
+ */
+app.delete("/api/posts/:postId", requireUser, async (req, res) => {
+  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postReference = db.collection("posts").doc(postId);
+  const snapshot = await postReference.get();
+  if (!snapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
+  if (snapshot.data().authorId !== req.auth.uid) {
+    throw new ApiError(403, "POST_FORBIDDEN", "내가 쓴 글만 삭제할 수 있습니다.");
+  }
+  const reactions = await postReference.collection("reactions").get();
+  const batch = db.batch();
+  reactions.docs.forEach((document) => batch.delete(document.ref));
+  batch.delete(postReference);
+  await batch.commit();
+  return success(res, req, { id: postId, deleted: true });
 });
 
 app.post("/api/posts/:postId/like", requireUser, async (req, res) => {

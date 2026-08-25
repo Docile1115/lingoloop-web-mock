@@ -43,3 +43,14 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+
+# 로컬 실행 설정 (개인 GCP 값이 들어갑니다)
+dev.local.sh
+
+# 로컬 에뮬레이터 설정
+firebase.json
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.dev.vars
