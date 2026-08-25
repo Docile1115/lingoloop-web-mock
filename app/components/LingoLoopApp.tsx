@@ -1557,6 +1557,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 post={detail.post}
                 onBack={closeDetail}
                 onProfile={(authorId) => {
+                  if (authorId === me.id) { closeDetail(); goToSection("learn"); return; }
                   const partner = findPartner(authorId);
                   if (partner) openProfile(partner);
                   else showToast(t("이 작성자의 프로필을 열 수 없어요"));
@@ -1639,6 +1640,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onCorrection={(id) => toggleSetValue(setOpenCorrections, id)}
                 onToggle={togglePost}
                 onProfile={(id) => {
+                  if (id === me.id) { goToSection("learn"); return; }
                   const partner = findPartner(id);
                   if (partner) openProfile(partner);
                   else showToast(t("이 작성자의 프로필을 열 수 없어요"));
@@ -3131,15 +3133,8 @@ function ChatsView({
   const pickPhoto = async (file: File) => {
     if (!file.type.startsWith("image/")) return onToast(t("사진 파일만 보낼 수 있어요"));
     try {
-      const bitmap = await createImageBitmap(file);
-      const scale = Math.min(1, 1280 / Math.max(bitmap.width, bitmap.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(bitmap.width * scale);
-      canvas.height = Math.round(bitmap.height * scale);
-      canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      bitmap.close();
-      const media = canvas.toDataURL("image/jpeg", 0.75);
-      if (media.length > 700000) return onToast(t("사진이 너무 커요. 더 작은 사진을 골라주세요."));
+      const media = await shrinkImage(file);
+      if (media.length > MAX_ATTACHMENT) return onToast(t("사진을 줄여도 너무 커요. 다른 사진을 골라주세요."));
       await onSendAttachment("image", media, t("사진"));
     } catch {
       onToast(t("사진을 읽지 못했어요."));
@@ -3167,7 +3162,7 @@ function ChatsView({
         const reader = new FileReader();
         reader.onload = () => {
           const media = String(reader.result || "");
-          if (media.length > 700000) return onToast(t("녹음이 너무 길어요. 짧게 다시 녹음해 주세요."));
+          if (media.length > 700000) return onToast(t("녹음이 너무 길어요. 30초 안쪽으로 다시 녹음해 주세요."));
           void onSendAttachment("voice", media, t("음성 메시지"));
         };
         reader.readAsDataURL(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
@@ -3825,7 +3820,7 @@ function LearnView({
           <span className="profile-head-name">{profileName}<BadgeCheck size={18} className="verified" /></span>
           <p className="profile-head-handle">{me.handle}</p>
         </div>
-        <Avatar name={profileName} flag={me.country?.flag ?? "🌐"} accent="violet" size="xl" online />
+        <Avatar name={profileName} flag={me.country?.flag ?? "🌐"} accent="violet" size="xl" online photo={me.avatarUrl} countryCode={me.country?.code} />
       </header>
 
       <p className="profile-head-bio">{profileBio}</p>
@@ -4556,22 +4551,38 @@ function MatchingPreferencesModal({
   );
 }
 
+/** 붙일 수 있는 파일 크기 상한. 문서 한도(1MB)에 여유를 둡니다. */
+const MAX_ATTACHMENT = 520000;
+
 /**
  * 고른 사진을 보낼 수 있는 크기로 줄입니다.
  *
- * 원본은 몇 MB 라 그대로는 담기지 않습니다. 긴 변 1280px 로 줄이고 JPEG 로
- * 다시 눌러 담으면 보통 100~200KB 입니다. 저장소 버킷이 생기면 이 함수 대신
- * 업로드하고 받은 주소를 쓰면 됩니다.
+ * 원본은 몇 MB 라 그대로는 담기지 않습니다. 들어갈 때까지 조금씩 더 줄여서,
+ * 사진이 몇 KB 인지 사용자가 알 필요가 없게 합니다 — 예전에는 "64KB 이하여야
+ * 합니다" 라고만 알리고 얼마나 줄여야 하는지는 알려주지 않았습니다.
+ *
+ * 저장소 버킷이 생기면 이 함수 대신 업로드하고 받은 주소를 쓰면 됩니다.
  */
 async function shrinkImage(file: File): Promise<string> {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 1280 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const attempts: Array<[number, number]> = [
+    [1280, 0.75],
+    [1024, 0.7],
+    [800, 0.65],
+    [640, 0.6],
+  ];
+  let smallest = "";
+  for (const [edge, quality] of attempts) {
+    const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    smallest = canvas.toDataURL("image/jpeg", quality);
+    if (smallest.length <= MAX_ATTACHMENT) break;
+  }
   bitmap.close();
-  return canvas.toDataURL("image/jpeg", 0.75);
+  return smallest;
 }
 
 /** 브라우저 녹음기. 멈추면 데이터 URI 를 돌려줍니다. */
@@ -4595,9 +4606,6 @@ function startRecorder(onDone: (media: string) => void, onFail: () => void) {
     .catch(onFail);
   return () => recorder?.stop();
 }
-
-/** 붙일 수 있는 파일 크기 상한. 문서 한도(1MB)에 여유를 둡니다. */
-const MAX_ATTACHMENT = 700000;
 
 /** 글에 달 수 있는 주제. 서버의 tags 로 그대로 갑니다. */
 const POST_TOPICS: MessageKey[] = [
@@ -4626,7 +4634,7 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
   const pickPhoto = async (file: File) => {
     try {
       const media = await shrinkImage(file);
-      if (media.length > MAX_ATTACHMENT) return onToast(t("사진이 너무 커요. 더 작은 사진을 골라주세요."));
+      if (media.length > MAX_ATTACHMENT) return onToast(t("사진을 줄여도 너무 커요. 다른 사진을 골라주세요."));
       setImage(media);
     } catch {
       onToast(t("사진을 읽지 못했어요."));
@@ -4639,7 +4647,7 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
       (media) => {
         setRecording(false);
         stopRef.current = null;
-        if (media.length > MAX_ATTACHMENT) return onToast(t("녹음이 너무 길어요. 짧게 다시 녹음해 주세요."));
+        if (media.length > MAX_ATTACHMENT) return onToast(t("녹음이 너무 길어요. 30초 안쪽으로 다시 녹음해 주세요."));
         setAudio(media);
       },
       () => { setRecording(false); stopRef.current = null; onToast(t("마이크를 쓸 수 없어요. 브라우저 권한을 확인해 주세요.")); },

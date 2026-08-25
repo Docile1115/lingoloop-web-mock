@@ -758,7 +758,27 @@ app.use("/api", (req, _res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "64kb", type: "application/json" }));
+/**
+ * 본문 크기 제한.
+ *
+ * 글·메시지는 몇 KB 면 충분해서 64KB 로 좁게 잡습니다. 사진·음성을 붙일 수 있는
+ * 길만 넓힙니다 — 전부 넓히면 아무 데나 큰 본문을 밀어넣을 수 있습니다.
+ * (저장소 버킷이 생겨 파일을 따로 올리게 되면 이 예외는 없어집니다.)
+ */
+const ATTACHMENT_ROUTES = [
+  "/api/posts",
+  "/api/messages",
+  "/api/profile",
+  /^\/api\/conversations\/[^/]+\/messages$/,
+];
+app.use((req, res, next) => {
+  const carriesFile = ATTACHMENT_ROUTES.some((route) =>
+    typeof route === "string" ? req.path === route : route.test(req.path),
+  );
+  return carriesFile
+    ? express.json({ limit: "1mb", type: "application/json" })(req, res, next)
+    : express.json({ limit: "64kb", type: "application/json" })(req, res, next);
+});
 
 app.use("/api", (req, _res, next) => {
   if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
@@ -946,7 +966,7 @@ app.patch("/api/profile", requireUser, async (req, res) => {
     intents: stringArray(req.body?.intents, "intents", current.intents, 4, 32),
     age: integerInRange(req.body?.age, "age", { min: 18, max: 100, fallback: current.age }),
     gender: req.body?.gender === undefined ? current.gender : req.body.gender,
-    avatarUrl: req.body?.avatarUrl === undefined ? current.avatarUrl || "" : safeString(req.body.avatarUrl, "avatarUrl", { min: 0, max: 400000 }),
+    avatarUrl: req.body?.avatarUrl === undefined ? current.avatarUrl || "" : safeString(req.body.avatarUrl, "avatarUrl", { min: 0, max: 520000 }),
     hideLocation: optionalBoolean(
       req.body?.hideLocation,
       "hideLocation",
@@ -1193,8 +1213,8 @@ app.post("/api/posts", requireUser, async (req, res) => {
     tags,
     visibility,
     requestCorrection: optionalBoolean(req.body?.requestCorrection, "requestCorrection", false),
-    imageUrl: optionalString(req.body?.imageUrl, "imageUrl", 700000) || "",
-    audioUrl: optionalString(req.body?.audioUrl, "audioUrl", 700000) || "",
+    imageUrl: optionalString(req.body?.imageUrl, "imageUrl", 520000) || "",
+    audioUrl: optionalString(req.body?.audioUrl, "audioUrl", 520000) || "",
     likes: 0,
     comments: 0,
     corrections: 0,
@@ -1603,7 +1623,7 @@ async function createMessage(req, res, conversationId) {
    * 압축하므로 보통 100~200KB 이고, Firestore 문서 한도(1MB)를 넘지 않게
    * 여기서도 한 번 더 막습니다. 버킷이 생기면 이 자리에 그 주소가 들어오면 됩니다.
    */
-  const media = type === "text" ? "" : optionalString(req.body?.media, "media", 700000) || "";
+  const media = type === "text" ? "" : optionalString(req.body?.media, "media", 520000) || "";
   if (type !== "text" && !media) {
     throw new ApiError(422, "VALIDATION_ERROR", "보낼 파일이 없습니다.", { field: "media" });
   }
@@ -1974,7 +1994,7 @@ app.use((error, req, res, _next) => {
     error instanceof ApiError
       ? error
       : error?.type === "entity.too.large"
-        ? new ApiError(413, "PAYLOAD_TOO_LARGE", "요청 본문은 64KB 이하여야 합니다.")
+        ? new ApiError(413, "PAYLOAD_TOO_LARGE", "보낸 내용이 너무 커요. 사진이나 음성을 붙였다면 더 작은 것으로 다시 시도해 주세요.")
         : error?.type === "entity.parse.failed"
           ? new ApiError(400, "INVALID_JSON", "JSON 요청 본문 형식을 확인해 주세요.")
         : new ApiError(500, "INTERNAL_ERROR", "요청 처리 중 오류가 발생했습니다.");
