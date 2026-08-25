@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Compass,
+  ArrowLeft,
   Ban,
   Database,
   Flag,
@@ -678,6 +679,9 @@ function OperationalApp({
   /* 요청함 — 수신 범위 밖에서 온 대화. 화면이 없으면 영영 안 보입니다. */
   const [requests, setRequests] = useState<Conversation[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
+  /* 좁은 화면에서는 목록과 대화창을 한 번에 보여줄 자리가 없어 번갈아 보여줍니다.
+     넓은 화면에서는 이 값과 상관없이 둘 다 보입니다. */
+  const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -773,6 +777,7 @@ function OperationalApp({
 
   const selectConversation = (conversationId: string) => {
     setSelectedConversationId(conversationId);
+    setMobileThreadOpen(true);
     setAiPanelOpen(false);
     setAiSupport(null);
   };
@@ -1288,7 +1293,7 @@ function OperationalApp({
                 </section>
               ) : null}
               {conversations.length ? (
-                <div className={styles.chatLayout}>
+                <div className={`${styles.chatLayout} ${mobileThreadOpen ? styles.threadOpen : ""}`.trim()}>
                   <aside className={styles.chatList}>
                     {conversations.map((conversation) => conversation.partner ? (
                       <button key={conversation.id} type="button" className={selectedConversationId === conversation.id ? styles.active : ""} onClick={() => selectConversation(conversation.id)}>
@@ -1302,6 +1307,9 @@ function OperationalApp({
                     {selectedConversation?.partner ? (
                       <>
                         <header>
+                          <button type="button" className={styles.threadBack} aria-label={t("대화 목록으로")} onClick={() => setMobileThreadOpen(false)}>
+                            <ArrowLeft size={20} />
+                          </button>
                           <Avatar profile={selectedConversation.partner} size="small" />
                           <span><strong>{selectedConversation.partner.name}</strong><small>{selectedConversation.partner.status === "online" ? t("접속 중") : t("오프라인")}</small></span>
                           <div className={styles.threadActions}>

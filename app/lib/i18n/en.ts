@@ -215,7 +215,7 @@ export const en: Record<MessageKey, string> = {
   "대화 기록 다운로드 파일을 준비하고 있어요 · mock": "Preparing your chat history download · mock",
   "대화 데이터": "Chat data",
   "대화 메뉴": "Chat menu",
-  "대화 목록으로": "Back to chats",
+  "대화 목록으로": "Back to conversations",
   "대화 속에서 바로 배우고 복습하세요": "Learn and review right inside the chat",
   "대화 시작": "Start chat",
   "대화 열기": "Open chat",
