@@ -591,7 +591,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
    */
   const reload = useCallback(async () => {
     try {
-      const [postList, conversationList, requestList, phraseList, correctionList, likeList, followList] = await Promise.all([
+      const [postList, conversationList, requestList, phraseList, correctionList, likeList, followList, blockList] = await Promise.all([
         api<ApiPost[]>("/api/posts"),
         api<ApiConversation[]>("/api/conversations"),
         api<ApiConversation[]>("/api/conversations?box=requests"),
@@ -599,11 +599,13 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         api<ApiCorrection[]>("/api/corrections/received"),
         api<ApiReceivedLike[]>("/api/likes/received"),
         api<string[]>("/api/follows"),
+        api<Array<{ blockedId: string }>>("/api/blocks"),
       ]);
       setSavedItems((phraseList || []).map(toSavedPhrase));
       setCorrections(correctionList || []);
       setLikesReceived(likeList || []);
       setFollowingIds(followList || []);
+      setBlockedAuthorIds(new Set((blockList || []).map((row) => row.blockedId)));
       const feed = (postList || []).map(toFeedPost);
       setPosts(feed);
       setMyPostList(feed.filter((post) => post.authorId === me.id));
@@ -727,10 +729,29 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   };
 
   /** 차단하면 그 사람 글이 피드에서 사라져야 "차단됐다"는 게 보입니다. */
-  const blockAuthor = (authorId: string, name: string) => {
+  const blockAuthor = async (authorId: string, name: string) => {
     setBlockedAuthorIds((current) => new Set(current).add(authorId));
     setDetail(null);
-    showToast(t("{author}님을 차단했어요", { author: name }));
+    try {
+      await api(`/api/partners/${encodeURIComponent(authorId)}/block`, { method: "POST", body: JSON.stringify({}) });
+      showToast(t("{author}님을 차단했어요", { author: name }));
+      await reload();
+    } catch (caught) {
+      // 서버에 못 남기면 내 화면에서만 사라진 상태가 됩니다 — 되돌리고 알립니다.
+      setBlockedAuthorIds((current) => { const next = new Set(current); next.delete(authorId); return next; });
+      showToast(caught instanceof Error ? caught.message : t("차단하지 못했어요."));
+    }
+  };
+
+  const unblockAuthor = async (authorId: string) => {
+    setBlockedAuthorIds((current) => { const next = new Set(current); next.delete(authorId); return next; });
+    try {
+      await api(`/api/partners/${encodeURIComponent(authorId)}/block`, { method: "DELETE" });
+      await reload();
+    } catch (caught) {
+      setBlockedAuthorIds((current) => new Set(current).add(authorId));
+      showToast(caught instanceof Error ? caught.message : t("차단을 풀지 못했어요."));
+    }
   };
 
   // 내가 접수한 신고 상태 — 프로필의 신고센터 카드가 실제 접수 내역을 보여줍니다.
@@ -1153,13 +1174,18 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     }
   };
 
-  const acceptChatRequest = (id: string) => {
-    setRequestConversationIds((current) => {
-      if (!current.has(id)) return current;
-      const next = new Set(current);
-      next.delete(id);
-      return next;
-    });
+  const acceptChatRequest = async (id: string) => {
+    try {
+      await api(`/api/conversations/${encodeURIComponent(id)}/accept`, { method: "POST", body: JSON.stringify({}) });
+      setRequestConversationIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      await reload();
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : t("요청을 수락하지 못했어요."));
+    }
   };
 
   const dismissChatRequest = (id: string) => {
@@ -1401,7 +1427,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 blocked={[...blockedAuthorIds]}
                 onBack={closeDetail}
                 onUnhide={(id) => { setHiddenAuthorIds((c) => { const n = new Set(c); n.delete(id); return n; }); showToast(t("다시 보기로 바꿨어요")); }}
-                onUnblock={(id) => { setBlockedAuthorIds((c) => { const n = new Set(c); n.delete(id); return n; }); showToast(t("차단을 해제했어요")); }}
+                onUnblock={(id) => { void unblockAuthor(id); showToast(t("차단을 해제했어요")); }}
               />
             ) : null}
 
