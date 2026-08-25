@@ -31,7 +31,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { I18nProvider, type MessageKey, msg, t, tx, useLocale, LOCALES, LOCALE_LABEL } from "../lib/i18n";
+import { I18nProvider, type MessageKey, msg, t, tx, useLocale, useLocaleRerender, LOCALES, LOCALE_LABEL } from "../lib/i18n";
 import styles from "./ProductionLingoLoopApp.module.css";
 
 type Tab = "partners" | "community" | "chats" | "profile";
@@ -1198,6 +1198,7 @@ function OperationalApp({
               </header>
               {filtersOpen && preferences ? (
                 <form className={styles.settingsPanel} onSubmit={savePreferences}>
+                  <p className={styles.settingsNote}>{t("배울 언어는 반드시 맞춰서 찾고, 나머지는 가까운 사람까지 함께 보여드려요.")}</p>
                   <SelectField
                     label={t("배울 언어")}
                     value={preferences.targetLanguages[0] || "en"}
@@ -1528,6 +1529,9 @@ export default function ProductionLingoLoopApp() {
 }
 
 function ProductionLingoLoopScreens() {
+  // 화면 문구는 모듈 함수 t() 로 읽습니다. 언어가 바뀔 때 여기부터 다시 그려야
+  // 아래 화면들이 새 언어로 바뀝니다 — 자세한 이유는 useLocaleRerender 주석 참고.
+  useLocaleRerender();
   const [authState, setAuthState] = useState<"loading" | "authenticated" | "anonymous">("loading");
   const [user, setUser] = useState<UserProfile | null>(null);
 

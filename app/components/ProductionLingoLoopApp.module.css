@@ -207,6 +207,17 @@
 }
 
 /* 값 고르기 — 브라우저 기본 select 대신 쓰는 우리 컴포넌트 */
+.settingsNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (min-width: 941px) {
+  .settingsNote { grid-column: 1 / -1; }
+}
+
 .selectField {
   position: relative;
   display: grid;
@@ -653,8 +664,10 @@
 }
 
 .checkLabel input {
-  width: 18px;
-  min-height: 18px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin: 0;
   accent-color: var(--primary);
   cursor: pointer;
 }
@@ -1884,7 +1897,15 @@
   }
 
   .partnerCard > header {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  /* ··· 메뉴는 어느 폭에서나 오른쪽 위에 둡니다. 자리를 안 정해두면 아래 .score 가
+     한 줄을 다 차지하면서 메뉴가 다음 줄 왼쪽으로 밀리고, 오른쪽으로 열리는
+     패널이 화면 밖(-53px)으로 나갑니다. */
+  .partnerCard > header > .postMenu {
+    grid-row: 1;
+    grid-column: 3;
   }
 
   .score {
