@@ -94,7 +94,7 @@ import {
 } from "@/app/lib/demo-data";
 import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
 import { SignIn } from "./SignIn";
-import { api, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, languageName } from "../lib/live-data";
+import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, languageName, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -561,7 +561,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
      mock 이지만 화면에는 진짜로 남아야 눌러본 사람이 결과를 확인할 수 있습니다. */
   /* 저장한 표현 — 데모 씨앗 3개로 시작하고, 사용자가 저장한 것이 앞에 쌓입니다.
      예전에는 id 만 Set 에 담아서 저장해도 목록에 안 보였습니다. */
-  const [savedItems, setSavedItems] = useState<SavedPhrase[]>(() => savedPhrases.map((item) => ({ ...item })));
+  const [savedItems, setSavedItems] = useState<SavedPhrase[]>([]);
+  const [corrections, setCorrections] = useState<ApiCorrection[]>([]);
+  const [likesReceived, setLikesReceived] = useState<ApiReceivedLike[]>([]);
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [safetyReports, setSafetyReports] = useState<SafetyReportInfo[]>([]);
   const [savedPartnerIds, setSavedPartnerIds] = useState<Set<string>>(new Set());
   const [hiddenAuthorIds, setHiddenAuthorIds] = useState<Set<string>>(new Set());
@@ -588,11 +591,19 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
    */
   const reload = useCallback(async () => {
     try {
-      const [postList, conversationList, requestList] = await Promise.all([
+      const [postList, conversationList, requestList, phraseList, correctionList, likeList, followList] = await Promise.all([
         api<ApiPost[]>("/api/posts"),
         api<ApiConversation[]>("/api/conversations"),
         api<ApiConversation[]>("/api/conversations?box=requests"),
+        api<ApiSavedPhrase[]>("/api/saved-phrases"),
+        api<ApiCorrection[]>("/api/corrections/received"),
+        api<ApiReceivedLike[]>("/api/likes/received"),
+        api<string[]>("/api/follows"),
       ]);
+      setSavedItems((phraseList || []).map(toSavedPhrase));
+      setCorrections(correctionList || []);
+      setLikesReceived(likeList || []);
+      setFollowingIds(followList || []);
       const feed = (postList || []).map(toFeedPost);
       setPosts(feed);
       setMyPostList(feed.filter((post) => post.authorId === me.id));
@@ -664,12 +675,25 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
 
   /** 복습함 저장 — 다시 누르면 빠집니다. 프로필의 "저장한 표현" 수에 바로 반영됩니다. */
   /** 복습함에 넣고 빼기. 같은 것을 다시 누르면 빠집니다. */
-  const savePhrase = (item: SavedPhrase) => {
-    setSavedItems((current) => {
-      const exists = current.some((saved) => saved.id === item.id);
-      showToast(exists ? t("복습함에서 뺐어요") : t("복습함에 저장했어요"));
-      return exists ? current.filter((saved) => saved.id !== item.id) : [item, ...current];
-    });
+  const savePhrase = async (item: SavedPhrase) => {
+    const exists = savedItems.some((saved) => saved.id === item.id);
+    // 화면에 먼저 반영하고 서버에 보냅니다. 실패하면 되돌립니다.
+    setSavedItems((current) => (exists ? current.filter((saved) => saved.id !== item.id) : [item, ...current]));
+    try {
+      if (exists) {
+        await api(`/api/saved-phrases/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+        showToast(t("복습함에서 뺐어요"));
+      } else {
+        await api("/api/saved-phrases", {
+          method: "POST",
+          body: JSON.stringify({ id: item.id, phrase: item.phrase, meaning: item.meaning, source: item.source, due: item.due }),
+        });
+        showToast(t("복습함에 저장했어요"));
+      }
+    } catch (caught) {
+      setSavedItems((current) => (exists ? [item, ...current] : current.filter((saved) => saved.id !== item.id)));
+      showToast(caught instanceof Error ? caught.message : t("저장하지 못했어요."));
+    }
   };
   const isSaved = (id: string) => savedItems.some((item) => item.id === id);
 
@@ -927,7 +951,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const connectionWith = (partner: Partner): "chatting" | "matched" | "signaled" | "none" => {
     if (conversations.some((item) => item.partnerId === partner.id)) return "chatting";
     const iSignaled = signaledPartners.includes(partner.id);
-    const theyLiked = receivedLikes.some((like) => like.partnerId === partner.id);
+    const theyLiked = likesReceived.some((like) => like.partner.id === partner.id);
     if (iSignaled && theyLiked) return "matched";
     if (iSignaled) return "signaled";
     return "none";
@@ -1405,7 +1429,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onRestart={restartPartners}
                 onOpenList={() => setModal({ type: "partner-list" })}
                 onOpenLikes={() => setModal({ type: "likes" })}
-                receivedCount={receivedLikes.length}
+                receivedCount={likesReceived.length}
                 onProfile={openProfile}
                 onFilters={() => setModal({ type: "filters" })}
               />
@@ -1504,6 +1528,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 profileName={profile.name}
                 profileBio={profile.bio}
                 me={me}
+                corrections={corrections}
                 onOpenTag={(tag) => { setActiveTag(tag); goToSection("community"); }}
                 myPostList={myPostList}
                 onCopyLink={copyLink}
@@ -1915,7 +1940,16 @@ function PostDetailView({
   sort: "popular" | "recent";
   onSortChange: (value: "popular" | "recent") => void;
 }) {
-  const [replies, setReplies] = useState<PostReply[]>(postReplies[post.id] ?? []);
+  const [replies, setReplies] = useState<PostReply[]>([]);
+
+  // 글을 열 때 서버에서 답글·교정을 함께 읽습니다.
+  useEffect(() => {
+    let cancelled = false;
+    api<ApiReply[]>(`/api/posts/${encodeURIComponent(post.id)}/replies`)
+      .then((rows) => { if (!cancelled) setReplies((rows || []).map(toPostReply).reverse()); })
+      .catch(() => { /* 못 읽어도 글 본문은 보여야 합니다. */ });
+    return () => { cancelled = true; };
+  }, [post.id]);
   const [draft, setDraft] = useState("");
   const [likedReplies, setLikedReplies] = useState<Set<string>>(new Set());
   const [replyTo, setReplyTo] = useState<{ id: string; author: string } | null>(null);
@@ -1976,30 +2010,34 @@ function PostDetailView({
       onToast(t("원문에서 고친 부분이 없어요"));
       return;
     }
-    const mine: PostReply = {
-      id: `local-${Date.now()}`,
-      author: currentUser.name,
-      handle: currentUser.handle,
-      flag: currentUser.flag,
-      accent: currentUser.accent,
-      time: t("방금"),
-      text,
-      likes: 0,
-      kind: replyKind,
-      ...(replyKind === "correction" && correctionSource ? { original: correctionSource } : {}),
-    };
-    setReplies((current) => {
-      if (!replyTo) return [mine, ...current];
-      // 대댓글: 부모의 replies 앞에 붙입니다.
-      return current.map((reply) =>
-        reply.id === replyTo.id ? { ...reply, replies: [mine, ...(reply.replies ?? [])] } : reply,
-      );
-    });
-    setDraft("");
-    setReplyTo(null);
-    onToast(replyKind === "correction" ? t("교정을 남겼어요") : t("답글을 남겼어요"));
-    setReplyKind("reply");
-    setCorrectionSource(null);
+    void (async () => {
+      try {
+        const saved = await api<ApiReply>(`/api/posts/${encodeURIComponent(post.id)}/replies`, {
+          method: "POST",
+          body: JSON.stringify({
+            text,
+            kind: replyKind,
+            ...(replyKind === "correction" ? { original: correctionSource ?? post.text } : {}),
+            ...(replyTo ? { parentId: replyTo.id } : {}),
+          }),
+        });
+        const mine = toPostReply(saved);
+        setReplies((current) => {
+          if (!replyTo) return [mine, ...current];
+          // 대댓글: 부모의 replies 앞에 붙입니다.
+          return current.map((reply) =>
+            reply.id === replyTo.id ? { ...reply, replies: [mine, ...(reply.replies ?? [])] } : reply,
+          );
+        });
+        setDraft("");
+        setReplyTo(null);
+        onToast(replyKind === "correction" ? t("교정을 남겼어요") : t("답글을 남겼어요"));
+        setReplyKind("reply");
+        setCorrectionSource(null);
+      } catch (caught) {
+        onToast(caught instanceof Error ? caught.message : t("남기지 못했어요."));
+      }
+    })();
   };
 
   const startReplyTo = (reply: PostReply) => {
@@ -2092,7 +2130,7 @@ function PostDetailView({
               <Heart size={19} fill={post.liked ? "currentColor" : "none"} /> {post.likes}
             </button>
             <button type="button" onClick={() => document.getElementById("reply-input")?.focus()}>
-              <MessageCircle size={18} /> {post.comments + replies.length - (postReplies[post.id]?.length ?? 0)}
+              <MessageCircle size={18} /> {replies.filter((reply) => reply.kind !== "correction").length}
             </button>
             <button type="button" className="correct" onClick={() => { enterCorrectionMode(); onToast(t("교정 모드를 열었어요")); }}>
               <PenLine size={18} /> {t("교정 {n}", { n: post.corrections })}
@@ -3357,6 +3395,7 @@ function LearnView({
   myPostList,
   onCopyLink,
   onDeletePost,
+  corrections,
 }: {
   onEditProfile: () => void;
   savedItems: SavedPhrase[];
@@ -3374,6 +3413,8 @@ function LearnView({
   onDeletePost: (post: FeedPost) => void;
   /** 로그인한 사람. 핸들·국기처럼 서버가 주는 값을 그립니다. */
   me: ApiProfile;
+  /** 내 글에 달린 교정. 학습 화면이 "받은 교정" 으로 보여줍니다. */
+  corrections: ApiCorrection[];
 }) {
   const [profileTab, setProfileTab] = useState("posts");
   const [showAllSaved, setShowAllSaved] = useState(false);
@@ -3449,10 +3490,9 @@ function LearnView({
 
       {profileTab === "learning" ? (
       <section className="learn-overview-grid" aria-label={t("학습 요약")}>
-        <article><span className="summary-icon coral"><Flame size={18} /></span><small>{t("연속 학습")}</small><strong>{currentUser.streak}<em>{t("일")}</em></strong></article>
-        <article><span className="summary-icon violet"><Timer size={18} /></span><small>{t("이번 주 대화")}</small><strong>145<em>{t("분")}</em></strong></article>
+        <article><span className="summary-icon violet"><PenLine size={18} /></span><small>{t("내 글")}</small><strong>{myPostList.length}<em>{t("개")}</em></strong></article>
         <article><span className="summary-icon mint"><Bookmark size={18} /></span><small>{t("저장한 표현")}</small><strong>{savedCount}<em>{t("개")}</em></strong></article>
-        <article><span className="summary-icon amber"><PenLine size={18} /></span><small>{t("받은 교정")}</small><strong>{receivedCorrections.length}<em>{t("개")}</em></strong></article>
+        <article><span className="summary-icon amber"><PenLine size={18} /></span><small>{t("받은 교정")}</small><strong>{corrections.length}<em>{t("개")}</em></strong></article>
       </section>
       ) : null}
 
@@ -3472,23 +3512,22 @@ function LearnView({
 
         {/* 지금까지 "받은 교정 N개"는 숫자뿐이고 실체가 없었습니다. 여기서 실제로 읽습니다. */}
         <section className="received-corrections-card">
-          <header><span><strong>{t("받은 교정")}</strong><small>{t("{n}개 · 내 문장이 어떻게 바뀌었는지", { n: receivedCorrections.length })}</small></span></header>
+          <header><span><strong>{t("받은 교정")}</strong><small>{t("{n}개 · 내 문장이 어떻게 바뀌었는지", { n: corrections.length })}</small></span></header>
           <ul className="received-correction-list">
-            {receivedCorrections.map((item) => (
+            {corrections.map((item) => (
               <li key={item.id}>
                 <div className="received-correction-head">
-                  <Avatar name={item.from} flag={item.flag} accent={item.accent} size="xs" />
-                  <span><strong>{item.from}</strong><small>{item.source} · {tx(item.time)}</small></span>
+                  <Avatar name={item.from ?? "?"} flag={item.fromFlag} accent={accentFor(item.id)} size="xs" />
+                  <span><strong>{item.from ?? t("알 수 없는 상대")}</strong><small>{liveRelativeTime(item.createdAt)}</small></span>
                 </div>
-                <p className="before">{item.before}</p>
-                <p className="after">{item.after}</p>
-                <p className="received-correction-note"><BookOpenCheck size={14} /> {item.note}</p>
+                <p className="before">{item.original}</p>
+                <p className="after">{item.fixed}</p>
                 <button
                   type="button"
                   className={savedItems.some((saved) => saved.id === item.id) ? "active" : ""}
                   aria-pressed={savedItems.some((saved) => saved.id === item.id)}
                   aria-label={t("복습에 저장")}
-                  onClick={() => onSavePhrase({ id: item.id, phrase: item.after, meaning: item.note, source: item.source, due: t("오늘") })}
+                  onClick={() => onSavePhrase({ id: item.id, phrase: item.fixed, meaning: item.original, source: t("받은 교정"), due: "" })}
                 >
                   <Bookmark size={16} />
                 </button>

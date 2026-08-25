@@ -1183,6 +1183,180 @@ app.delete("/api/posts/:postId", requireUser, async (req, res) => {
   return success(res, req, { id: postId, deleted: true });
 });
 
+/** 글을 읽을 수 있는 사람인지. 댓글·교정도 같은 기준을 씁니다. */
+async function readablePost(postId, uid) {
+  const snapshot = await db.collection("posts").doc(postId).get();
+  if (!snapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
+  const post = snapshot.data();
+  const [partnerIds, blocked] = await Promise.all([acceptedPartnerIds(uid), blockedBothWays(uid)]);
+  const readable =
+    !blocked.has(post.authorId) &&
+    (post.visibility === "public" || post.authorId === uid || (post.visibility === "partners" && partnerIds.has(post.authorId)));
+  if (!readable) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
+  return post;
+}
+
+/**
+ * 댓글과 교정.
+ *
+ * 한 컬렉션에 kind 로 구분해 담습니다 — 화면에서 둘은 같은 자리에 시간순으로
+ * 섞여 나오고, 교정은 "원문을 함께 든 댓글"이기 때문입니다. 따로 두면 합쳐서
+ * 정렬하는 일을 매번 해야 합니다.
+ */
+app.get("/api/posts/:postId/replies", requireUser, async (req, res) => {
+  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  await readablePost(postId, req.auth.uid);
+  const [snapshot, blocked] = await Promise.all([
+    db.collection("posts").doc(postId).collection("replies").orderBy("createdAt", "asc").limit(200).get(),
+    blockedBothWays(req.auth.uid),
+  ]);
+  const rows = snapshot.docs.map((document) => document.data()).filter((row) => !blocked.has(row.authorId));
+  const profiles = await profilesByIds(rows.map((row) => row.authorId));
+  return success(
+    res,
+    req,
+    rows.map((row) => ({
+      ...row,
+      author: profiles.get(row.authorId)
+        ? { id: row.authorId, name: profiles.get(row.authorId).name, handle: profiles.get(row.authorId).handle, flag: profiles.get(row.authorId).country?.flag || "🌐" }
+        : { id: row.authorId, name: null, handle: null, flag: "🌐" },
+    })),
+    200,
+    { pagination: { total: rows.length, nextCursor: null } },
+  );
+});
+
+app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
+  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  await readablePost(postId, req.auth.uid);
+  const text = safeString(req.body?.text, "text", { min: 1, max: 1000 });
+  const kind = req.body?.kind === "correction" ? "correction" : "reply";
+  // 교정은 어느 문장을 고쳤는지 있어야 의미가 있습니다.
+  const original = kind === "correction" ? safeString(req.body?.original, "original", { min: 1, max: 1000 }) : "";
+  const parentId = optionalString(req.body?.parentId, "parentId", 128) || "";
+  const timestamp = nowIso();
+  const reply = {
+    id: "reply-" + crypto.randomUUID(),
+    postId,
+    authorId: req.auth.uid,
+    text,
+    kind,
+    original,
+    parentId,
+    likes: 0,
+    createdAt: timestamp,
+  };
+  const postReference = db.collection("posts").doc(postId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(postReference);
+    if (!snapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
+    const current = snapshot.data();
+    transaction.create(postReference.collection("replies").doc(reply.id), reply);
+    transaction.update(postReference, {
+      comments: kind === "reply" ? (current.comments || 0) + 1 : current.comments || 0,
+      corrections: kind === "correction" ? (current.corrections || 0) + 1 : current.corrections || 0,
+      updatedAt: timestamp,
+    });
+  });
+  return success(res, req, reply, 201);
+});
+
+/** 내 글에 달린 교정. 학습 화면이 "받은 교정" 으로 보여줍니다. */
+app.get("/api/corrections/received", requireUser, async (req, res) => {
+  const postsSnapshot = await db.collection("posts").where("authorId", "==", req.auth.uid).limit(100).get();
+  const myPosts = postsSnapshot.docs.map((document) => document.data());
+  const blocked = await blockedBothWays(req.auth.uid);
+  const groups = await Promise.all(
+    myPosts.map(async (post) => {
+      const snapshot = await db.collection("posts").doc(post.id).collection("replies").where("kind", "==", "correction").limit(50).get();
+      return snapshot.docs.map((document) => ({ ...document.data(), postText: post.text }));
+    }),
+  );
+  const rows = groups.flat().filter((row) => !blocked.has(row.authorId));
+  const profiles = await profilesByIds(rows.map((row) => row.authorId));
+  const corrections = rows
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    .map((row) => ({
+      id: row.id,
+      postId: row.postId,
+      postText: row.postText,
+      original: row.original,
+      fixed: row.text,
+      createdAt: row.createdAt,
+      from: profiles.get(row.authorId)?.name ?? null,
+      fromFlag: profiles.get(row.authorId)?.country?.flag ?? "🌐",
+    }));
+  return success(res, req, corrections, 200, { pagination: { total: corrections.length, nextCursor: null } });
+});
+
+/** 나에게 마음을 보낸 사람. 화면의 "받은 마음" 목록입니다. */
+app.get("/api/likes/received", requireUser, async (req, res) => {
+  const [snapshot, blocked] = await Promise.all([
+    db.collection("likes").where("toUserId", "==", req.auth.uid).limit(200).get(),
+    blockedBothWays(req.auth.uid),
+  ]);
+  const rows = snapshot.docs.map((document) => document.data()).filter((row) => !blocked.has(row.fromUserId));
+  const profiles = await profilesByIds(rows.map((row) => row.fromUserId));
+  // 내가 마음을 돌려보냈으면 서로 맞은 것입니다.
+  const mine = await db.collection("likes").where("fromUserId", "==", req.auth.uid).limit(200).get();
+  const sentTo = new Set(mine.docs.map((document) => document.data().toUserId));
+  const received = rows
+    .filter((row) => profiles.get(row.fromUserId))
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    .map((row) => ({
+      partner: publicProfile(profiles.get(row.fromUserId)),
+      createdAt: row.createdAt,
+      mutual: sentTo.has(row.fromUserId),
+    }));
+  return success(res, req, received, 200, { pagination: { total: received.length, nextCursor: null } });
+});
+
+/** 내가 팔로우하는 사람. 피드의 "팔로잉" 탭이 씁니다. */
+app.get("/api/follows", requireUser, async (req, res) => {
+  const [snapshot, blocked] = await Promise.all([
+    db.collection("follows").where("fromUserId", "==", req.auth.uid).limit(200).get(),
+    blockedBothWays(req.auth.uid),
+  ]);
+  const ids = snapshot.docs.map((document) => document.data().toUserId).filter((id) => !blocked.has(id));
+  return success(res, req, ids, 200, { pagination: { total: ids.length, nextCursor: null } });
+});
+
+/**
+ * 저장한 표현. 사람마다 자기 것만 봅니다.
+ * 복습 화면이 여기서 읽고, 글·메시지에서 "복습에 저장" 을 누르면 여기에 쌓입니다.
+ */
+app.get("/api/saved-phrases", requireUser, async (req, res) => {
+  const snapshot = await db.collection("savedPhrases").doc(req.auth.uid).collection("items").limit(300).get();
+  const rows = snapshot.docs
+    .map((document) => document.data())
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+  return success(res, req, rows, 200, { pagination: { total: rows.length, nextCursor: null } });
+});
+
+app.post("/api/saved-phrases", requireUser, async (req, res) => {
+  const phrase = safeString(req.body?.phrase, "phrase", { min: 1, max: 500 });
+  const id = optionalString(req.body?.id, "id", 128) || "saved-" + crypto.randomUUID();
+  const item = {
+    id,
+    phrase,
+    meaning: optionalString(req.body?.meaning, "meaning", 500) || "",
+    source: optionalString(req.body?.source, "source", 200) || "",
+    due: optionalString(req.body?.due, "due", 100) || "",
+    createdAt: nowIso(),
+  };
+  await db.collection("savedPhrases").doc(req.auth.uid).collection("items").doc(id).set(item);
+  return success(res, req, item, 201);
+});
+
+app.delete("/api/saved-phrases/:itemId", requireUser, async (req, res) => {
+  const itemId = safeString(req.params.itemId, "itemId", { min: 1, max: 128 });
+  const reference = db.collection("savedPhrases").doc(req.auth.uid).collection("items").doc(itemId);
+  const snapshot = await reference.get();
+  if (!snapshot.exists) throw new ApiError(404, "SAVED_PHRASE_NOT_FOUND", "저장한 표현을 찾을 수 없습니다.");
+  await reference.delete();
+  return success(res, req, { id: itemId, deleted: true });
+});
+
 app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
   const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
   const postReference = db.collection("posts").doc(postId);

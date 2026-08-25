@@ -105,6 +105,8 @@ likes/{fromUid_toUid}
 follows/{fromUid_toUid}
 posts/{postId}
 posts/{postId}/reactions/{uid}
+posts/{postId}/replies/{replyId}
+savedPhrases/{uid}/items/{itemId}
 conversations/{conversationId}
 conversations/{conversationId}/messages/{messageId}
 dmPolicies/{uid}
@@ -163,6 +165,11 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 | `GET/POST` | `/api/conversations/:id/messages` | 메시지 조회·전송 |
 | `GET/POST` | `/api/dm/privacy` | DM 수신 정책 조회·저장 |
 | `GET` | `/api/dm/sync` | 서버 저장·복원 상태 확인 |
+| `GET/POST` | `/api/posts/{id}/replies` | 답글·교정 |
+| `GET` | `/api/corrections/received` | 내 글에 달린 교정 |
+| `GET` | `/api/likes/received` | 나에게 온 마음 |
+| `GET` | `/api/follows` | 내가 팔로우하는 사람 |
+| `GET/POST/DELETE` | `/api/saved-phrases` | 저장한 표현 |
 | `GET` | `/api/countries` | 프로필에서 고를 수 있는 국가 목록 |
 | `GET` | `/api/blocks` | 내가 차단한 사용자 목록 |
 | `POST/DELETE` | `/api/partners/{id}/block` | 차단·차단 해제 |

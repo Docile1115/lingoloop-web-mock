@@ -140,6 +140,8 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
     "reports",
     "aiUsage",
     "blocks",
+    "replies",
+    "savedPhrases",
   ]) {
     assert.match(source, new RegExp(`collection\\("${collection}"\\)`));
   }
@@ -155,6 +157,10 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
     "/api/conversations/:conversationId/accept",
     "/api/reports",
     "/api/blocks",
+    "/api/posts/:postId/replies",
+    "/api/saved-phrases",
+    "/api/corrections/received",
+    "/api/likes/received",
     "/api/countries",
     "/api/partners/:partnerId/block",
   ]) {

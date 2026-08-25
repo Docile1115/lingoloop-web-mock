@@ -5,6 +5,8 @@ import type {
   Conversation,
   FeedPost,
   Partner,
+  PostReply,
+  SavedPhrase,
 } from "./demo-data";
 
 /**
@@ -244,5 +246,71 @@ export function toConversation(conversation: ApiConversation, messages: ChatMess
     unread: conversation.unreadCount || 0,
     online: partner?.status === "online",
     messages,
+  };
+}
+
+export interface ApiReply {
+  id: string;
+  postId: string;
+  authorId: string;
+  text: string;
+  kind: "reply" | "correction";
+  original: string;
+  parentId: string;
+  likes: number;
+  createdAt: string;
+  author: { id: string; name: string | null; handle: string | null; flag: string };
+}
+
+export interface ApiReceivedLike {
+  partner: ApiProfile;
+  createdAt: string;
+  mutual: boolean;
+}
+
+export interface ApiCorrection {
+  id: string;
+  postId: string;
+  postText: string;
+  original: string;
+  fixed: string;
+  createdAt: string;
+  from: string | null;
+  fromFlag: string;
+}
+
+export interface ApiSavedPhrase {
+  id: string;
+  phrase: string;
+  meaning: string;
+  source: string;
+  due: string;
+  createdAt: string;
+}
+
+/** 서버 댓글을 화면의 답글 모양으로. 교정은 원문을 함께 든 답글입니다. */
+export function toPostReply(reply: ApiReply): PostReply {
+  return {
+    id: reply.id,
+    author: reply.author.name ?? t("알 수 없는 상대"),
+    handle: reply.author.handle ?? "",
+    flag: reply.author.flag || "🌐",
+    accent: accentFor(reply.authorId),
+    time: relativeTime(reply.createdAt),
+    text: reply.text,
+    likes: reply.likes,
+    kind: reply.kind,
+    original: reply.original || undefined,
+  };
+}
+
+export function toSavedPhrase(item: ApiSavedPhrase): SavedPhrase {
+  return {
+    id: item.id,
+    phrase: item.phrase,
+    meaning: item.meaning,
+    source: item.source,
+    // 서버는 복습 주기를 아직 계산하지 않습니다. 비워두면 화면이 그 줄을 감춥니다.
+    due: item.due,
   };
 }
