@@ -47,6 +47,10 @@ yarn-error.log*
 # 로컬 실행 설정 (개인 GCP 값이 들어갑니다)
 dev.local.sh
 
+# 데모 데이터 채우기 — 로컬 에뮬레이터에서만 씁니다.
+# 실제 계정을 만드는 스크립트라 운영 저장소에는 두지 않습니다.
+scripts/seed-demo.mjs
+
 # 로컬 에뮬레이터 설정
 firebase.json
 .firebase/
