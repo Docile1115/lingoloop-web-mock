@@ -166,6 +166,7 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 | `GET` | `/api/countries` | 프로필에서 고를 수 있는 국가 목록 |
 | `GET` | `/api/blocks` | 내가 차단한 사용자 목록 |
 | `POST/DELETE` | `/api/partners/{id}/block` | 차단·차단 해제 |
+| `GET/PATCH` | `/api/admin/reports` | 운영자용 신고 목록·처리 (ADMIN_UIDS 만) |
 | `GET/POST` | `/api/reports` | 내 신고 내역 조회·신고 접수 |
 | `GET` | `/api/account/verification` | 이메일·전화·신원 인증 상태 조회 |
 | `GET` | `/api/search?q=...` | 사용자·게시물 검색 |
@@ -235,6 +236,7 @@ npm run dev
 | `GEMINI_LOCATION` | 아니요 | Vertex AI 위치. 기본값 `global` |
 | `AI_TRANSLATION_DAILY_LIMIT` | 아니요 | 사용자당 번역 일일 한도. 기본값 `100` |
 | `AI_SUPPORT_DAILY_LIMIT` | 아니요 | 사용자당 대화 지원 일일 한도. 기본값 `30` |
+| `ADMIN_UIDS` | 아니요 | 신고 처리 화면을 볼 사람의 uid. 쉼표로 구분 |
 | `PORT` | 아니요 | Cloud Run이 주입하며 기본값 `8080` |
 
 ### 웹 서비스
