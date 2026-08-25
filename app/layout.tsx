@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { SITE_METADATA, localeFromAcceptLanguage } from "./lib/i18n/metadata";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -7,29 +8,32 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:5174";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const metadataBase = new URL(`${protocol}://${host}`);
+  // 탭 제목과 검색 결과는 서버에서 만들어지므로 화면용 t() 를 쓸 수 없습니다.
+  // 요청 언어로 고르고, 앱에서 언어를 바꾸면 브라우저에서 제목을 다시 맞춥니다.
+  const locale = localeFromAcceptLanguage(requestHeaders.get("accept-language"));
+  const copy = SITE_METADATA[locale];
 
   return {
     metadataBase,
     title: {
-      default: "LingoLoop — 함께 말하고, 함께 배우는 언어 교환",
+      default: copy.title,
       template: "%s | LingoLoop",
     },
-    description:
-      "Firebase Identity Platform 인증과 Firestore 영구 저장으로 파트너 매칭, 커뮤니티와 대화를 이어가는 언어 교환 서비스입니다.",
+    description: copy.description,
     applicationName: "LingoLoop",
-    keywords: ["언어 교환", "language exchange", "학습 커뮤니티", "언어 파트너", "LingoLoop"],
+    keywords: copy.keywords,
     authors: [{ name: "LingoLoop" }],
     openGraph: {
       type: "website",
       siteName: "LingoLoop",
-      title: "LingoLoop — 함께 말하고, 함께 배우는 언어 교환",
-      description: "맞춤 파트너 매칭, 커뮤니티와 영구 저장되는 대화를 제공하는 반응형 언어 교환 서비스",
-      images: [{ url: "/og.png", width: 1732, height: 908, alt: "LingoLoop 언어 교환 서비스" }],
+      title: copy.title,
+      description: copy.ogDescription,
+      images: [{ url: "/og.png", width: 1732, height: 908, alt: copy.title }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "LingoLoop — 함께 말하고, 함께 배우는 언어 교환",
-      description: "PC와 모바일에서 이어지는 소셜 언어 교환 서비스",
+      title: copy.title,
+      description: copy.ogDescription,
       images: ["/og.png"],
     },
   };

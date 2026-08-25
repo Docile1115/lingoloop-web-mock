@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { SITE_METADATA } from "../app/lib/i18n/metadata.ts";
 
-const expectedTitle =
-  "LingoLoop — 함께 말하고, 함께 배우는 언어 교환 | LingoLoop";
-const expectedDescription =
-  "Firebase Identity Platform 인증과 Firestore 영구 저장으로 파트너 매칭, 커뮤니티와 대화를 이어가는 언어 교환 서비스입니다.";
+// 요청에 Accept-Language 가 없으면 서버는 ko 로 그립니다.
+// 페이지가 제목을 따로 정하지 않으므로 layout 의 default 가 그대로 쓰입니다
+// (template "%s | LingoLoop" 은 하위 페이지가 제목을 줄 때만 붙습니다).
+const expectedTitle = SITE_METADATA.ko.title;
+const expectedDescription = SITE_METADATA.ko.description;
 
 let workerPromise;
 
@@ -55,7 +57,7 @@ test("운영 메타데이터와 인증 확인 화면을 서버 렌더링한다",
     /<meta(?=[^>]*\bname="application-name")(?=[^>]*\bcontent="LingoLoop")[^>]*>/i,
   );
   assert.match(html, /LingoLoop/);
-  assert.match(html, /안전한 로그인 상태를 확인하고 있어요\./);
+  assert.match(html, /로그인 상태를 확인하고 있어요\./);
   assert.doesNotMatch(html, /Mock API 연결됨|오프라인 데모|웹 mock|mock API 프로토타입/i);
 });
 
