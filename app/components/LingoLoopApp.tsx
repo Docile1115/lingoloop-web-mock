@@ -24,7 +24,6 @@ import {
   Ellipsis,
   Eye,
   EyeOff,
-  Flame,
   Flag,
   Globe2,
   Hand,
@@ -45,7 +44,6 @@ import {
   Phone,
   Play,
   Plus,
-  Radio,
   RefreshCw,
   RotateCcw,
   Search,
@@ -70,17 +68,9 @@ import {
 } from "lucide-react";
 import {
   currentUser,
-  initialConversations,
-  initialPosts,
-  myPosts,
-  followingAuthors,
-  postReplies,
-  receivedLikes,
-  partners,
   initialRoomMessages,
   languageOptions,
   rooms,
-  savedPhrases,
   type SavedPhrase,
   type Accent,
   type ChatMessage,
@@ -90,11 +80,10 @@ import {
   type PostReply,
   type PracticeRoom,
   type RoomMessage,
-  receivedCorrections,
 } from "@/app/lib/demo-data";
 import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
 import { SignIn } from "./SignIn";
-import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, languageName, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply } from "../lib/live-data";
+import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -145,20 +134,6 @@ type DailyMatchRecommendation = {
   score: number;
   matchReasons: string[];
   icebreaker: string;
-};
-
-type MatchingApiPartner = {
-  id: string;
-  name: string;
-  handle: string;
-  country: { code: string; name: string; flag: string };
-  nativeLanguages: string[];
-  learningLanguages: Array<{ code: string; level: string; goal: string }>;
-  bio: string;
-  interests: string[];
-  status: string;
-  verified?: boolean;
-  responseRate?: number;
 };
 
 /** 탭 위에 얹히는 상세 화면. 모달이 아니라 화면 이동입니다. */
@@ -355,76 +330,17 @@ function fallbackConversationSupport(name: string): ConversationSupport {
   };
 }
 
-function displayPartnerFromApi(partner: MatchingApiPartner, score: number, index: number): Partner {
-  const localId = partner.id.replace(/^user-/, "");
-  const existing = partners.find((item) => item.id === localId || item.name === partner.name);
-  if (existing) {
-    // 이미 아는 사람이면 우리가 가진 프로필을 그대로 씁니다.
-    // 국기만 API 값으로 덮으면 국기와 나라·도시가 어긋납니다
-    // (Maya = 캐나다·밴쿠버인데 국기만 🇺🇸 로 바뀌던 문제).
-    return {
-      ...existing,
-      compatibility: score,
-    };
-  }
-
-  const accents: Accent[] = ["violet", "coral", "mint", "amber", "blue", "rose"];
-  const learning = partner.learningLanguages[0];
-  const languageNames: Record<string, MessageKey> = { ...languageLabels, ko: msg("한국어"), fr: msg("프랑스어"), de: msg("독일어") };
-  const levelNames: Record<string, string> = { beginner: "A1–A2", intermediate: "B1–B2", advanced: "C1+" };
-
-  return {
-    id: localId,
-    name: partner.name,
-    handle: partner.handle,
-    flag: partner.country.flag,
-    city: "",
-    country: partner.country.name,
-    timeOffset: 0,
-    native: partner.nativeLanguages.map((code) => (languageNames[code] ? t(languageNames[code]) : code.toUpperCase())).join(" · "),
-    learning: labelOf(languageNames, learning?.code ?? "ko"),
-    level: levelNames[learning?.level ?? "intermediate"] ?? learning?.level ?? "B1",
-    interests: partner.interests.slice(0, 3).map((item) => labelOf(interestLabels, item)),
-    bio: partner.bio,
-    online: partner.status === "online",
-    compatibility: score,
-    accent: accents[index % accents.length],
-    goal: learning?.goal ?? t("부담 없는 일상 대화"),
-    activeTime: t("내가 선택한 시간대와 겹쳐요"),
-    balance: t("응답률 {value}%", { value: partner.responseRate ?? 90 }),
-    verified: partner.verified,
-  };
-}
-
 /**
- * 오프라인 추천 — mock API 처럼 매칭 조건을 반영합니다.
- * 조건을 만족하는 파트너를 앞에 두고, 부족하면 조건을 넓힌 파트너를 뒤에 채운 뒤 그 사실을 추천 근거로 알립니다.
+ * 서버가 준 사람을 화면이 쓰는 모양으로.
+ *
+ * 예전에는 이름이 같으면 우리가 들고 있던 fixture 프로필을 대신 썼습니다.
+ * 진짜 사용자가 생기고 나서는 그게 곧 거짓말이 됩니다 — 서울에 사는 Aiko 가
+ * fixture 때문에 "일본 · 도쿄"로 보였습니다. 이제 서버 값만 씁니다.
  */
-function fallbackDailyRecommendations(preferences?: MatchPreferences): DailyMatchRecommendation[] {
-  const languageAliases: Record<string, string> = { en: "영어", es: "스페인어", ja: "일본어" };
-  const satisfies = (partner: Partner): boolean => {
-    if (!preferences) return true;
-    const targets = preferences.targetLanguages.map((code) => languageAliases[code] ?? code);
-    if (targets.length && !targets.some((name) => partner.native.includes(name))) return false;
-    if (preferences.onlineOnly && !partner.online) return false;
-    if (preferences.verifiedOnly && !partner.verified) return false;
-    if (preferences.partnerLevel === "beginner" && !partner.level.startsWith("A")) return false;
-    if (preferences.partnerLevel === "intermediate" && !partner.level.startsWith("B")) return false;
-    if (preferences.partnerLevel === "advanced" && !partner.level.startsWith("C")) return false;
-    return true;
-  };
-  const matched = partners.filter(satisfies);
-  const widened = partners.filter((partner) => !satisfies(partner));
-  return [...matched, ...widened].slice(0, MAX_DAILY_PARTNERS).map((partner) => ({
-    partner,
-    score: partner.compatibility,
-    matchReasons: [
-      ...(satisfies(partner) ? [] : [msg("일부 조건을 넓혀 찾은 가까운 파트너예요")]),
-      ...(dailyMatchDetails[partner.id]?.reasons ?? [msg("학습 목표 일치"), msg("비슷한 활동 시간")]),
-    ],
-    icebreaker: dailyMatchDetails[partner.id]?.icebreaker ?? `Hi ${partner.name}! What would you like to practice today?`,
-  }));
+function displayPartnerFromApi(partner: ApiProfile, score: number): Partner {
+  return toPartner(partner, score);
 }
+
 
 const navItems: Array<{
   id: Section;
@@ -549,9 +465,18 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [settings, setSettings] = useState<AppSettings>({ dmRequests: true, hideLocation: true, correctionAlerts: true, autoSync: true, dmScope: "matches" });
   const [matchPreferences, setMatchPreferences] = useState<MatchPreferences>(defaultMatchPreferences);
   const [dailyRecommendations, setDailyRecommendations] = useState<DailyMatchRecommendation[]>([]);
-  /* 첫 불러오기가 끝나기 전에는 "아무것도 없음" 과 구분해야 합니다. */
-  const [loading, setLoading] = useState(true);
-  const [livePartners, setLivePartners] = useState<Partner[]>([]);
+  const [matchesFailed, setMatchesFailed] = useState(false);
+  /**
+   * 사람 명부.
+   *
+   * 글·대화·좋아요에는 상대의 id 만 실려 옵니다. 프로필을 열거나 이름을 보여주려면
+   * 그 id 로 사람을 찾아야 하는데, 예전에는 fixture 배열에서 찾았습니다. 진짜
+   * 사용자는 거기 없으니 "프로필은 아직 준비 중이에요" 만 떴습니다.
+   */
+  const [directory, setDirectory] = useState<Partner[]>([]);
+  /* 차단한 사람은 명부에서 빠집니다. 이름을 보여주려면 따로 들고 있어야 합니다. */
+  const [blockedPartners, setBlockedPartners] = useState<Partner[]>([]);
+
   const [detail, setDetail] = useState<DetailRoute>(null);
   const [partnerIndex, setPartnerIndex] = useState(0);
   const [signaledPartners, setSignaledPartners] = useState<string[]>([]);
@@ -563,9 +488,14 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [savedItems, setSavedItems] = useState<SavedPhrase[]>([]);
   const [corrections, setCorrections] = useState<ApiCorrection[]>([]);
   const [likesReceived, setLikesReceived] = useState<ApiReceivedLike[]>([]);
+  const [sentLikes, setSentLikes] = useState<ApiReceivedLike[]>([]);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [safetyReports, setSafetyReports] = useState<SafetyReportInfo[]>([]);
   const [savedPartnerIds, setSavedPartnerIds] = useState<Set<string>>(new Set());
+  /* 숨긴 사람은 서버에 보관하지 않습니다(차단과 달리 상대에게 아무 영향이 없는,
+     이 기기의 취향입니다). 대신 이 기기에는 남겨야 합니다 — 예전에는 새로고침하면
+     숨긴 사람이 그대로 돌아왔고 설정의 "숨긴 사용자" 목록도 비어 있었습니다. */
+  const hiddenStorageKey = `lingoloop-hidden-authors:${me.id}`;
   const [hiddenAuthorIds, setHiddenAuthorIds] = useState<Set<string>>(new Set());
   const [blockedAuthorIds, setBlockedAuthorIds] = useState<Set<string>>(new Set());
   const [mutedChatIds, setMutedChatIds] = useState<Set<string>>(new Set());
@@ -588,9 +518,51 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
    * 실패하면 가짜 데이터로 되돌아가지 않고 빈 상태를 그대로 보여줍니다. 가짜를
    * 섞으면 사용자는 자기 데이터가 사라졌는지 서버가 죽었는지 알 수 없습니다.
    */
+  /**
+   * id 로 사람 찾기. 명부에 없으면 오늘의 추천에서 찾습니다
+   * (추천에는 있지만 명부 100명 안에는 없을 수 있습니다).
+   */
+  const findPartner = useCallback(
+    (id?: string): Partner | undefined => {
+      if (!id) return undefined;
+      return (
+        directory.find((person) => person.id === id || person.handle === `@${id}`) ||
+        blockedPartners.find((person) => person.id === id) ||
+        dailyRecommendations.find((item) => item.partner.id === id)?.partner
+      );
+    },
+    [directory, blockedPartners, dailyRecommendations],
+  );
+
+  /**
+   * 프로필 저장.
+   *
+   * 예전에는 화면 상태만 바꾸고 "저장했어요" 라고 알렸습니다. 새로고침하면
+   * 예전 이름으로 돌아왔고, 다른 사람에게는 바뀐 적도 없었습니다.
+   * 학습 목표는 서버에서 학습 언어에 딸린 값이라 그 자리에 넣어 보냅니다.
+   */
+  const saveProfile = async (next: ProfileDraft) => {
+    const previous = profile;
+    setProfile(next);
+    try {
+      const learning = me.learningLanguages?.length
+        ? me.learningLanguages.map((item, index) => (index === 0 ? { ...item, goal: next.goal || item.goal } : item))
+        : undefined;
+      await api("/api/profile", {
+        method: "PATCH",
+        body: JSON.stringify({ name: next.name, bio: next.bio, ...(learning ? { learningLanguages: learning } : {}) }),
+      });
+      showToast(t("프로필을 저장했어요"));
+      void reload();
+    } catch (caught) {
+      setProfile(previous);
+      showToast(caught instanceof Error ? caught.message : t("프로필을 저장하지 못했어요."));
+    }
+  };
+
   const reload = useCallback(async () => {
     try {
-      const [postList, conversationList, requestList, phraseList, correctionList, likeList, followList, blockList] = await Promise.all([
+      const [postList, conversationList, requestList, phraseList, correctionList, likeList, followList, blockList, peopleList, sentLikeList] = await Promise.all([
         api<ApiPost[]>("/api/posts"),
         api<ApiConversation[]>("/api/conversations"),
         api<ApiConversation[]>("/api/conversations?box=requests"),
@@ -598,14 +570,21 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         api<ApiCorrection[]>("/api/corrections/received"),
         api<ApiReceivedLike[]>("/api/likes/received"),
         api<string[]>("/api/follows"),
-        api<Array<{ blockedId: string }>>("/api/blocks"),
+        api<Array<{ blockedId: string; partner: ApiProfile }>>("/api/blocks"),
+        api<ApiProfile[]>("/api/partners"),
+        api<ApiReceivedLike[]>("/api/likes/sent"),
       ]);
+      setSentLikes(sentLikeList || []);
+      setSignaledPartners((sentLikeList || []).map((item) => item.partner.id));
+      setDirectory((peopleList || []).map((person) => toPartner(person)));
       setSavedItems((phraseList || []).map(toSavedPhrase));
       setCorrections(correctionList || []);
       setLikesReceived(likeList || []);
       setFollowingIds(followList || []);
       setBlockedAuthorIds(new Set((blockList || []).map((row) => row.blockedId)));
-      const feed = (postList || []).map(toFeedPost);
+      setBlockedPartners((blockList || []).filter((row) => row.partner).map((row) => toPartner(row.partner)));
+      const savedIds = new Set((phraseList || []).map((item) => item.id));
+      const feed = (postList || []).map((post) => ({ ...toFeedPost(post), saved: savedIds.has(post.id) }));
       setPosts(feed);
       setMyPostList(feed.filter((post) => post.authorId === me.id));
 
@@ -615,8 +594,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       setSelectedChatId((current) => (rooms.some((room) => room.id === current) ? current : rooms[0]?.id ?? ""));
     } catch {
       /* 실패해도 빈 화면을 유지합니다. 오류는 아래 개별 동작에서 알립니다. */
-    } finally {
-      setLoading(false);
     }
   }, [me.id]);
 
@@ -624,6 +601,25 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     const timer = window.setTimeout(() => void reload(), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
+
+  // 숨긴 사람 복원. 서버 값이 아니라 이 기기의 기록이라 마운트 이후에 읽습니다.
+  // (다른 복원 코드와 같이 rAF 뒤로 미룹니다 — 하이드레이션 중 setState 를 피합니다.)
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const stored = readStoredJson<string[]>(hiddenStorageKey, (value): value is string[] =>
+        Array.isArray(value) && value.every((item) => typeof item === "string"));
+      if (stored?.length) setHiddenAuthorIds(new Set(stored));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [hiddenStorageKey]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(hiddenStorageKey, JSON.stringify([...hiddenAuthorIds]));
+    } catch {
+      // 저장 공간을 못 쓰면 이번 세션에만 유지됩니다.
+    }
+  }, [hiddenAuthorIds, hiddenStorageKey]);
 
   /** 고른 대화의 메시지를 채웁니다. 목록만으로는 말풍선을 그릴 수 없습니다. */
   useEffect(() => {
@@ -728,6 +724,15 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   };
 
   /** 차단하면 그 사람 글이 피드에서 사라져야 "차단됐다"는 게 보입니다. */
+  const signOut = async () => {
+    try {
+      await api("/api/auth/logout", { method: "POST", body: JSON.stringify({}) });
+    } catch {
+      /* 서버가 답을 안 해도 이 기기에서는 나갑니다. */
+    }
+    onSignedOut();
+  };
+
   const blockAuthor = async (authorId: string, name: string) => {
     setBlockedAuthorIds((current) => new Set(current).add(authorId));
     setDetail(null);
@@ -788,20 +793,22 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     fetch(`/api/matching/daily?${query.toString()}`)
       .then(async (response) => {
         if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-        return response.json() as Promise<{ data?: { recommendations?: Array<{ partner: MatchingApiPartner; score: number; matchReasons: string[]; icebreaker: string }> } }>;
+        return response.json() as Promise<{ data?: { recommendations?: Array<{ partner: ApiProfile; score: number; matchReasons: string[]; icebreaker: string }> } }>;
       })
       .then((body) => {
-        if (cancelled || !body.data?.recommendations?.length) return;
-        setDailyRecommendations(body.data.recommendations.slice(0, MAX_DAILY_PARTNERS).map((item, index) => ({
-          partner: displayPartnerFromApi(item.partner, item.score, index),
+        if (cancelled) return;
+        setDailyRecommendations((body.data?.recommendations || []).slice(0, MAX_DAILY_PARTNERS).map((item) => ({
+          partner: displayPartnerFromApi(item.partner, item.score),
           score: item.score,
           matchReasons: item.matchReasons,
           icebreaker: item.icebreaker,
         })));
+        setMatchesFailed(false);
       })
       .catch(() => {
-        // mock API 를 못 쓰면 조건을 반영한 결정론적 로컬 추천으로 대체합니다.
-        if (!cancelled) setDailyRecommendations(fallbackDailyRecommendations(matchPreferences));
+        // 추천을 못 받아오면 빈 화면 + 안내입니다. 예전에는 가짜 사람 12명을
+        // 대신 보여줬는데, 말을 걸 수 없는 사람들이라 더 나쁩니다.
+        if (!cancelled) { setDailyRecommendations([]); setMatchesFailed(true); }
       });
 
     return () => {
@@ -876,32 +883,42 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   };
 
   /**
-   * 설정 저장 — 이 기기(localStorage)에 남기고, DM 수신 범위는 mock API 계약(/api/dm/privacy)에도 반영합니다.
-   * API 가 없어도 기기 저장만으로 동작해야 하므로 실패는 조용히 넘어갑니다.
+   * 설정 저장.
+   *
+   * DM 수신 범위는 서버가 실제로 라우팅에 쓰는 값입니다. 그래서 저장에 실패하면
+   * 되돌리고 알립니다 — 예전에는 조용히 넘어가서, 화면에는 "매칭된 사람"이라고
+   * 적혀 있는데 서버는 "모든 사람"으로 받는 상태가 될 수 있었습니다.
+   * 나머지 항목은 이 기기에만 남습니다.
    */
   const applySettings = (next: AppSettings) => {
+    const previous = settings;
     setSettings(next);
     try {
       window.localStorage.setItem("lingoloop-app-settings", JSON.stringify(next));
     } catch {
       // Continue with in-memory state if browser storage is unavailable.
     }
-    void fetch("/api/dm/privacy", {
+    if (next.dmScope === previous.dmScope) return;
+    void api("/api/dm/privacy", {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         whoCanMessage: dmScopeToApi[next.dmScope],
+        // 허용 범위 밖의 DM 은 받은함이 아니라 요청함으로 갑니다 — 제품 결정이라 항상 켭니다.
         routeOthersToRequests: true,
-        filterSuspectedSpam: true,
-        allowVoiceMessagesInRequests: false,
-        readReceipts: true,
       }),
-    }).catch(() => {
-      // 오프라인이어도 이 기기 저장만으로 충분합니다.
+    }).catch((caught) => {
+      setSettings(previous);
+      showToast(caught instanceof Error ? caught.message : t("설정을 저장하지 못했어요."));
     });
   };
 
-  // 저장된 설정 복원 — 없으면 mock API 의 DM 개인정보 설정을 초기값으로 씁니다.
+  /**
+   * 설정 복원.
+   *
+   * 기기에만 남는 항목은 localStorage 에서, DM 수신 범위는 서버에서 가져옵니다.
+   * 예전에는 기기 값이 서버를 덮어써서, 폰에서 바꾼 범위가 노트북에서는 옛 값으로
+   * 보였습니다. 실제 라우팅은 서버 값으로 도니 서버가 맞습니다.
+   */
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const stored = readStoredJson<Partial<AppSettings>>(
@@ -909,20 +926,16 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         (value): value is Partial<AppSettings> => typeof value === "object" && value !== null && !Array.isArray(value),
       );
       if (stored) {
-        setSettings((current) => ({ ...current, ...stored }));
-        return;
+        // dmScope 는 서버에서 받습니다 — 기기 값으로 덮으면 실제 라우팅과 어긋납니다.
+        setSettings((current) => ({ ...current, ...stored, dmScope: current.dmScope }));
       }
-      fetch("/api/dm/privacy")
-        .then((response) => (response.ok ? (response.json() as Promise<{ data?: { settings?: { whoCanMessage?: string } } }>) : Promise.reject(new Error(`Mock API returned ${response.status}`))))
+      void api<{ settings?: { whoCanMessage?: string } }>("/api/dm/privacy")
         .then((body) => {
-          const scope = dmScopeFromApi[body.data?.settings?.whoCanMessage ?? ""];
-          // 안전 설정은 좁은 쪽이 안전합니다. 서버가 더 열린 값을 주더라도
-          // 사용자가 직접 넓히기 전까지는 기본값(매칭된 사람)을 유지합니다.
-          const RANK: Record<DmScope, number> = { matches: 0, mutuals: 1, anyone: 2 };
-          if (scope) setSettings((current) => (RANK[scope] < RANK[current.dmScope] ? { ...current, dmScope: scope } : current));
+          const scope = dmScopeFromApi[body.settings?.whoCanMessage ?? ""];
+          if (scope) setSettings((current) => ({ ...current, dmScope: scope }));
         })
         .catch(() => {
-          // 오프라인이면 기본값을 유지합니다.
+          // 서버를 못 부르면 기본값(매칭된 사람)을 유지합니다. 안전 설정은 좁은 쪽이 안전합니다.
         });
     });
     return () => window.cancelAnimationFrame(frame);
@@ -946,7 +959,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
       showToast(t("매칭 설정을 저장했어요 · 오늘의 파트너에 바로 반영돼요"));
     } catch {
-      showToast(t("매칭 설정을 이 기기에 저장했어요 · 오프라인 데모"));
+      showToast(t("매칭 설정을 저장하지 못했어요."));
     }
   };
 
@@ -955,10 +968,27 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     showToast(t("다음 사람을 보여드릴게요"));
   };
 
+  /**
+   * 마음 보내기.
+   *
+   * 예전에는 화면 상태만 바꿨습니다 — 상대에게는 아무 일도 일어나지 않았고
+   * 새로고침하면 보낸 기록도 사라졌습니다.
+   */
   const signalPartner = (partner: Partner) => {
     setSignaledPartners((current) => (current.includes(partner.id) ? current : [...current, partner.id]));
     setPartnerIndex((current) => current + 1);
-    showToast(t("{name}님에게 마음을 보냈어요", { name: partner.name }));
+    api<{ mutual: boolean }>(`/api/partners/${encodeURIComponent(partner.id)}/like`, { method: "POST" })
+      .then((result) =>
+        showToast(
+          result.mutual
+            ? t("{name}님과 서로 마음이 통했어요", { name: partner.name })
+            : t("{name}님에게 마음을 보냈어요", { name: partner.name }),
+        ),
+      )
+      .catch((caught) => {
+        setSignaledPartners((current) => current.filter((id) => id !== partner.id));
+        showToast(caught instanceof Error ? caught.message : t("마음을 보내지 못했어요."));
+      });
   };
 
   /**
@@ -1052,18 +1082,32 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     );
   };
 
+  /**
+   * 좋아요·복습함 저장.
+   *
+   * 화면을 먼저 바꾸고 서버에 보냅니다. 예전에는 서버에 아예 보내지 않아서
+   * 새로고침하면 눌렀던 하트가 풀렸습니다.
+   */
   const togglePost = (postId: string, key: "liked" | "saved") => {
-    let message = "";
-    updatePost(postId, (post) => {
-      if (key === "liked") {
-        const nextLiked = !post.liked;
-        message = nextLiked ? t("좋아요를 눌렀어요") : t("좋아요를 취소했어요");
-        return { ...post, liked: nextLiked, likes: post.likes + (nextLiked ? 1 : -1) };
-      }
-      message = post.saved ? t("복습함에서 뺐어요") : t("복습함에 저장했어요");
-      return { ...post, saved: !post.saved };
-    });
-    showToast(message);
+    const post = posts.find((item) => item.id === postId) || myPostList.find((item) => item.id === postId);
+    if (!post) return;
+
+    if (key === "saved") {
+      // 글 저장은 복습함(저장한 표현)에 그대로 들어갑니다 — 저장 목록이 두 벌이면 어긋납니다.
+      void savePhrase({ id: post.id, phrase: post.text, meaning: "", source: post.author, due: "" });
+      updatePost(postId, (item) => ({ ...item, saved: !item.saved }));
+      return;
+    }
+
+    const nextLiked = !post.liked;
+    updatePost(postId, (item) => ({ ...item, liked: nextLiked, likes: item.likes + (nextLiked ? 1 : -1) }));
+    showToast(nextLiked ? t("좋아요를 눌렀어요") : t("좋아요를 취소했어요"));
+    api<{ liked: boolean; likes: number }>(`/api/posts/${encodeURIComponent(postId)}/like`, { method: "POST" })
+      .then((result) => updatePost(postId, (item) => ({ ...item, liked: result.liked, likes: result.likes })))
+      .catch((caught) => {
+        updatePost(postId, (item) => ({ ...item, liked: !nextLiked, likes: item.likes + (nextLiked ? -1 : 1) }));
+        showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."));
+      });
   };
 
   /** 내 글 삭제. 되돌릴 수 없으므로 한 번 묻고, 상세를 보고 있었다면 함께 닫습니다. */
@@ -1074,11 +1118,19 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       body: t("삭제한 글과 거기 달린 답글·교정은 되돌릴 수 없어요."),
       confirmLabel: t("삭제하기"),
       onConfirm: () => {
+        /* 화면에서 먼저 지우고 서버에 알립니다. 실패하면 되돌립니다 —
+           예전에는 서버에 알리지 않아서 "삭제했어요" 라고 해놓고 새로고침하면
+           그대로 있었습니다. */
         const drop = (items: FeedPost[]) => items.filter((item) => item.id !== post.id);
         setPosts(drop);
         setMyPostList(drop);
         setDetail((current) => (current?.kind === "post" && current.post.id === post.id ? null : current));
-        showToast(t("글을 삭제했어요"));
+        api(`/api/posts/${encodeURIComponent(post.id)}`, { method: "DELETE" })
+          .then(() => showToast(t("글을 삭제했어요")))
+          .catch((caught) => {
+            void reload();
+            showToast(caught instanceof Error ? caught.message : t("글을 삭제하지 못했어요."));
+          });
       },
     });
   };
@@ -1256,41 +1308,44 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     showToast(t("보이스룸을 열었어요 · 호스트로 입장했어요"));
   };
 
+  /**
+   * 신고 접수.
+   *
+   * 운영자가 보는 화면으로 그대로 갑니다. 그래서 여기서 지어내는 값이 있으면
+   * 안 됩니다 — 예전에는 대상 id 가 없으면 "demo-홍길동" 을 만들어 보냈고,
+   * 사유 설명에는 늘 "UI 프로토타입에서 제출한 데모 신고입니다" 를 붙였습니다.
+   * 진짜 신고가 그 문구를 달고 접수되면 운영자가 걸러낼 수 없습니다.
+   */
   const reportTarget = async (target: string, options?: ReportOptions) => {
-    /* 함께 차단 — 신고와 별개로 즉시 반영합니다 (API 실패와 무관하게 내 화면에서 사라져야 안전). */
-    if (options?.block && options.targetId && options.targetType !== "room") {
-      setBlockedAuthorIds((current) => new Set(current).add(options.targetId!));
+    if (!options?.targetId) {
+      showToast(t("이 대상은 신고할 수 없어요"));
+      setModal(null);
+      return;
     }
-    /* mock API 가 지원하는 사유만 그대로 보내고, 나머지(개인정보 요구 등)는 other 로 접수합니다. */
+    /* 서버가 받는 사유만 그대로 보내고, 나머지(개인정보 요구 등)는 other 로 접수합니다. */
     const supportedReasons = ["spam", "scam", "harassment", "dating", "other"];
-    const reason = options?.reason && supportedReasons.includes(options.reason) ? options.reason : "other";
+    const reason = options.reason && supportedReasons.includes(options.reason) ? options.reason : "other";
     try {
-      const response = await fetch("/api/reports", {
+      const report = await api<SafetyReportInfo>("/api/reports", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          targetType: options?.targetType ?? "user",
-          targetId: options?.targetId ?? `demo-${target.toLowerCase().replace(/\s+/g, "-")}`,
+          targetType: options.targetType === "room" ? "user" : options.targetType ?? "user",
+          targetId: options.targetId,
           reason,
-          details: t("UI 프로토타입에서 제출한 데모 신고입니다."),
         }),
       });
-      if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-      const body = await response.json() as { data?: SafetyReportInfo };
-      if (body.data?.id) {
-        setSafetyReports((current) => [body.data as SafetyReportInfo, ...current]);
-        setModal(null);
-        showToast(
-          options?.block
-            ? t("신고를 접수하고 {name}님을 차단했어요 · 접수번호 {id}", { name: target, id: shortReportId(body.data.id) })
-            : t("신고가 접수되었어요 · 접수번호 {id}", { id: shortReportId(body.data.id) }),
-        );
-        return;
-      }
-      throw new Error("Missing mock report data");
-    } catch {
-      showToast(t("신고를 기기에 임시 저장했어요 · 오프라인 데모"));
+      setSafetyReports((current) => [report, ...current]);
       setModal(null);
+      /* 함께 차단은 서버까지 반영해야 합니다 — 화면에서만 지우면 새로고침에 되살아납니다. */
+      if (options.block) await blockAuthor(options.targetId, target);
+      showToast(
+        options.block
+          ? t("신고를 접수하고 {name}님을 차단했어요 · 접수번호 {id}", { name: target, id: shortReportId(report.id) })
+          : t("신고가 접수되었어요 · 접수번호 {id}", { id: shortReportId(report.id) }),
+      );
+    } catch (caught) {
+      setModal(null);
+      showToast(caught instanceof Error ? caught.message : t("신고를 접수하지 못했어요."));
     }
   };
 
@@ -1393,9 +1448,9 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 post={detail.post}
                 onBack={closeDetail}
                 onProfile={(authorId) => {
-                  const partner = partners.find((item) => item.id === authorId || item.handle === `@${authorId}`);
+                  const partner = findPartner(authorId);
                   if (partner) openProfile(partner);
-                  else showToast(t("이 작성자의 프로필은 아직 준비 중이에요"));
+                  else showToast(t("이 작성자의 프로필을 열 수 없어요"));
                 }}
                 onReport={() => setModal({ type: "report", target: detail.post.author, targetId: detail.post.authorId })}
                 onToast={showToast}
@@ -1416,7 +1471,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               <ProfileEditView
                 value={profile}
                 onBack={closeDetail}
-                onSave={(next) => { setProfile(next); closeDetail(); showToast(t("프로필을 저장했어요")); }}
+                onSave={(next) => { closeDetail(); void saveProfile(next); }}
               />
             ) : null}
 
@@ -1424,6 +1479,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               <BlockedListView
                 hidden={[...hiddenAuthorIds]}
                 blocked={[...blockedAuthorIds]}
+                directory={[...directory, ...blockedPartners]}
                 onBack={closeDetail}
                 onUnhide={(id) => { setHiddenAuthorIds((c) => { const n = new Set(c); n.delete(id); return n; }); showToast(t("다시 보기로 바꿨어요")); }}
                 onUnblock={(id) => { void unblockAuthor(id); showToast(t("차단을 해제했어요")); }}
@@ -1447,6 +1503,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               <DiscoverView
                 preferences={matchPreferences}
                 dailyRecommendations={dailyRecommendations}
+                loadFailed={matchesFailed}
                 index={partnerIndex}
                 signaledCount={signaledPartners.length}
                 onSkip={skipPartner}
@@ -1471,9 +1528,9 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onCorrection={(id) => toggleSetValue(setOpenCorrections, id)}
                 onToggle={togglePost}
                 onProfile={(id) => {
-                  const partner = partners.find((item) => item.id === id);
+                  const partner = findPartner(id);
                   if (partner) openProfile(partner);
-                  else showToast(t("이 작성자의 프로필은 아직 준비 중이에요"));
+                  else showToast(t("이 작성자의 프로필을 열 수 없어요"));
                 }}
                 onReport={(target, targetId) => setModal({ type: "report", target, targetId })}
                 onOpen={openPost}
@@ -1488,6 +1545,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onCopyLink={copyLink}
                 onDeletePost={deletePost}
                 myLearningLanguage={languageName(me.learningLanguages?.[0]?.code ?? "en")}
+                followingIds={followingIds}
               />
             ) : null}
             {!detail && section === "chats" ? (
@@ -1510,9 +1568,9 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onSend={sendMessage}
                 onExchange={() => setModal({ type: "exchange" })}
                 onProfile={() => {
-                  const partner = partners.find((item) => item.id === selectedConversation?.partnerId);
+                  const partner = findPartner(selectedConversation?.partnerId);
                   if (partner) openProfile(partner);
-                  else showToast(t("그룹 정보 패널을 열었어요"));
+                  else showToast(t("이 작성자의 프로필을 열 수 없어요"));
                 }}
                 onReport={() => setModal({ type: "report", target: selectedConversation?.name ?? t("대화"), targetId: selectedConversation?.partnerId })}
                 onToast={showToast}
@@ -1589,6 +1647,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           onChangeSettings={applySettings}
           onOnboarding={() => setModal({ type: "onboarding" })}
           onOpenBlocked={() => { setSettingsOpen(false); goToSection("learn"); setDetail({ kind: "blocked" }); }}
+          onSignOut={signOut}
           onToast={showToast}
           safetyReports={safetyReports}
           onCloseSettings={() => setSettingsOpen(false)}
@@ -1619,6 +1678,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
             setModal(null);
           }}
           posts={posts}
+          directory={directory}
+          savedItems={savedItems}
+          likesReceived={likesReceived}
+          sentLikes={sentLikes}
           onOpenPost={(post) => { setModal(null); openPost(post); }}
           roomMessages={roomMessages}
           onSendRoomMessage={(text) => setRoomMessages((list) => [...list, { id: `rm-${list.length + 1}-${text.length}`, name: currentUser.name, text, mine: true }])}
@@ -1630,7 +1693,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           setExchangeLength={setExchangeLength}
           matchPreferences={matchPreferences}
           onSaveMatchPreferences={saveMatchPreferences}
-          dailyQueue={dailyRecommendations.length ? dailyRecommendations : fallbackDailyRecommendations(matchPreferences)}
+          dailyQueue={dailyRecommendations}
           partnerIndex={partnerIndex}
           signaledPartners={signaledPartners}
           onJumpPartner={(position) => { setPartnerIndex(position); setModal(null); }}
@@ -2420,17 +2483,22 @@ function ProfileEditView({
 function BlockedListView({
   hidden,
   blocked,
+  directory,
   onBack,
   onUnhide,
   onUnblock,
 }: {
   hidden: string[];
   blocked: string[];
+  directory: Partner[];
   onBack: () => void;
   onUnhide: (id: string) => void;
   onUnblock: (id: string) => void;
 }) {
-  const nameOf = (id: string) => partners.find((item) => item.id === id)?.name ?? id;
+  /* 차단한 사람은 명부(/api/partners)에서 빠지므로 이름을 찾지 못할 수 있습니다.
+     그때는 id 를 그대로 보여주는 대신 "차단한 사용자"라고 적습니다 — 화면에 uid 가
+     찍히면 무엇을 푸는 건지 알 수 없습니다. */
+  const nameOf = (id: string) => directory.find((item) => item.id === id)?.name ?? t("차단한 사용자");
   const [tab, setTab] = useState<"blocked" | "hidden">("blocked");
   const ids = tab === "blocked" ? blocked : hidden;
 
@@ -2497,6 +2565,7 @@ function DiscoverView({
   onOpenList,
   onOpenLikes,
   receivedCount,
+  loadFailed,
 }: {
   preferences: MatchPreferences;
   dailyRecommendations: DailyMatchRecommendation[];
@@ -2510,6 +2579,7 @@ function DiscoverView({
   onOpenList: () => void;
   onOpenLikes: () => void;
   receivedCount: number;
+  loadFailed: boolean;
 }) {
   // 부모가 이미 조건에 맞는 12명(또는 조건을 넓힌 후보 포함)을 내려줍니다. 조건 밖 fixture 를 섞지 않습니다.
   const queue = dailyRecommendations.slice(0, MAX_DAILY_PARTNERS);
@@ -2537,23 +2607,37 @@ function DiscoverView({
         <header className="simple-view-header partner-view-header">
           <div>
             <h1>{t("오늘의 파트너")}</h1>
-            <p>{t("오늘은 여기까지예요.")}</p>
+            {!loadFailed && total > 0 ? <p>{t("오늘은 여기까지예요.")}</p> : null}
           </div>
           <button className="secondary-button" type="button" onClick={onFilters}><SlidersHorizontal size={16} /> {t("조건 바꾸기")}</button>
         </header>
 
         <section className="partners-exhausted">
           <span className="partners-exhausted-icon"><CalendarDays size={32} strokeWidth={1.6} /></span>
-          <strong>{t("오늘 만날 사람을 다 봤어요")}</strong>
+          <strong>
+            {loadFailed
+              ? t("추천을 불러오지 못했어요")
+              : total === 0
+                ? t("조건에 맞는 사람이 아직 없어요")
+                : t("오늘 만날 사람을 다 봤어요")}
+          </strong>
           <p>
-            {t("오늘 {total}명을 모두 확인했어요", { total })}
-            {signaledCount > 0 ? t(" · {signaledCount}명에게 신호를 보냈어요", { signaledCount }) : ""}.
-            <br />
-            {t("내일 오전 9시에 새로운 파트너를 추천해드릴게요.")}
+            {loadFailed ? (
+              t("잠시 뒤에 다시 시도해 주세요.")
+            ) : total === 0 ? (
+              t("조건을 조금 넓히면 만날 수 있는 사람이 늘어나요.")
+            ) : (
+              <>
+                {t("오늘 {total}명을 모두 확인했어요", { total })}
+                {signaledCount > 0 ? t(" · {signaledCount}명에게 신호를 보냈어요", { signaledCount }) : ""}.
+                <br />
+                {t("내일 오전 9시에 새로운 파트너를 추천해드릴게요.")}
+              </>
+            )}
           </p>
           <div className="partners-exhausted-actions">
             <button className="primary-button" type="button" onClick={onFilters}><SlidersHorizontal size={16} /> {t("조건 바꾸기")}</button>
-            <button className="secondary-button" type="button" onClick={onRestart}><RotateCcw size={16} /> {t("처음부터 다시")}</button>
+            {total > 0 ? <button className="secondary-button" type="button" onClick={onRestart}><RotateCcw size={16} /> {t("처음부터 다시")}</button> : null}
           </div>
         </section>
       </div>
@@ -2664,6 +2748,7 @@ function CommunityView({
   onCopyLink,
   onDeletePost,
   myLearningLanguage,
+  followingIds,
 }: {
   posts: FeedPost[];
   tab: "recommended" | "learning" | "following";
@@ -2680,6 +2765,8 @@ function CommunityView({
   onDeletePost: (post: FeedPost) => void;
   /** "학습" 탭은 내가 배우는 언어로 쓴 글만 봅니다. */
   myLearningLanguage: string;
+  /** "팔로잉" 탭은 내가 팔로우하는 사람의 글만 봅니다. */
+  followingIds: string[];
   translated: Set<string>;
   translations: Record<string, string>;
   corrections: Set<string>;
@@ -2699,7 +2786,7 @@ function CommunityView({
     if (hiddenAuthorIds.has(post.authorId) || blockedAuthorIds.has(post.authorId)) return false;
     if (activeTag) return post.tags.includes(activeTag);
     if (tab === "learning") return post.language === myLearningLanguage;
-    if (tab === "following") return followingAuthors.includes(post.authorId);
+    if (tab === "following") return followingIds.includes(post.authorId);
     return true;
   });
   const visible = filteredPosts.slice(0, count);
@@ -2772,7 +2859,7 @@ function CommunityView({
               <button className="post-copy-open" type="button" onClick={() => onOpen(post)} aria-label={t("{author}님의 게시물 열기", { author: post.author })}>
                 <span className="post-copy">{post.text}</span>
               </button>
-              {translated.has(post.id) ? <div className="translation-box"><Languages size={16} /><p><span>{t("데모 번역")}</span>{translations[post.id] ?? post.translation}</p></div> : null}
+              {translated.has(post.id) ? <div className="translation-box"><Languages size={16} /><p><span>{t("번역")}</span>{translations[post.id] ?? post.translation}</p></div> : null}
               <div className="post-tags">{post.tags.map((tag) => <button type="button" key={tag} className={activeTag === tag ? "active" : ""} onClick={() => onTagSelect(activeTag === tag ? null : tag)}>{tag}</button>)}</div>
               {post.visual ? (
                 <div className={`post-visual visual-${post.accent}`}>
@@ -2886,7 +2973,7 @@ function ChatsView({
       setMessageTranslations((current) => ({ ...current, [message.id]: translatedText }));
       toggleLocalSet(setTranslatedMessages, message.id);
     } catch {
-      onToast(t("번역을 불러오지 못했어요 · 오프라인 데모"));
+      onToast(t("번역을 불러오지 못했어요."));
     }
   };
   const [coachLoading, setCoachLoading] = useState(false);
@@ -2968,7 +3055,7 @@ function ChatsView({
           <div><h1>{t("대화")}</h1>{unreadTotal > 0 ? <Pill tone="soft">{t("안 읽음 {n}", { n: unreadTotal })}</Pill> : null}</div>
           <IconButton label={t("새 대화")} icon={PenLine} onClick={onNewChat} />
         </header>
-        <div className="chat-sync-note"><Cloud size={15} /><span><strong>{tx(msg("실서비스 설계 · 서버 자동 동기화"))}</strong><small>{tx(msg("출시 버전에서는 앱을 삭제하거나 기기를 바꿔도 로그인하면 복원돼요. 현재는 mock입니다."))}</small></span></div>
+        <div className="chat-sync-note"><Cloud size={15} /><span><strong>{tx(msg("실서비스 설계 · 서버 자동 동기화"))}</strong><small>{tx(msg("앱을 지우거나 기기를 바꿔도 로그인하면 그대로 이어져요."))}</small></span></div>
         <label className="chat-search"><Search size={16} /><input type="search" value={listQuery} onChange={(event) => setListQuery(event.target.value)} placeholder={t("이름 또는 대화 검색")} />{listQuery ? <button type="button" className="chat-search-clear" aria-label={t("검색어 지우기")} onClick={() => setListQuery("")}><X size={14} /></button> : null}</label>
         <div className="chat-list-tabs">
           <button type="button" className={listTab === "all" ? "active" : ""} onClick={() => setListTab("all")}>{t("전체")}</button>
@@ -3115,7 +3202,7 @@ function ChatsView({
                     <button type="button" onClick={() => onToast(speakText(message.text ?? "") ? t("문장을 원어민 발음으로 재생했어요") : t("이 브라우저에서는 음성 재생을 지원하지 않아요"))}><Volume2 size={13} /> {t("듣기")}</button>
                   </div>
                 </div>
-                <time>{localizeClock(message.time)}{message.mine ? t(" · 읽음") : ""}</time>
+                <time>{localizeClock(message.time)}{message.mine && message.readByPartner ? t(" · 읽음") : ""}</time>
               </div>
             );
           })}
@@ -3225,6 +3312,7 @@ function SettingsModal({
   onToast,
   safetyReports,
   onCloseSettings,
+  onSignOut,
 }: {
   settings: AppSettings;
   onChangeSettings: (next: AppSettings) => void;
@@ -3233,6 +3321,7 @@ function SettingsModal({
   onToast: (message: string) => void;
   safetyReports: SafetyReportInfo[];
   onCloseSettings: () => void;
+  onSignOut: () => Promise<void> | void;
 }) {
   const toggle = (key: "dmRequests" | "hideLocation" | "correctionAlerts" | "autoSync") => onChangeSettings({ ...settings, [key]: !settings[key] });
   /* 설정 모달 — 좌측 메뉴 선택값. 모바일에서는 pane 을 열었는지도 함께 봅니다. */
@@ -3269,7 +3358,7 @@ function SettingsModal({
       if (body.data?.verification?.steps) setVerificationSteps(body.data.verification.steps);
       onToast(action === "verify" ? t("인증을 완료했어요") : t("인증을 시작했어요 · 확인 중"));
     } catch {
-      onToast(t("지금은 인증 서버에 연결할 수 없어요 · 오프라인 데모"));
+      onToast(t("지금은 인증 서버에 연결할 수 없어요."));
     }
   };
 
@@ -3354,7 +3443,7 @@ function SettingsModal({
                   {settingsPane === "data" ? (
                     <>
                       <SettingRow icon={Cloud} title={tx(msg("대화 자동 동기화"))} description={tx(msg("재설치·기기 변경 후에도 서버에서 복원"))} checked={settings.autoSync} onChange={() => toggle("autoSync")} />
-                      <div className="data-sync-status"><CheckCircle2 size={17} /><span><strong>{settings.autoSync ? tx(msg("자동 동기화 켜짐 · DEMO")) : tx(msg("자동 동기화 꺼짐"))}</strong><small>{settings.autoSync ? tx(msg("실서비스 동작을 보여주는 목업이며 현재 재로그인 복원은 지원하지 않아요.")) : tx(msg("출시 버전에서는 이 기기의 새 메시지가 복원되지 않을 수 있어요."))}</small></span></div>
+                      <div className="data-sync-status"><CheckCircle2 size={17} /><span><strong>{settings.autoSync ? tx(msg("자동 동기화 켜짐")) : tx(msg("자동 동기화 꺼짐"))}</strong><small>{settings.autoSync ? tx(msg("대화는 서버에 남아 다시 로그인하면 복원돼요.")) : tx(msg("이 기기의 새 메시지가 복원되지 않을 수 있어요."))}</small></span></div>
                       <button className="profile-settings-link" type="button" onClick={() => onToast(tx(msg("대화 기록 다운로드 파일을 준비하고 있어요 · mock")))}><span className="setting-icon"><Download size={17} /></span><span><strong>{tx(msg("대화 기록 다운로드"))}</strong><small>{tx(msg("내 메시지를 파일로 보관"))}</small></span><ChevronRight size={15} /></button>
                     </>
                   ) : null}
@@ -3364,6 +3453,8 @@ function SettingsModal({
                       <div className="verification-step done"><CheckCircle2 size={17} /><span><strong>{tx(msg("1단계 · 이메일 인증"))}</strong><small>{tx(msg("완료됨"))}</small></span><Pill tone="success">{tx(msg("완료"))}</Pill></div>
                       {verificationRow("phone", Phone, tx(msg("2단계 · 전화번호 인증")), tx(msg("재가입 악용과 대량 계정 생성을 줄여요")), "not-started")}
                       {verificationRow("identity", ShieldCheck, tx(msg("3단계 · 신원 확인")), tx(msg("선택 사항이며 인증 배지만 표시해요")), "not-started")}
+                      <div className="settings-subhead"><strong>{t("이 기기에서 나가기")}</strong><small>{t("다시 로그인하면 대화와 기록이 그대로 돌아와요.")}</small></div>
+                      <button className="danger-button settings-signout" type="button" onClick={() => void onSignOut()}><LogOut size={16} /> {t("로그아웃")}</button>
                     </>
                   ) : null}
 
@@ -3654,6 +3745,10 @@ function ModalLayer({
   onBlockHost,
   onEndRoom,
   posts,
+  directory,
+  savedItems,
+  likesReceived,
+  sentLikes,
   onOpenPost,
   roomMessages,
   onSendRoomMessage,
@@ -3689,6 +3784,10 @@ function ModalLayer({
   onBlockHost: (room: PracticeRoom) => void;
   onEndRoom: (room: PracticeRoom) => void;
   posts: FeedPost[];
+  directory: Partner[];
+  savedItems: SavedPhrase[];
+  likesReceived: ApiReceivedLike[];
+  sentLikes: ApiReceivedLike[];
   onOpenPost: (post: FeedPost) => void;
   roomMessages: RoomMessage[];
   onSendRoomMessage: (text: string) => void;
@@ -3734,13 +3833,14 @@ function ModalLayer({
         {modal.type === "profile" ? <ProfileModal partner={modal.partner} onStartChat={onStartChat} onReport={() => onReport(modal.partner.name)} onToast={onToast} /> : null}
         {modal.type === "filters" ? <MatchingPreferencesModal initial={matchPreferences} onClose={onClose} onSave={onSaveMatchPreferences} onToast={onToast} /> : null}
         {modal.type === "compose" ? <ComposeModal onPublish={onPublish} onToast={onToast} /> : null}
-        {modal.type === "search" ? <SearchModal posts={posts} onOpenProfile={onOpenProfile} onOpenPost={onOpenPost} onToast={onToast} /> : null}
+        {modal.type === "search" ? <SearchModal directory={directory} posts={posts} savedItems={savedItems} onOpenProfile={onOpenProfile} onOpenPost={onOpenPost} onToast={onToast} /> : null}
         {modal.type === "create-room" ? <CreateRoomModal onCreate={onCreateRoom} onToast={onToast} /> : null}
         {modal.type === "room" ? <RoomModal room={modal.room} handRaised={roomHandRaised} setHandRaised={setRoomHandRaised} micOn={roomMicOn} setMicOn={setRoomMicOn} messages={roomMessages} onSendMessage={onSendRoomMessage} onMinimize={() => onMinimizeRoom(modal.room)} onLeave={onClose} onReport={() => onReport(modal.room.title, { targetType: "room", targetId: modal.room.id })} onToast={onToast} onBlockHost={() => onBlockHost(modal.room)} onEndRoom={() => onEndRoom(modal.room)} mutedRoom={mutedRoomIds.has(modal.room.id)} onToggleRoomMute={onToggleRoomMute} onCopyLink={onCopyLink} /> : null}
         {modal.type === "exchange" ? <ExchangeModal length={exchangeLength} setLength={setExchangeLength} onClose={onClose} onToast={onToast} /> : null}
         {modal.type === "review" ? <ReviewModal items={modal.items} onClose={onClose} /> : null}
         {modal.type === "new-chat" ? (
           <NewChatModal
+            directory={directory}
             existingPartnerIds={existingPartnerIds}
             onPick={(partner) => { onClose(); onStartChat(partner); }}
           />
@@ -3748,11 +3848,13 @@ function ModalLayer({
         {modal.type === "partner-list" ? <PartnerListModal queue={dailyQueue} index={partnerIndex} signaled={signaledPartners} onJump={onJumpPartner} onProfile={onOpenPartnerProfile} /> : null}
         {modal.type === "likes" ? (
           <LikesModal
-            received={receivedLikes.flatMap((item) => {
-              const partner = partners.find((p) => p.id === item.partnerId);
-              return partner ? [{ partner, time: item.time, note: item.note }] : [];
-            })}
-            sent={signaledPartners.flatMap((id) => { const p = partners.find((x) => x.id === id); return p ? [p] : []; })}
+            received={likesReceived.map((item) => ({
+              partner: toPartner(item.partner),
+              time: liveRelativeTime(item.createdAt),
+              // 서버는 좋아요에 메모를 받지 않습니다. 지어내지 않고 비웁니다.
+              note: "",
+            }))}
+            sent={sentLikes.map((item) => toPartner(item.partner))}
             onAccept={onAcceptLike}
             onProfile={onOpenPartnerProfile}
           />
@@ -3878,9 +3980,11 @@ function LikesModal({
  * "파트너 검색에서 시작해보세요" 토스트만 뜨던 자리를 대신합니다.
  */
 function NewChatModal({
+  directory,
   existingPartnerIds,
   onPick,
 }: {
+  directory: Partner[];
   existingPartnerIds: string[];
   onPick: (partner: Partner) => void;
 }) {
@@ -3888,7 +3992,7 @@ function NewChatModal({
   const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
   const needle = query.trim().toLowerCase();
-  const candidates = partners
+  const candidates = directory
     .filter((partner) => !existingPartnerIds.includes(partner.id))
     .filter((partner) =>
       needle
@@ -4190,13 +4294,15 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
   );
 }
 
-function SearchModal({ posts, onOpenProfile, onOpenPost, onToast }: { posts: FeedPost[]; onOpenProfile: (partner: Partner) => void; onOpenPost: (post: FeedPost) => void; onToast: (message: string) => void }) {
+function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, onToast }: { directory: Partner[]; posts: FeedPost[]; savedItems: SavedPhrase[]; onOpenProfile: (partner: Partner) => void; onOpenPost: (post: FeedPost) => void; onToast: (message: string) => void }) {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
-  /* 자리표시자가 약속하는 대로 사람 · 게시물 · 저장한 표현을 함께 찾습니다. */
-  const partnerResults = partners.filter((partner) => `${partner.name} ${partner.native} ${partner.interests.join(" ")}`.toLowerCase().includes(needle)).slice(0, 3);
+  /* 자리표시자가 약속하는 대로 사람 · 게시물 · 저장한 표현을 함께 찾습니다.
+     검색어가 없으면 아무것도 내지 않습니다 — 예전에는 빈 검색어가 모두와 일치해서
+     아직 찾지도 않은 사람이 결과처럼 보였습니다. */
+  const partnerResults = needle ? directory.filter((partner) => `${partner.name} ${partner.handle} ${partner.native} ${partner.interests.join(" ")}`.toLowerCase().includes(needle)).slice(0, 3) : [];
   const postResults = needle ? posts.filter((post) => `${post.text} ${post.tags.join(" ")} ${post.author}`.toLowerCase().includes(needle)).slice(0, 4) : [];
-  const phraseResults = needle ? savedPhrases.filter((item) => `${item.phrase} ${item.meaning}`.toLowerCase().includes(needle)).slice(0, 3) : [];
+  const phraseResults = needle ? savedItems.filter((item) => `${item.phrase} ${item.meaning}`.toLowerCase().includes(needle)).slice(0, 3) : [];
   const nothingFound = needle && !partnerResults.length && !postResults.length && !phraseResults.length;
 
   const copyPhrase = async (phrase: string) => {

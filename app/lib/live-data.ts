@@ -1,4 +1,4 @@
-import { msg, t } from "./i18n";
+import { msg, t, tx } from "./i18n";
 import type {
   Accent,
   ChatMessage,
@@ -117,7 +117,11 @@ export interface ApiRecommendation {
   meetsAllPreferences: boolean;
 }
 
-/** 화면이 tx() 로 번역합니다 — 여기서는 사전에 담을 문구임을 표시만 합니다. */
+/**
+ * 낱말은 사전에 담아 두고(msg), 이어붙이기 전에 tx() 로 옮깁니다.
+ * "한국어 · 영어" 처럼 이어붙인 문장은 사전에 통째로 담을 수 없어서,
+ * 화면에 넘기기 전 여기서 옮겨야 합니다.
+ */
 const LANGUAGE_NAMES: Record<string, string> = {
   ko: msg("한국어"),
   en: msg("영어"),
@@ -126,6 +130,17 @@ const LANGUAGE_NAMES: Record<string, string> = {
   es: msg("스페인어"),
   fr: msg("프랑스어"),
   de: msg("독일어"),
+};
+
+/**
+ * 활동 시간대. 서버는 "weekday-evening" 같은 코드를 주는데 화면은 사람이 읽을
+ * 문장을 그립니다. 여기서 옮기지 않으면 프로필에 코드가 그대로 찍힙니다.
+ */
+const AVAILABILITY_NAMES: Record<string, string> = {
+  "weekday-morning": msg("평일 아침"),
+  "weekday-evening": msg("평일 저녁"),
+  "weekend-morning": msg("주말 오전"),
+  "weekend-evening": msg("주말 저녁"),
 };
 
 const LEVEL_NAMES: Record<string, string> = {
@@ -182,8 +197,10 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
     // 서버는 상대의 시간대를 주지 않습니다. 시차를 지어내면 틀린 시각을 보여주게
     // 되므로 0 으로 두고, 화면은 시차가 0 이면 현지 시각을 감춥니다.
     timeOffset: 0,
-    native: languageName(profile.nativeLanguages?.[0] || "ko"),
-    learning: languageName(learning?.code || "en"),
+    native: (profile.nativeLanguages?.length ? profile.nativeLanguages : ["ko"])
+      .map((code) => tx(languageName(code)))
+      .join(" · "),
+    learning: tx(languageName(learning?.code || "en")),
     level: LEVEL_NAMES[learning?.level || "beginner"] || "A2",
     interests: profile.interests || [],
     bio: profile.bio || "",
@@ -191,7 +208,11 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
     compatibility: score,
     accent: accentFor(profile.id),
     goal: learning?.goal || "",
-    activeTime: profile.availability?.[0] || "",
+    activeTime: (profile.availability || [])
+      .map((code) => AVAILABILITY_NAMES[code])
+      .filter(Boolean)
+      .map((name) => tx(name))
+      .join(" · "),
     // 서버는 "도움 4h 20m · 배움 4h 05m" 같은 교환 기록을 아직 남기지 않습니다.
     // 지어내지 않고 비워두면 화면이 그 줄을 감춥니다.
     balance: "",
@@ -230,6 +251,7 @@ export function toChatMessage(message: ApiMessage, myId: string): ChatMessage {
     mine: message.senderId === myId,
     text: message.text,
     time: clockTime(message.sentAt),
+    readByPartner: message.readByPartner,
   };
 }
 

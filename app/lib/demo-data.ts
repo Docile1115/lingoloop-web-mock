@@ -63,6 +63,8 @@ export type ChatMessage = {
   mine: boolean;
   text?: string;
   time: string;
+  /** 내 메시지를 상대가 읽었는가. 내 메시지에만 뜻이 있습니다. */
+  readByPartner?: boolean;
   translated?: string;
   voice?: string;
   correction?: {

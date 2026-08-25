@@ -1126,7 +1126,12 @@ app.get("/api/posts", requireUser, async (req, res) => {
         (post.visibility === "partners" && partnerIds.has(post.authorId)),
     )
     .slice(0, 50);
-  return success(res, req, posts, 200, { pagination: { total: posts.length, nextCursor: null } });
+  // 내가 이 글에 좋아요를 눌렀는지. 이 값이 없으면 새로고침할 때마다 하트가 풀립니다.
+  const reactions = await Promise.all(
+    posts.map((post) => db.collection("posts").doc(post.id).collection("reactions").doc(req.auth.uid).get()),
+  );
+  const withReactions = posts.map((post, index) => ({ ...post, liked: reactions[index].exists }));
+  return success(res, req, withReactions, 200, { pagination: { total: posts.length, nextCursor: null } });
 });
 
 app.post("/api/posts", requireUser, async (req, res) => {
@@ -1287,6 +1292,27 @@ app.get("/api/corrections/received", requireUser, async (req, res) => {
       fromFlag: profiles.get(row.authorId)?.country?.flag ?? "🌐",
     }));
   return success(res, req, corrections, 200, { pagination: { total: corrections.length, nextCursor: null } });
+});
+
+/** 내가 마음을 보낸 사람. 새로고침해도 "보낸 마음"이 남아야 해서 필요합니다. */
+app.get("/api/likes/sent", requireUser, async (req, res) => {
+  const [snapshot, blocked] = await Promise.all([
+    db.collection("likes").where("fromUserId", "==", req.auth.uid).limit(200).get(),
+    blockedBothWays(req.auth.uid),
+  ]);
+  const rows = snapshot.docs.map((document) => document.data()).filter((row) => !blocked.has(row.toUserId));
+  const profiles = await profilesByIds(rows.map((row) => row.toUserId));
+  const reverse = await db.collection("likes").where("toUserId", "==", req.auth.uid).limit(200).get();
+  const likedMe = new Set(reverse.docs.map((document) => document.data().fromUserId));
+  const sent = rows
+    .filter((row) => profiles.get(row.toUserId))
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    .map((row) => ({
+      partner: publicProfile(profiles.get(row.toUserId)),
+      createdAt: row.createdAt,
+      mutual: likedMe.has(row.toUserId),
+    }));
+  return success(res, req, sent, 200, { pagination: { total: sent.length, nextCursor: null } });
 });
 
 /** 나에게 마음을 보낸 사람. 화면의 "받은 마음" 목록입니다. */

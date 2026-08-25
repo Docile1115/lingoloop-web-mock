@@ -2052,7 +2052,7 @@ p {
   color: var(--subtle);
 }
 
-.chat-search input { width: 100%; border: 0; outline: 0; background: transparent; font-size: 15px; line-height: 21px; }
+.chat-search input { width: 100%; min-height: 24px; border: 0; outline: 0; background: transparent; font-size: 15px; line-height: 21px; }
 
 /* 메시지 필터 칩: 33h · radius 20 · 13px/600 · 0.5px 테두리 상시 */
 .chat-list-tabs {
@@ -4600,6 +4600,8 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 .post-copy-open {
   display: block;
   width: 100%;
+  /* 한 줄짜리 글은 본문 높이가 23px 이라 최소 탭 크기(24px)에 1px 모자랍니다. */
+  min-height: 24px;
   padding: 0;
   border: 0;
   border-radius: var(--r-sm);
@@ -6486,6 +6488,7 @@ label > svg { flex: none; }
 .my-post-text {
   display: block;
   width: 100%;
+  min-height: 24px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -6634,4 +6637,13 @@ label > svg { flex: none; }
   .signin-intro { max-width: none; text-align: center; }
   .signin-brand { justify-content: center; }
   .signin-intro h1 { font-size: 28px; }
+}
+
+/* 설정의 로그아웃 — 되돌릴 수 있는 행동이라 크게 두지 않습니다. */
+.settings-signout {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4);
 }
