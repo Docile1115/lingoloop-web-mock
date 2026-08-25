@@ -21,6 +21,8 @@ export type Partner = {
   accent: Accent;
   goal: string;
   activeTime: string;
+  /** 프로필 사진. */
+  photo?: string;
   balance: string;
   verified?: boolean;
 };
@@ -45,6 +47,12 @@ export type FeedPost = {
   saved?: boolean;
   /** 공개 범위. 없으면 전체 공개로 취급합니다. */
   visibility?: "public" | "partners";
+  /** 글쓴이가 원어민 교정을 부탁했는가. 글에 표시가 붙습니다. */
+  requestCorrection?: boolean;
+  /** 글쓴이 프로필 사진. */
+  photo?: string;
+  /** 글에 붙인 사진. */
+  image?: string;
   visual?: {
     emoji: string;
     eyebrow: string;
@@ -80,6 +88,8 @@ export type Conversation = {
   partnerId?: string;
   name: string;
   flag: string;
+  /** 상대 프로필 사진. */
+  photo?: string;
   accent: Accent;
   preview: string;
   time: string;
@@ -773,6 +783,8 @@ export type PostReply = {
   original?: string;
   /** 대댓글. 한 단계만 들여씁니다. */
   replies?: PostReply[];
+  /** 작성자 프로필 사진. */
+  photo?: string;
 };
 
 /** 게시물별 답글. 상세 화면에서 원글 아래에 이어집니다. */

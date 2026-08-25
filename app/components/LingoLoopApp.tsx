@@ -28,7 +28,6 @@ import {
   Globe2,
   Hand,
   Heart,
-  Image as ImageIcon,
   Languages,
   Link as LinkIcon,
   LogOut,
@@ -39,7 +38,6 @@ import {
   Mic,
   MicOff,
   Minimize2,
-  Paperclip,
   PenLine,
   Phone,
   Play,
@@ -110,11 +108,18 @@ type MatchPreferences = {
   onlineOnly: boolean;
 };
 
+/**
+ * 설정.
+ *
+ * 여기 있는 두 항목은 모두 서버에 남고 실제로 무언가를 바꿉니다.
+ * 알림 켜고 끄기와 자동 동기화 스위치는 뺐습니다 — 알림을 보낼 곳이 아직
+ * 없고, 동기화는 끌 수 있는 것이 아니라 늘 켜져 있습니다. 아무 일도 하지 않는
+ * 스위치는 없는 것만 못합니다.
+ */
 type AppSettings = {
-  dmRequests: boolean;
+  /** 남에게 내 도시를 감춥니다. 서버의 프로필에 남습니다. */
   hideLocation: boolean;
-  correctionAlerts: boolean;
-  autoSync: boolean;
+  /** 누가 바로 DM 을 보낼 수 있는지. 서버가 이 값으로 요청함 라우팅을 정합니다. */
   dmScope: DmScope;
 };
 
@@ -170,7 +175,7 @@ type ModalState =
   | null;
 
 /** 게시물 작성 화면에서 넘기는 옵션. */
-type PublishOptions = { requestCorrection: boolean; visibility: "public" | "partners" };
+type PublishOptions = { requestCorrection: boolean; visibility: "public" | "partners"; tags: string[] };
 
 /** 신고 제출 시 화면에서 넘기는 선택값. */
 type ReportOptions = {
@@ -288,7 +293,6 @@ const dailyMatchDetails: Record<string, { reasons: MessageKey[]; icebreaker: str
 };
 
 /** mock 백엔드(mock-api/data.ts)에서 conversationGuides 가 준비된 파트너 ID 목록. */
-const GUIDE_PARTNER_IDS = ["user-maya", "user-ren", "user-sofia", "user-noah", "user-lina", "user-amelie"];
 
 /** `report-<uuid>` 를 화면용 접수번호로 줄입니다. */
 const shortReportId = (id: string): string => `LL-${id.replace(/^report-/, "").slice(0, 8).toUpperCase()}`;
@@ -318,16 +322,6 @@ function speakText(text: string): boolean {
   } catch {
     return false;
   }
-}
-
-function fallbackConversationSupport(name: string): ConversationSupport {
-  return {
-    stage: "ongoing",
-    topics: [t("이번 주 가장 좋았던 순간"), t("서로의 도시에서 꼭 해볼 일"), t("최근 새로 배운 표현")],
-    suggestedOpeners: [`Hi ${name}! What was the highlight of your week?`],
-    followUpQuestions: ["What made it memorable?", "How would you say that in Korean?", "Would you recommend it to a friend?"],
-    tip: t("한 번에 질문 하나만 보내고, 상대 답변의 단어를 이어서 물으면 대화가 자연스러워져요."),
-  };
 }
 
 /**
@@ -394,21 +388,29 @@ function Avatar({
   accent = "violet",
   size = "md",
   online,
+  photo,
 }: {
   name: string;
   flag?: string;
   accent?: Accent;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   online?: boolean;
+  /** 프로필 사진. 없으면 사람 모양 자리표시자를 그립니다. */
+  photo?: string;
 }) {
   return (
     <span className={`avatar avatar-${size}`} style={accentStyle(accent)} role="img" aria-label={name}>
+      {photo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className="avatar-photo" src={photo} alt="" />
+      ) : (
       <span className="avatar-initials">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="8.6" r="3.8" />
           <path d="M12 13.6c-4.2 0-7.6 2.7-7.6 6 0 .6.5 1.1 1.1 1.1h13c.6 0 1.1-.5 1.1-1.1 0-3.3-3.4-6-7.6-6Z" />
         </svg>
       </span>
+      )}
       {flag ? <span className="avatar-flag">{flag}</span> : null}
       {online ? <span className="avatar-online" /> : null}
     </span>
@@ -462,7 +464,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [minimizedRoom, setMinimizedRoom] = useState<PracticeRoom | null>(null);
   const [roomMessages, setRoomMessages] = useState<RoomMessage[]>(initialRoomMessages);
   const [exchangeLength, setExchangeLength] = useState(15);
-  const [settings, setSettings] = useState<AppSettings>({ dmRequests: true, hideLocation: true, correctionAlerts: true, autoSync: true, dmScope: "matches" });
+  const [settings, setSettings] = useState<AppSettings>({ hideLocation: me.hideLocation ?? true, dmScope: "matches" });
   const [matchPreferences, setMatchPreferences] = useState<MatchPreferences>(defaultMatchPreferences);
   const [dailyRecommendations, setDailyRecommendations] = useState<DailyMatchRecommendation[]>([]);
   const [matchesFailed, setMatchesFailed] = useState(false);
@@ -888,11 +890,17 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const applySettings = (next: AppSettings) => {
     const previous = settings;
     setSettings(next);
-    try {
-      window.localStorage.setItem("lingoloop-app-settings", JSON.stringify(next));
-    } catch {
-      // Continue with in-memory state if browser storage is unavailable.
+    const failed = (caught: unknown) => {
+      setSettings(previous);
+      showToast(caught instanceof Error ? caught.message : t("설정을 저장하지 못했어요."));
+    };
+
+    if (next.hideLocation !== previous.hideLocation) {
+      void api("/api/profile", { method: "PATCH", body: JSON.stringify({ hideLocation: next.hideLocation }) })
+        .then(() => showToast(next.hideLocation ? t("이제 다른 사람에게 도시가 보이지 않아요") : t("이제 다른 사람에게 도시가 보여요")))
+        .catch(failed);
     }
+
     if (next.dmScope === previous.dmScope) return;
     void api("/api/dm/privacy", {
       method: "POST",
@@ -901,29 +909,18 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         // 허용 범위 밖의 DM 은 받은함이 아니라 요청함으로 갑니다 — 제품 결정이라 항상 켭니다.
         routeOthersToRequests: true,
       }),
-    }).catch((caught) => {
-      setSettings(previous);
-      showToast(caught instanceof Error ? caught.message : t("설정을 저장하지 못했어요."));
-    });
+    }).catch(failed);
   };
 
   /**
-   * 설정 복원.
+   * 설정 복원 — 서버에서 가져옵니다.
    *
-   * 기기에만 남는 항목은 localStorage 에서, DM 수신 범위는 서버에서 가져옵니다.
-   * 예전에는 기기 값이 서버를 덮어써서, 폰에서 바꾼 범위가 노트북에서는 옛 값으로
-   * 보였습니다. 실제 라우팅은 서버 값으로 도니 서버가 맞습니다.
+   * 예전에는 기기(localStorage) 값이 서버를 덮어써서, 폰에서 바꾼 DM 범위가
+   * 노트북에서는 옛 값으로 보였습니다. 실제 라우팅은 서버 값으로 도니 서버가 맞습니다.
+   * 위치 숨기기도 같은 이유로 프로필(서버)에서 읽습니다.
    */
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      const stored = readStoredJson<Partial<AppSettings>>(
-        "lingoloop-app-settings",
-        (value): value is Partial<AppSettings> => typeof value === "object" && value !== null && !Array.isArray(value),
-      );
-      if (stored) {
-        // dmScope 는 서버에서 받습니다 — 기기 값으로 덮으면 실제 라우팅과 어긋납니다.
-        setSettings((current) => ({ ...current, ...stored, dmScope: current.dmScope }));
-      }
       void api<{ settings?: { whoCanMessage?: string } }>("/api/dm/privacy")
         .then((body) => {
           const scope = dmScopeFromApi[body.settings?.whoCanMessage ?? ""];
@@ -1021,6 +1018,40 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     } catch (caught) {
       setFollowingIds((current) => (wasFollowing ? [...current.filter((id) => id !== partner.id), partner.id] : current.filter((id) => id !== partner.id)));
       showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."));
+    }
+  };
+
+  /**
+   * 대화 기록 내려받기.
+   *
+   * 예전에는 "준비하고 있어요 · mock" 토스트만 띄우고 끝이었습니다.
+   * 메시지는 이미 서버에 다 있으니 받아서 파일로 만들면 됩니다.
+   */
+  const downloadChats = async () => {
+    try {
+      const rooms = await api<ApiConversation[]>("/api/conversations");
+      const withMessages = await Promise.all(
+        (rooms || []).map(async (room) => ({
+          [t("상대")]: room.partner?.name ?? t("알 수 없는 상대"),
+          [t("메시지")]: (await api<ApiMessage[]>(`/api/conversations/${encodeURIComponent(room.id)}/messages`)).map((message) => ({
+            [t("보낸 사람")]: message.senderId === me.id ? me.name : room.partner?.name ?? "",
+            [t("시각")]: message.sentAt,
+            [t("내용")]: message.text,
+          })),
+        })),
+      );
+      const blob = new Blob([JSON.stringify({ [t("내려받은 시각")]: new Date().toISOString(), [t("대화")]: withMessages }, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `lingoloop-${t("대화 기록")}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast(t("대화 기록을 내려받았어요"));
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : t("대화 기록을 내려받지 못했어요."));
     }
   };
 
@@ -1287,6 +1318,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           targetLanguage: me.nativeLanguages?.[0] ?? "ko",
           visibility: options.visibility,
           requestCorrection: options.requestCorrection,
+          tags: options.tags,
         }),
       });
       const post = toFeedPost(saved);
@@ -1433,7 +1465,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         <div className="sidebar-spacer" />
         <div className="sidebar-profile-row">
           <button className="sidebar-profile" type="button" aria-label={t("내 프로필")} onClick={() => goToSection("learn")}>
-            <Avatar name={profile.name} flag={me.country?.flag ?? "🌐"} accent="violet" size="sm" online />
+            <Avatar name={profile.name} flag={me.country?.flag ?? "🌐"} accent="violet" size="sm" online photo={me.avatarUrl} />
             <span><strong>{profile.name}</strong><small>{tx(languageName(me.nativeLanguages?.[0] ?? "ko"))} → {tx(languageName(me.learningLanguages?.[0]?.code ?? "en"))}</small></span>
           </button>
           <MenuPopover
@@ -1662,6 +1694,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         <SettingsModal
           settings={settings}
           onChangeSettings={applySettings}
+          onDownloadChats={downloadChats}
           onOnboarding={() => setModal({ type: "onboarding" })}
           onOpenBlocked={() => { setSettingsOpen(false); goToSection("learn"); setDetail({ kind: "blocked" }); }}
           onSignOut={signOut}
@@ -1773,7 +1806,7 @@ function PartnerCard({
           disabled={!top}
           aria-label={t("{name} 프로필 보기", { name: partner.name })}
         >
-          <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} />
+          <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} />
           <div>
             <span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={17} className="verified" aria-label={t("인증됨")} /> : null}</span>
             <p>{partner.flag} {tx(partner.country)}{partner.city ? ` · ${partner.city}` : ""}</p>
@@ -2155,7 +2188,7 @@ function PostDetailView({
   const renderReply = (reply: PostReply, isChild: boolean) => (
     <article className={`thread-item reply ${isChild ? "child" : ""}`} key={reply.id}>
       <div className="thread-gutter">
-        <Avatar name={reply.author} flag={reply.flag} accent={reply.accent} size={isChild ? "xs" : "sm"} />
+        <Avatar name={reply.author} flag={reply.flag} accent={reply.accent} size={isChild ? "xs" : "sm"} photo={reply.photo} />
       </div>
       <div className="thread-body">
         <div className="thread-head">
@@ -2200,7 +2233,7 @@ function PostDetailView({
       <article className="thread-item">
         <div className="thread-gutter">
           <button type="button" className="thread-avatar" onClick={() => onProfile(post.authorId)} aria-label={t("{author} 프로필", { author: post.author })}>
-            <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" />
+            <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} />
           </button>
         </div>
         <div className="thread-body">
@@ -2357,7 +2390,7 @@ function ProfileDetailView({
           </span>
           <p className="profile-head-handle">{partner.handle} · {partner.city}</p>
         </div>
-        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} />
+        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} />
       </header>
 
       <p className="profile-head-bio">{partner.bio}</p>
@@ -2488,7 +2521,6 @@ function ProfileEditView({
         </div>
       </div>
       <div className="modal-footer">
-        <small>{t("변경 내용은 이 기기에 반영돼요")}</small>
         <button className="primary-button" type="button" disabled={!changed} onClick={() => onSave(draft)}>
           {t("저장")}
         </button>
@@ -2857,10 +2889,11 @@ function CommunityView({
             <article className="feed-post" key={post.id}>
               <header className="post-header">
                 <button className="post-author" type="button" onClick={() => onProfile(post.authorId)}>
-                  <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" online={post.authorId === "maya"} />
+                  <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" online={post.authorId === "maya"} photo={post.photo} />
                   <span><strong>{post.author}{post.authorId === "maya" ? <BadgeCheck size={14} className="verified" /> : null}</strong><small>{post.handle} · {tx(post.time)}</small></span>
                 </button>
                 <div className="post-meta">
+                  {post.requestCorrection ? <Pill tone="soft"><WandSparkles size={12} /> {t("교정 부탁해요")}</Pill> : null}
                   {post.visibility === "partners" ? <Pill tone="neutral">{t("파트너 공개")}</Pill> : null}
                   <Pill tone="language">{tx(post.language)} · {post.level}</Pill>
                   <MenuPopover
@@ -2881,6 +2914,10 @@ function CommunityView({
                 <span className="post-copy">{post.text}</span>
               </button>
               {translated.has(post.id) ? <div className="translation-box"><Languages size={16} /><p><span>{t("번역")}</span>{translations[post.id] ?? post.translation}</p></div> : null}
+              {post.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="post-image" src={post.image} alt="" loading="lazy" />
+              ) : null}
               <div className="post-tags">{post.tags.map((tag) => <button type="button" key={tag} className={activeTag === tag ? "active" : ""} onClick={() => onTagSelect(activeTag === tag ? null : tag)}>{tag}</button>)}</div>
               {post.visual ? (
                 <div className={`post-visual visual-${post.accent}`}>
@@ -2999,7 +3036,7 @@ function ChatsView({
   };
   const [coachLoading, setCoachLoading] = useState(false);
   const [supportResult, setSupportResult] = useState<{ conversationId: string; data: ConversationSupport } | null>(null);
-  const conversationSupport = supportResult?.conversationId === selected.id ? supportResult.data : fallbackConversationSupport(selected.name);
+  const conversationSupport = supportResult?.conversationId === selected.id ? supportResult.data : null;
   /* 요청함은 일반 받은 대화와 분리한 뒤, 검색어가 있으면 이름·마지막 메시지에서 찾습니다. */
   const byTab = conversations.filter((item) =>
     listTab === "turn"
@@ -3032,38 +3069,40 @@ function ChatsView({
     onToast(tx(msg("{name}님의 요청을 삭제했어요 · 상대에게 알리지 않아요"), { name }));
   };
 
+  /**
+   * 대화 코치.
+   *
+   * 예전에는 상대 id 를 fixture 목록(GUIDE_PARTNER_IDS) 중 하나로 바꿔 보냈습니다.
+   * mock 백엔드에는 준비된 사람만 있었기 때문인데, 그 결과 **다른 사람에 대한 조언**을
+   * 받아서 보여줬습니다. 지금은 실제 상대를 그대로 묻습니다.
+   *
+   * 실패하면 준비해둔 예시로 채우지 않습니다 — 지어낸 조언인지 진짜 조언인지
+   * 구분할 수 없게 됩니다.
+   */
   const requestConversationSupport = async (polishDraft = false) => {
+    if (!selected.partnerId) {
+      onToast(t("이 대화에서는 코치를 쓸 수 없어요"));
+      return;
+    }
     setCoachLoading(true);
-    /* mock 백엔드에는 대화 가이드가 준비된 파트너만 있고(GUIDE_PARTNER_IDS),
-       프런트 fixture와 ID 체계도 다릅니다. 짝이 없는 파트너를 `user-${id}` 로 보내면
-       404/500 이 나므로, 가이드가 있는 파트너로 결정론적으로 매핑합니다. */
-    const localId = selected.partnerId ?? selected.id;
-    const partnerId =
-      { maya: "user-maya", aiko: "user-ren", lucas: "user-sofia" }[localId] ??
-      GUIDE_PARTNER_IDS[[...localId].reduce((sum, char) => sum + char.charCodeAt(0), 0) % GUIDE_PARTNER_IDS.length];
-
     try {
-      const response = await fetch("/api/conversation-support", {
+      const data = await api<ConversationSupport>("/api/conversation-support", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ partnerId, draft: draft.trim() || undefined, stage: selected.messages.length > 2 ? "ongoing" : "first-message" }),
+        body: JSON.stringify({
+          partnerId: selected.partnerId,
+          draft: draft.trim() || undefined,
+          stage: selected.messages.length > 2 ? "ongoing" : "first-message",
+        }),
       });
-      if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-      const body = await response.json() as { data?: ConversationSupport };
-      if (!body.data) throw new Error("Missing mock support data");
-      setSupportResult({ conversationId: selected.id, data: body.data });
-      if (polishDraft && body.data.improvedDraft) {
-        setDraft(body.data.improvedDraft);
+      setSupportResult({ conversationId: selected.id, data });
+      if (polishDraft && data.improvedDraft) {
+        setDraft(data.improvedDraft);
         onToast(t("대화 코치가 문장을 자연스럽게 다듬었어요"));
       } else {
         onToast(t("지금 대화에 맞는 주제를 새로 추천했어요"));
       }
-    } catch {
-      const fallback = fallbackConversationSupport(selected.name);
-      const improvedDraft = draft.trim() ? `${draft.trim()} I’d love to hear more about it!` : undefined;
-      setSupportResult({ conversationId: selected.id, data: { ...fallback, improvedDraft } });
-      if (polishDraft && improvedDraft) setDraft(improvedDraft);
-      onToast(t("준비된 대화 코칭 예시를 보여드려요 · 오프라인 데모"));
+    } catch (caught) {
+      onToast(caught instanceof Error ? caught.message : t("대화 코치를 부르지 못했어요."));
     } finally {
       setCoachLoading(false);
     }
@@ -3099,7 +3138,7 @@ function ChatsView({
                 className={`conversation-item ${selected.id === conversation.id ? "active" : ""}`}
                 onClick={() => onSelect(conversation.id)}
               >
-                <Avatar name={conversation.name} flag={conversation.flag} accent={conversation.accent} size="lg" online={conversation.online} />
+                <Avatar name={conversation.name} flag={conversation.flag} accent={conversation.accent} size="lg" online={conversation.online} photo={conversation.photo} />
                 <span className="conversation-copy">
                   <span className="conversation-name"><strong>{conversation.name}</strong>{mutedChatIds.has(conversation.id) ? <BellOff size={12} className="conversation-muted" /> : null}<small>{tx(conversation.time)}</small></span>
                   <span className={conversation.typing ? "typing" : ""}>{conversation.typing ? t("입력 중…") : conversation.preview}</span>
@@ -3129,13 +3168,12 @@ function ChatsView({
         <header className="thread-header">
           <button className="mobile-back" type="button" onClick={onBack} aria-label={t("대화 목록으로")}><ArrowLeft size={21} /></button>
           <button className="thread-person" type="button" onClick={onProfile}>
-            <Avatar name={selected.name} flag={selected.flag} accent={selected.accent} size="sm" online={selected.online} />
+            <Avatar name={selected.name} flag={selected.flag} accent={selected.accent} size="sm" online={selected.online} photo={selected.photo} />
             <span><strong>{selected.name}</strong><small>{selected.online ? t("온라인 · 영어 ⇄ 한국어") : t("최근 활동 어제")}</small></span>
           </button>
           <div className="thread-actions">
             <button className={`coach-cta ${coachOpen ? "active" : ""}`} type="button" onClick={() => setCoachOpen(!coachOpen)}><WandSparkles size={16} /><span>{t("대화 코치")}</span></button>
             <button className="exchange-cta" type="button" onClick={onExchange}><Timer size={16} /><span>{t("교환 세션")}</span></button>
-            <IconButton label={t("음성 통화")} icon={Phone} onClick={() => onToast(t("음성 통화 데모를 시작했어요"))} />
             <MenuPopover
               label={t("대화 메뉴")}
               items={[
@@ -3165,7 +3203,10 @@ function ChatsView({
               <button type="button" onClick={() => void requestConversationSupport(false)} disabled={coachLoading}><RefreshCw size={14} className={coachLoading ? "spinning" : ""} /> {t("새로 추천")}</button>
               <button type="button" className="coach-close" aria-label={t("대화 코치 닫기")} onClick={() => setCoachOpen(false)}><X size={15} /></button>
             </header>
-            <div className="coach-grid">
+            {!conversationSupport ? (
+              <p className="coach-empty">{t("“새로 추천”을 누르면 지금 대화에 맞는 주제를 찾아드려요.")}</p>
+            ) : (
+            <><div className="coach-grid">
               <div className="coach-topic-list">
                 <span className="coach-label"><Lightbulb size={13} /> {t("대화 주제")}</span>
                 {conversationSupport.topics.slice(0, 3).map((topic, index) => (
@@ -3184,7 +3225,8 @@ function ChatsView({
                 </div>
               </div>
             </div>
-            <footer><Sparkles size={12} /><span>{conversationSupport.tip}</span><small>DEMO COACH</small></footer>
+            <footer><Sparkles size={12} /><span>{conversationSupport.tip}</span></footer></>
+            )}
           </section>
         ) : null}
 
@@ -3195,7 +3237,7 @@ function ChatsView({
             if (message.correction) {
               return (
                 <div className="message-row correction-message" key={message.id}>
-                  <Avatar name={selected.name} accent={selected.accent} size="xs" />
+                  <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} />
                   <div className="chat-correction-card">
                     <span className="correction-label"><PenLine size={14} /> {t("{name}님이 문장을 고쳤어요", { name: selected.name })}</span>
                     <p className="before">{message.correction.original}</p>
@@ -3209,7 +3251,7 @@ function ChatsView({
             }
             return (
               <div className={`message-row ${message.mine ? "mine" : "theirs"}`} key={message.id}>
-                {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" /> : null}
+                {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} /> : null}
                 <div className="message-stack">
                   <div className="message-bubble">
                     {message.voice ? <button className="voice-message" type="button" onClick={() => { if (message.text) speakText(message.text); onToast(t("음성 메시지를 재생 중이에요")); }}><span className="play-dot"><Play size={13} fill="currentColor" /></span><span className="waveform"><i /><i /><i /><i /><i /><i /><i /><i /><i /></span><small>{message.voice}</small></button> : null}
@@ -3227,14 +3269,12 @@ function ChatsView({
               </div>
             );
           })}
-          {selected.typing ? <div className="typing-indicator"><Avatar name={selected.name} accent={selected.accent} size="xs" /><span><i /><i /><i /></span><small>{t("{name}님이 입력 중", { name: selected.name })}</small></div> : null}
+          {selected.typing ? <div className="typing-indicator"><Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} /><span><i /><i /><i /></span><small>{t("{name}님이 입력 중", { name: selected.name })}</small></div> : null}
         </div>
 
         {selectedIsRequest ? <div className="request-composer-lock"><LockKeyhole size={17} /><span><strong>{tx(msg("요청을 수락하면 답장할 수 있어요"))}</strong><small>{tx(msg("삭제하거나 수락해도 상대에게 별도 알림은 가지 않아요."))}</small></span></div> : <form className="message-composer" onSubmit={onSend}>
           <div className="writing-language"><span>EN</span> {t("영어로 작성 중")} <ChevronDown size={13} /></div>
           <div className="composer-row">
-            <IconButton label={t("파일 첨부")} icon={Paperclip} onClick={() => onToast(t("파일 첨부 데모를 열었어요"))} />
-            <IconButton label={t("음성 메시지")} icon={Mic} onClick={() => onToast(t("녹음 데모 · 다시 누르면 전송돼요"))} />
             <label className="message-input">
               <span className="sr-only">{t("메시지 입력")}</span>
               <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t("{name}님에게 메시지 보내기", { name: selected.name })} rows={1} maxLength={LIMITS.message} />
@@ -3242,7 +3282,6 @@ function ChatsView({
             </label>
             <button className="send-button" type="submit" disabled={!draft.trim()} aria-label={t("메시지 보내기")}><Send size={18} /></button>
           </div>
-          <small className="composer-hint"><WandSparkles size={12} /> {t("Enter로 줄바꿈 · 전송 전 문법 힌트는 데모로 제공돼요")}</small>
         </form>}
       </section>
       )}
@@ -3328,6 +3367,7 @@ function Tabs({
 function SettingsModal({
   settings,
   onChangeSettings,
+  onDownloadChats,
   onOnboarding,
   onOpenBlocked,
   onToast,
@@ -3337,6 +3377,7 @@ function SettingsModal({
 }: {
   settings: AppSettings;
   onChangeSettings: (next: AppSettings) => void;
+  onDownloadChats: () => Promise<void>;
   onOnboarding: () => void;
   onOpenBlocked: () => void;
   onToast: (message: string) => void;
@@ -3344,7 +3385,7 @@ function SettingsModal({
   onCloseSettings: () => void;
   onSignOut: () => Promise<void> | void;
 }) {
-  const toggle = (key: "dmRequests" | "hideLocation" | "correctionAlerts" | "autoSync") => onChangeSettings({ ...settings, [key]: !settings[key] });
+  const toggle = (key: "hideLocation") => onChangeSettings({ ...settings, [key]: !settings[key] });
   /* 설정 모달 — 좌측 메뉴 선택값. 모바일에서는 pane 을 열었는지도 함께 봅니다. */
   const [settingsPane, setSettingsPane] = useState<SettingsPaneId>("learning");
   const [settingsPaneOpen, setSettingsPaneOpen] = useState(false);
@@ -3411,7 +3452,7 @@ function SettingsModal({
             <button className="modal-close" type="button" onClick={onCloseSettings} aria-label={t("닫기")}><X size={20} /></button>
             <div className={`settings-shell ${settingsPaneOpen ? "pane-open" : ""}`}>
               <nav className="settings-nav" aria-label={t("설정 메뉴")}>
-                <header><strong>{t("설정")}</strong><small>{t("변경 내용은 이 기기에 반영돼요")}</small></header>
+                <header><strong>{t("설정")}</strong></header>
                 <ul>
                   {SETTINGS_SECTIONS.map((section) => {
                     const Icon = section.icon;
@@ -3454,18 +3495,22 @@ function SettingsModal({
                     </>
                   ) : null}
 
+                  {/* 켜고 끌 것이 아직 없습니다. 앱 밖으로 알림을 보내는 길(푸시·메일)이
+                      없어서, 스위치를 두면 켜도 꺼도 아무 일이 없습니다.
+                      지금 어떻게 알려주는지만 사실대로 적습니다. */}
                   {settingsPane === "notifications" ? (
                     <>
-                      <SettingRow icon={Bell} title={tx(msg("메시지 요청 알림"))} description={tx(msg("요청함에 새 DM이 오면 알려주기"))} checked={settings.dmRequests} onChange={() => toggle("dmRequests")} />
-                      <SettingRow icon={PenLine} title={t("교정 알림")} description={t("내 문장이 교정되면 알려주기")} checked={settings.correctionAlerts} onChange={() => toggle("correctionAlerts")} />
+                      <div className="data-sync-status"><Bell size={17} /><span><strong>{t("앱 안에서 알려드려요")}</strong><small>{t("새 메시지는 대화 탭의 숫자로, 받은 교정은 프로필에서 확인할 수 있어요.")}</small></span></div>
+                      <div className="settings-subhead"><strong>{t("푸시 알림")}</strong><small>{t("휴대폰 알림은 아직 준비 중이에요. 준비되면 여기서 켜고 끌 수 있어요.")}</small></div>
                     </>
                   ) : null}
 
                   {settingsPane === "data" ? (
                     <>
-                      <SettingRow icon={Cloud} title={tx(msg("대화 자동 동기화"))} description={tx(msg("재설치·기기 변경 후에도 서버에서 복원"))} checked={settings.autoSync} onChange={() => toggle("autoSync")} />
-                      <div className="data-sync-status"><CheckCircle2 size={17} /><span><strong>{settings.autoSync ? tx(msg("자동 동기화 켜짐")) : tx(msg("자동 동기화 꺼짐"))}</strong><small>{settings.autoSync ? tx(msg("대화는 서버에 남아 다시 로그인하면 복원돼요.")) : tx(msg("이 기기의 새 메시지가 복원되지 않을 수 있어요."))}</small></span></div>
-                      <button className="profile-settings-link" type="button" onClick={() => onToast(tx(msg("대화 기록 다운로드 파일을 준비하고 있어요 · mock")))}><span className="setting-icon"><Download size={17} /></span><span><strong>{tx(msg("대화 기록 다운로드"))}</strong><small>{tx(msg("내 메시지를 파일로 보관"))}</small></span><ChevronRight size={15} /></button>
+                      {/* 스위치가 아니었습니다 — 대화는 언제나 서버에 남습니다. 끌 수 있는 척하면
+                          꺼둔 사람은 남지 않을 거라고 오해합니다. */}
+                      <div className="data-sync-status"><Cloud size={17} /><span><strong>{t("대화는 서버에 저장돼요")}</strong><small>{t("앱을 지우거나 기기를 바꿔도 로그인하면 그대로 이어져요.")}</small></span></div>
+                      <button className="profile-settings-link" type="button" onClick={() => void onDownloadChats()}><span className="setting-icon"><Download size={17} /></span><span><strong>{tx(msg("대화 기록 다운로드"))}</strong><small>{tx(msg("내 메시지를 파일로 보관"))}</small></span><ChevronRight size={15} /></button>
                     </>
                   ) : null}
 
@@ -3503,9 +3548,6 @@ function SettingsModal({
                       )}
                       <p className="report-protection-note"><ShieldCheck size={16} /><span>{tx(msg("신고했다는 이유만으로 신고자 계정이 자동 제재되지 않아요. 양쪽 자료를 분리해 검토합니다."))}</span></p>
                       <button className="profile-settings-link" type="button" onClick={onOpenBlocked}><span className="setting-icon"><Flag size={17} /></span><span><strong>{t("신고 및 차단 관리")}</strong><small>{t("차단한 사용자와 지난 신고를 확인해요")}</small></span><ChevronRight size={15} /></button>
-                      {safetyReports.length > 0 ? (
-                        <button className="profile-settings-link" type="button" onClick={() => onToast(tx(msg("추가 자료 제출 및 이의제기 화면을 열었어요 · mock")))}><span className="setting-icon"><MessageCircle size={17} /></span><span><strong>{tx(msg("추가 자료 제출 · 이의제기"))}</strong><small>{tx(msg("처리 결과에도 이의를 제기할 수 있어요"))}</small></span><ChevronRight size={15} /></button>
-                      ) : null}
                     </>
                   ) : null}
                 </div>
@@ -3974,7 +4016,7 @@ function LikesModal({
           {list.map(({ partner, time, note }) => (
             <li key={partner.id}>
               <button type="button" className="likes-row" onClick={() => onProfile(partner)}>
-                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} />
+                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} />
                 <span className="likes-copy">
                   <strong>{partner.name}</strong>
                   <LikeMeta partner={partner} time={time} />
@@ -4051,7 +4093,7 @@ function NewChatModal({
           {candidates.map((partner) => (
             <li key={partner.id}>
               <button type="button" onClick={() => onPick(partner)}>
-                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} />
+                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} />
                 <span>
                   <strong>{partner.name}</strong>
                   <small>{tx(partner.native)} ⇄ {tx(partner.learning)} · {partner.interests.slice(0, 2).join(" · ")}</small>
@@ -4099,7 +4141,7 @@ function PartnerListModal({
           return (
             <li key={partner.id} className={isCurrent ? "current" : ""}>
               <button type="button" className="partner-list-row" onClick={() => onJump(position)}>
-                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} />
+                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} />
                 <span className="partner-list-copy">
                   <strong>{partner.name}</strong>
                   <small>{t("{native} 가르치고 {learning} 배워요", { native: tx(partner.native), learning: tx(partner.learning) })}</small>
@@ -4132,7 +4174,7 @@ function ProfileModal({ partner, following, onToggleFollow, onStartChat, onRepor
     <div className="profile-modal-content">
       <div className={`profile-cover cover-${partner.accent}`}><span className="cover-pattern" /></div>
       <div className="profile-modal-head">
-        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} />
+        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} />
         <div><span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={18} className="verified" /> : null}</span><p>{partner.handle} · {partner.city}</p></div>
         <div className="profile-head-actions"><button className="primary-button" type="button" onClick={() => onStartChat(partner)}><MessageCircle size={17} /> {t("대화 시작")}</button><button className={following ? "secondary-button active" : "secondary-button"} type="button" aria-pressed={following} onClick={() => onToggleFollow(partner)}><UserPlus size={16} /> {following ? t("팔로잉") : t("팔로우")}</button><button className="secondary-button" type="button" onClick={onReport}><Flag size={16} /> {t("신고")}</button></div>
       </div>
@@ -4283,37 +4325,78 @@ function MatchingPreferencesModal({
   );
 }
 
+/** 글에 달 수 있는 주제. 서버의 tags 로 그대로 갑니다. */
+const POST_TOPICS: MessageKey[] = [
+  msg("오늘의연습"),
+  msg("표현질문"),
+  msg("문법질문"),
+  msg("일상"),
+  msg("여행"),
+  msg("음식"),
+  msg("영화"),
+  msg("음악"),
+];
+
 function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, options: PublishOptions) => void; onToast: (message: string) => void }) {
   const [text, setText] = useState("");
   const [correction, setCorrection] = useState(true);
   const [visibility, setVisibility] = useState<PublishOptions["visibility"]>("public");
+  const [topics, setTopics] = useState<string[]>([]);
+  const [topicsOpen, setTopicsOpen] = useState(false);
+
+  const toggleTopic = (topic: string) =>
+    setTopics((current) =>
+      current.includes(topic) ? current.filter((item) => item !== topic) : current.length >= 3 ? current : [...current, topic],
+    );
+
   return (
     <div className="compose-modal-content">
-      <header><Pill tone="soft"><PenLine size={13} /> NEW NOTE</Pill><h2>{t("커뮤니티에 공유하기")}</h2></header>
-      <div className="compose-author">
-        <Avatar name={currentUser.name} flag={currentUser.flag} accent="violet" size="sm" />
-        <span><strong>{currentUser.name}</strong><small>{t("영어 학습자")} · {currentUser.level}</small></span>
-        <button type="button" onClick={() => setVisibility(visibility === "public" ? "partners" : "public")}>{visibility === "public" ? t("전체 공개") : t("파트너만 공개")} <ChevronDown size={14} /></button>
-      </div>
+      {/* 예전에는 여기 "NEW NOTE" 배지와 내 아바타가 있었습니다. 배지는 번역도 안 되는
+          장식이었고, 아바타는 fixture 사용자(내가 아닌 사람)의 이름과 레벨을 보여줬습니다. */}
+      <header><h2>{t("글쓰기")}</h2></header>
+
       <label className="compose-text">
         <span className="sr-only">{t("게시물 내용")}</span>
         <textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={t("연습하고 싶은 문장, 궁금한 표현, 문화 이야기를 짧게 나눠보세요…")} rows={7} maxLength={LIMITS.post} />
         <small>{text.length}/{LIMITS.post}</small>
       </label>
-      <div className="compose-attachments">
-        <button type="button" onClick={() => onToast(t("사진 첨부 데모를 열었어요"))}><ImageIcon size={17} /> {t("사진")}</button>
-        <button type="button" onClick={() => onToast(t("음성 녹음 데모를 열었어요"))}><Mic size={17} /> {t("음성")}</button>
-        <button type="button" onClick={() => onToast(t("주제를 선택했어요"))}><Plus size={17} /> {t("주제")}</button>
+
+      <div className="compose-options">
+        <button type="button" className="compose-option" onClick={() => setVisibility(visibility === "public" ? "partners" : "public")}>
+          <Users size={16} /> {visibility === "public" ? t("전체 공개") : t("파트너만 공개")} <ChevronDown size={14} />
+        </button>
+        <button type="button" className={topicsOpen ? "compose-option active" : "compose-option"} aria-expanded={topicsOpen} onClick={() => setTopicsOpen(!topicsOpen)}>
+          <Plus size={16} /> {topics.length ? t("주제 {n}개", { n: topics.length }) : t("주제")}
+        </button>
       </div>
+
+      {topicsOpen ? (
+        <div className="compose-topics" role="group" aria-label={t("주제")}>
+          {POST_TOPICS.map((topic) => (
+            <button
+              type="button"
+              key={topic}
+              className={topics.includes(topic) ? "active" : ""}
+              aria-pressed={topics.includes(topic)}
+              onClick={() => toggleTopic(topic)}
+            >
+              #{t(topic)}
+            </button>
+          ))}
+          <small>{t("최대 3개까지 고를 수 있어요")}</small>
+        </div>
+      ) : null}
+
       <label className="correction-request">
         <span className="setting-icon"><WandSparkles size={17} /></span>
-        <span><strong>{t("원어민에게 교정 요청")}</strong><small>{t("게시물에 교정 버튼이 표시돼요")}</small></span>
+        <span><strong>{t("원어민에게 교정 요청")}</strong><small>{t("글에 \"교정 부탁해요\" 표시가 붙어요")}</small></span>
         <input aria-label={t("원어민에게 교정 요청")} type="checkbox" checked={correction} onChange={() => setCorrection(!correction)} />
         <i className="toggle" />
       </label>
+
       <div className="modal-footer">
         <span className="safety-note"><ShieldCheck size={14} /> {t("연락처와 정밀 위치는 공유하지 마세요.")}</span>
-        <button className="primary-button" type="button" disabled={!canSubmit(text, "post")} onClick={() => { const checked = checkText(text, "post"); if (!checked.ok) { if (checked.error) onToast(checked.error); return; } onPublish(checked.value, { requestCorrection: correction, visibility }); }}>{t("게시하기")} <Send size={16} /></button>
+        <button className="primary-button" type="button" disabled={!canSubmit(text, "post")} onClick={() => { const checked = checkText(text, "post"); if (!checked.ok) { if (checked.error) onToast(checked.error); return; } onPublish(checked.value, { requestCorrection: correction, visibility, tags: topics }); }}>{t("게시하기")} <Send size={16} /></button>
       </div>
     </div>
   );
@@ -4345,13 +4428,13 @@ function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, 
       <div className="search-chips"><span>{t("빠른 검색")}</span>{[t("영어 원어민"), t("지금 온라인"), t("#여행"), t("저장한 표현")].map((item) => <button type="button" key={item} onClick={() => setQuery(item.replace("#", ""))}>{item}</button>)}</div>
       <section>
         <h3>{query ? t("“{query}” 검색 결과", { query }) : t("추천 파트너")}</h3>
-        {partnerResults.map((partner) => <button className="search-result" type="button" key={partner.id} aria-label={t("{name} 프로필 보기", { name: partner.name })} onClick={() => onOpenProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning} · {partner.interests.join(" · ")}</small></span><Pill tone="success">{partner.compatibility}%</Pill><ChevronRight size={16} /></button>)}
+        {partnerResults.map((partner) => <button className="search-result" type="button" key={partner.id} aria-label={t("{name} 프로필 보기", { name: partner.name })} onClick={() => onOpenProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning} · {partner.interests.join(" · ")}</small></span><Pill tone="success">{partner.compatibility}%</Pill><ChevronRight size={16} /></button>)}
         {nothingFound ? <div className="empty-search"><Search size={28} /><strong>{t("검색 결과가 없어요")}</strong><p>{t("언어나 관심사를 더 짧게 입력해보세요.")}</p></div> : null}
       </section>
       {postResults.length ? (
         <section>
           <h3>{t("게시물")}</h3>
-          {postResults.map((post) => <button className="search-result" type="button" key={post.id} onClick={() => onOpenPost(post)}><Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" /><span><strong>{post.author}</strong><small>{post.text.length > 64 ? `${post.text.slice(0, 64)}…` : post.text}</small></span><ChevronRight size={16} /></button>)}
+          {postResults.map((post) => <button className="search-result" type="button" key={post.id} onClick={() => onOpenPost(post)}><Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} /><span><strong>{post.author}</strong><small>{post.text.length > 64 ? `${post.text.slice(0, 64)}…` : post.text}</small></span><ChevronRight size={16} /></button>)}
         </section>
       ) : null}
       {phraseResults.length ? (

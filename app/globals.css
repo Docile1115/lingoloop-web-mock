@@ -561,8 +561,8 @@ p {
   --view-pad-x: var(--page-pad-x);   /* 화면 폭에 따라 아래 미디어쿼리에서 바뀝니다 */
   width: 100%;
   max-width: var(--page-max);
-  min-height: calc(100% - var(--sp-5));
-  margin: var(--sp-5) auto 0;
+  min-height: calc(100% - var(--sp-5) * 2);
+  margin: var(--sp-5) auto var(--sp-5);
   padding: var(--sp-5) var(--view-pad-x) var(--sp-6);
   border-radius: 24px;
   background: var(--surface);
@@ -1743,6 +1743,8 @@ p {
 .post-meta > button { display: inline-flex; padding: var(--sp-1); border: 0; background: transparent; color: var(--muted); }
 
 .post-copy {
+  /* span 이지만 문단처럼 씁니다. block 이어야 위 여백이 먹습니다. */
+  display: block;
   margin-top: var(--sp-4);
   color: var(--muted);
   font-size: 15px;
@@ -1939,7 +1941,8 @@ p {
 .feed-grid .feed-post:last-child { border-bottom: 0; }
 
 .feed-grid .post-copy {
-  margin-top: var(--sp-1);
+  /* 작성자 줄과 본문이 4px 밖에 안 떨어져 붙어 보였습니다. */
+  margin-top: var(--sp-3);
   font-size: 15px;           /* 실측 */
   line-height: 21px;
   white-space: pre-line;     /* 실측 */
@@ -2081,7 +2084,7 @@ p {
 
 .chat-list-tabs span { margin-left: 0; color: var(--subtle); }
 
-.conversation-list { flex: 1; overflow-y: auto; padding: 2px var(--sp-2) var(--sp-3); }
+.conversation-list { flex: 1; overflow-y: auto; padding: 2px 0 var(--sp-3); }
 
 .conversation-entry { padding: 2px 0; }
 /* 항목 "사이"에만 선을 둡니다. 마지막 항목 아래에 남는 선이 생기지 않습니다. */
@@ -2276,6 +2279,7 @@ p {
 .spinning { animation: coach-spin .8s linear infinite; }
 @keyframes coach-spin { to { transform: rotate(360deg); } }
 
+.coach-empty { margin-top: var(--sp-2); color: var(--muted); font-size: 13px; line-height: 1.6; }
 .coach-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: var(--sp-2); margin-top: var(--sp-2); }
 .coach-label { display: flex; align-items: center; gap: var(--sp-1); color: var(--muted); font-size: 12px; font-weight: 700; }
 .coach-topic-list { display: flex; min-width: 0; flex-direction: column; gap: var(--sp-1); }
@@ -2414,7 +2418,7 @@ p {
 
 .message-input {
   display: flex;
-  min-height: 39px;
+  min-height: 44px;
   flex: 1;
   align-items: center;
   gap: var(--sp-1);
@@ -2426,8 +2430,8 @@ p {
 
 .message-input:focus-within { border-color: var(--line-structure); box-shadow: 0 0 0 3px rgba(161, 161, 161, .08); }
 .message-input textarea { width: 100%; min-height: 24px; max-height: 74px; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 1.4; }
-.message-input button { display: inline-flex; align-items: center; justify-content: center; padding: var(--sp-1); border: 0; background: transparent; color: var(--muted); }
-.send-button { display: inline-flex; width: 39px; height: 39px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: var(--r-btn); background: var(--primary); color: var(--primary-text); }
+.message-input button { display: inline-flex; width: 26px; height: 26px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.send-button { display: inline-flex; width: 44px; height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: var(--r-btn); background: var(--primary); color: var(--primary-text); }
 .send-button:disabled { background: var(--line-structure); color: var(--muted); }
 .composer-hint { display: flex; align-items: center; gap: var(--sp-1); margin: var(--sp-1) 0 0 88px; color: var(--subtle); font-size: 12px; }
 
@@ -2852,7 +2856,7 @@ p {
 .setting-row strong { font-size: 13px; }
 .setting-row small { margin-top: var(--sp-1); color: var(--muted); font-size: 12px; }
 .setting-icon { display: inline-flex; width: 31px; height: 31px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: var(--r-btn); background: var(--surface-soft); color: var(--ink); }
-.setting-row input { position: absolute; right: 0; width: 34px; height: 20px; opacity: 0; }
+.setting-row input { position: absolute; right: 0; width: 34px; height: 24px; opacity: 0; }
 .toggle { position: relative; width: 34px; height: 20px; flex: 0 0 auto; border-radius: var(--r-pill); background: var(--line-structure); transition: background .18s ease; }
 .toggle::after { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,.15); content: ""; transition: transform .18s ease; }
 .setting-row input:checked + .toggle { background: var(--primary); }
@@ -2995,11 +2999,11 @@ p {
 .profile-settings-link {
   display: flex;
   width: 100%;
-  min-height: 38px;
+  min-height: 44px;
   align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-3);
-  padding: 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   border: var(--bw-hair) solid var(--line);
   border-radius: var(--r-btn);
   background: var(--sunken);
@@ -3303,21 +3307,23 @@ p {
 .matching-schedule-note small { margin-top: 2px; color: var(--success); font-size: 12px; }
 .modal-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: var(--bw-hair) solid var(--line); }
 
-.compose-author { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); }
-.compose-author > span:nth-child(2) { display: flex; flex: 1; flex-direction: column; }
-.compose-author strong { font-size: 13px; }
-.compose-author small { margin-top: var(--sp-1); color: var(--muted); font-size: 12px; }
-.compose-author > button { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2); border: var(--bw-hair) solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); color: var(--muted); font-size: 12px; }
 .compose-text { position: relative; display: block; margin-top: var(--sp-4); }
 .compose-text textarea { width: 100%; padding: var(--sp-3); resize: vertical; border: var(--bw-thin) solid var(--line-strong); border-radius: var(--r-btn); background: var(--surface); font-size: 15px; line-height: 1.7; }
 .compose-text > small { position: absolute; right: 10px; bottom: 9px; color: var(--subtle); font-size: 12px; }
-.compose-attachments { display: flex; gap: var(--sp-1); margin-top: var(--sp-2); }
-.compose-attachments button { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-2) var(--sp-2); border: var(--bw-hair) solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--muted); font-size: 13px; }
+/* 공개 범위 · 주제 — 예전 첨부 줄(사진·음성·주제) 자리를 씁니다. */
+.compose-options { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2); }
+.compose-option { display: flex; min-height: 32px; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); border: var(--bw-hair) solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--muted); font-size: 13px; }
+.compose-option.active { border-color: var(--primary); color: var(--ink); }
+
+.compose-topics { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2); padding: var(--sp-2); border: var(--bw-hair) solid var(--line); border-radius: var(--r-btn); background: var(--sunken); }
+.compose-topics button { min-height: 28px; padding: 0 var(--sp-2); border: var(--bw-hair) solid var(--line); border-radius: var(--r-pill); background: var(--surface); color: var(--muted); font-size: 12px; }
+.compose-topics button.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); }
+.compose-topics > small { width: 100%; color: var(--subtle); font-size: 12px; }
 .correction-request { position: relative; display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); padding: var(--sp-3); border: var(--bw-hair) solid var(--line); border-radius: var(--r-btn); background: var(--surface); cursor: pointer; }
 .correction-request > span:nth-child(2) { display: flex; flex: 1; flex-direction: column; }
 .correction-request strong { font-size: 13px; }
 .correction-request small { margin-top: var(--sp-1); color: var(--muted); font-size: 12px; }
-.correction-request input { position: absolute; right: 11px; opacity: 0; }
+.correction-request input { position: absolute; right: 11px; width: 34px; height: 24px; opacity: 0; }
 .correction-request input:checked + .toggle { background: var(--primary); }
 .correction-request input:checked + .toggle::after { transform: translateX(14px); }
 .safety-note { display: flex; align-items: center; gap: var(--sp-1); color: var(--muted); font-size: 12px; }
@@ -3325,7 +3331,7 @@ p {
 .modal-search { width: min(610px,100%); align-self: flex-start; margin-top: 7vh; }
 .modal-confirm { width: min(400px, 100%); }
 .search-modal-content > header { display: flex; height: 63px; align-items: center; gap: var(--sp-2); padding: 0 19px; border-bottom: var(--bw-hair) solid var(--line); color: var(--muted); }
-.search-modal-content > header input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; font-size: 15px; }
+.search-modal-content > header input { min-width: 0; min-height: 24px; flex: 1; border: 0; outline: 0; background: transparent; font-size: 15px; }
 /* type="search" 는 브라우저가 제 나름의 지우기 ✕ 를 그려 넣습니다.
    OS·브라우저마다 생김새가 다르고 여기서는 ESC 안내와 겹칩니다 — 앱이 그린 것만 남깁니다. */
 input[type="search"]::-webkit-search-cancel-button,
@@ -4102,6 +4108,7 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 }
 
 .avatar-initials { overflow: hidden; border-radius: var(--r-pill); }
+.avatar-photo { width: 100%; height: 100%; border-radius: var(--r-pill); object-fit: cover; }
 .avatar-initials svg { width: 100%; height: 100%; fill: currentColor; }
 
 /* ─────────────────────────────────────────────
@@ -5848,7 +5855,17 @@ label > svg { flex: none; }
 
 /* 태그·교정 카드 안 버튼은 줄 자체에 높이를 줘야 이웃과 겹치지 않고 24px 을 만족합니다 */
 @media (max-width: 640px) {
-  .app-root .post-tags { row-gap: var(--sp-1); }
+  .app-root .post-image {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  margin-top: var(--sp-3);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-btn);
+  object-fit: cover;
+}
+
+.post-tags { row-gap: var(--sp-1); }
   .app-root .post-tags button { min-height: 24px; }
   .app-root .correction-card > button,
   .app-root .chat-correction-card > button,
@@ -6266,8 +6283,8 @@ label > svg { flex: none; }
   .likes-accept,
   .partner-list-profile { min-width: var(--mobile-tap); min-height: var(--mobile-tap); }
 
-  .compose-author > button,
-  .compose-attachments button,
+  .compose-option,
+  .compose-topics button,
   .search-chips button,
   .notifications-content > header > button,
   .notifications-content > footer button,

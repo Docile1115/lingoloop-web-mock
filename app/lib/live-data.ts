@@ -66,18 +66,23 @@ export interface ApiProfile {
   status: string;
   verified?: boolean;
   exchangeScore?: number;
+  /** 프로필 사진 주소(데이터 URI 도 됩니다). 비면 자리표시자를 그립니다. */
+  avatarUrl?: string;
+  /** 남에게 도시를 감출지. 본인 프로필에만 실려 옵니다. */
+  hideLocation?: boolean;
 }
 
 export interface ApiPost {
   id: string;
   authorId: string;
-  author: { id: string; name: string; handle: string; flag: string };
+  author: { id: string; name: string; handle: string; flag: string; avatarUrl?: string };
   text: string;
   language: string;
   targetLanguage: string;
   tags: string[];
   visibility: string;
   requestCorrection: boolean;
+  imageUrl?: string;
   likes: number;
   comments: number;
   corrections: number;
@@ -130,6 +135,12 @@ const LANGUAGE_NAMES: Record<string, string> = {
   es: msg("스페인어"),
   fr: msg("프랑스어"),
   de: msg("독일어"),
+  vi: msg("베트남어"),
+  pt: msg("포르투갈어"),
+  it: msg("이탈리아어"),
+  th: msg("태국어"),
+  id: msg("인도네시아어"),
+  ru: msg("러시아어"),
 };
 
 /**
@@ -207,6 +218,7 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
     online: profile.status === "online",
     compatibility: score,
     accent: accentFor(profile.id),
+    photo: profile.avatarUrl || "",
     goal: learning?.goal || "",
     activeTime: (profile.availability || [])
       .map((code) => AVAILABILITY_NAMES[code])
@@ -228,6 +240,8 @@ export function toFeedPost(post: ApiPost): FeedPost {
     handle: post.author.handle,
     flag: post.author.flag || "🌐",
     accent: accentFor(post.authorId),
+    photo: post.author.avatarUrl || "",
+    image: post.imageUrl || "",
     time: relativeTime(post.createdAt),
     language: languageName(post.language),
     level: "",
@@ -242,6 +256,7 @@ export function toFeedPost(post: ApiPost): FeedPost {
     liked: post.liked,
     saved: post.saved,
     visibility: post.visibility === "partners" ? "partners" : "public",
+    requestCorrection: post.requestCorrection,
   };
 }
 
@@ -262,6 +277,7 @@ export function toConversation(conversation: ApiConversation, messages: ChatMess
     partnerId: partner?.id,
     name: partner?.name || t("알 수 없는 상대"),
     flag: partner?.country?.flag || "🌐",
+    photo: partner?.avatarUrl || "",
     accent: accentFor(partner?.id || conversation.id),
     preview: conversation.preview,
     time: relativeTime(conversation.updatedAt),
@@ -281,7 +297,7 @@ export interface ApiReply {
   parentId: string;
   likes: number;
   createdAt: string;
-  author: { id: string; name: string | null; handle: string | null; flag: string };
+  author: { id: string; name: string | null; handle: string | null; flag: string; avatarUrl?: string };
 }
 
 export interface ApiReceivedLike {
@@ -314,10 +330,11 @@ export interface ApiSavedPhrase {
 export function toPostReply(reply: ApiReply): PostReply {
   return {
     id: reply.id,
-    author: reply.author.name ?? t("알 수 없는 상대"),
-    handle: reply.author.handle ?? "",
-    flag: reply.author.flag || "🌐",
+    author: reply.author?.name ?? t("알 수 없는 상대"),
+    handle: reply.author?.handle ?? "",
+    flag: reply.author?.flag || "🌐",
     accent: accentFor(reply.authorId),
+    photo: reply.author?.avatarUrl || "",
     time: relativeTime(reply.createdAt),
     text: reply.text,
     likes: reply.likes,

@@ -246,6 +246,21 @@ function publicProfile(profile) {
   return Object.fromEntries(Object.entries(profile).filter(([key]) => !privateFields.has(key)));
 }
 
+/**
+ * 남에게 보여줄 프로필.
+ *
+ * "정밀 위치 숨기기" 를 켠 사람의 도시는 지웁니다. 개인정보 스위치는 실제로
+ * 무언가를 가려야 스위치입니다 — 예전에는 켜도 남들에게 도시가 그대로 보였습니다.
+ * 본인에게는 publicProfile 로 그대로 보여줍니다(자기 도시는 자기가 봐야 고칩니다).
+ */
+function profileForOthers(profile) {
+  const shown = publicProfile(profile);
+  if (!shown) return shown;
+  // 설정값 자체도 남에게 알릴 이유가 없습니다.
+  const { hideLocation, ...rest } = shown;
+  return hideLocation ? { ...rest, city: "" } : rest;
+}
+
 function defaultProfile(uid, email, name) {
   const normalizedName = (name || email.split("@")[0] || "LingoLoop 사용자").trim().slice(0, 40);
   const handleBase = normalizedName
@@ -261,6 +276,10 @@ function defaultProfile(uid, email, name) {
     handle: "@" + handleBase + uid.slice(0, 5).toLocaleLowerCase(),
     country: { code: "KR", name: "대한민국", flag: "🇰🇷" },
     city: "",
+    hideLocation: true,
+    // 프로필 사진. 지금은 데이터 URI 를 그대로 담습니다 — 저장소 버킷이 생기면
+    // 그 주소로 바뀌기만 하면 됩니다(화면은 문자열만 봅니다).
+    avatarUrl: "",
     nativeLanguages: ["ko"],
     learningLanguages: [{ code: "en", level: "beginner", goal: "부담 없는 일상 대화" }],
     bio: "함께 꾸준히 연습할 언어 파트너를 찾고 있어요.",
@@ -495,7 +514,7 @@ function matchCandidate(candidate, me, preferences, date) {
     reasonCodes.push({ code: "first-exchange" });
   }
   return {
-    partner: publicProfile(candidate),
+    partner: profileForOthers(candidate),
     score: Math.min(99, score),
     matchReasons: reasons.slice(0, 4),
     matchReasonCodes: reasonCodes.slice(0, 4),
@@ -591,7 +610,7 @@ async function profilesByIds(ids) {
 async function conversationView(conversation, uid, includeMessages = false) {
   const partnerId = conversation.memberIds.find((id) => id !== uid);
   const partnerSnapshot = partnerId ? await db.collection("profiles").doc(partnerId).get() : null;
-  const partner = partnerSnapshot?.exists ? publicProfile(partnerSnapshot.data()) : null;
+  const partner = partnerSnapshot?.exists ? profileForOthers(partnerSnapshot.data()) : null;
   let messages;
   if (includeMessages) {
     const snapshot = await db
@@ -927,6 +946,12 @@ app.patch("/api/profile", requireUser, async (req, res) => {
     intents: stringArray(req.body?.intents, "intents", current.intents, 4, 32),
     age: integerInRange(req.body?.age, "age", { min: 18, max: 100, fallback: current.age }),
     gender: req.body?.gender === undefined ? current.gender : req.body.gender,
+    avatarUrl: req.body?.avatarUrl === undefined ? current.avatarUrl || "" : safeString(req.body.avatarUrl, "avatarUrl", { min: 0, max: 400000 }),
+    hideLocation: optionalBoolean(
+      req.body?.hideLocation,
+      "hideLocation",
+      current.hideLocation === undefined ? true : Boolean(current.hideLocation),
+    ),
     updatedAt: nowIso(),
   };
   if (!patch.nativeLanguages.length || !patch.learningLanguages.length) {
@@ -953,7 +978,7 @@ app.get("/api/partners", requireUser, async (req, res) => {
         .toLocaleLowerCase()
         .includes(query);
     })
-    .map(publicProfile);
+    .map(profileForOthers);
   return success(res, req, partners, 200, {
     pagination: { total: partners.length, nextCursor: null },
   });
@@ -995,7 +1020,7 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
     const recommendations = (stored.recommendations || [])
       .filter((item) => profileMap.get(item.partnerId)?.accountStatus === "active")
       .filter((item) => !blockedNow.has(item.partnerId))
-      .map((item) => ({ ...item, partner: publicProfile(profileMap.get(item.partnerId)) }));
+      .map((item) => ({ ...item, partner: profileForOthers(profileMap.get(item.partnerId)) }));
     return success(res, req, {
       date,
       recommendations,
@@ -1038,7 +1063,7 @@ app.get("/api/blocks", requireUser, async (req, res) => {
   const rows = snapshot.docs.map((document) => document.data());
   const profiles = await profilesByIds(rows.map((row) => row.blockedId));
   const blocked = rows
-    .map((row) => ({ ...row, partner: profiles.get(row.blockedId) ? publicProfile(profiles.get(row.blockedId)) : null }))
+    .map((row) => ({ ...row, partner: profiles.get(row.blockedId) ? profileForOthers(profiles.get(row.blockedId)) : null }))
     .filter((row) => row.partner)
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
   return success(res, req, blocked, 200, { pagination: { total: blocked.length, nextCursor: null } });
@@ -1089,7 +1114,7 @@ app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
     createdAt: timestamp,
   });
   const reverse = await db.collection("likes").doc(partnerId + "_" + req.auth.uid).get();
-  return success(res, req, { liked: true, mutual: reverse.exists, partner: publicProfile(partnerSnapshot.data()) }, 201);
+  return success(res, req, { liked: true, mutual: reverse.exists, partner: profileForOthers(partnerSnapshot.data()) }, 201);
 });
 
 app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
@@ -1107,7 +1132,7 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
     return !snapshot.exists;
   });
   const reverse = await db.collection("follows").doc(partnerId + "_" + req.auth.uid).get();
-  return success(res, req, { following, mutual: following && reverse.exists, partner: publicProfile(partnerSnapshot.data()) });
+  return success(res, req, { following, mutual: following && reverse.exists, partner: profileForOthers(partnerSnapshot.data()) });
 });
 
 app.get("/api/posts", requireUser, async (req, res) => {
@@ -1130,7 +1155,12 @@ app.get("/api/posts", requireUser, async (req, res) => {
   const reactions = await Promise.all(
     posts.map((post) => db.collection("posts").doc(post.id).collection("reactions").doc(req.auth.uid).get()),
   );
-  const withReactions = posts.map((post, index) => ({ ...post, liked: reactions[index].exists }));
+  const authors = await profilesByIds(posts.map((post) => post.authorId));
+  const withReactions = posts.map((post, index) => ({
+    ...post,
+    liked: reactions[index].exists,
+    author: { ...post.author, avatarUrl: authors.get(post.authorId)?.avatarUrl || "" },
+  }));
   return success(res, req, withReactions, 200, { pagination: { total: posts.length, nextCursor: null } });
 });
 
@@ -1150,6 +1180,7 @@ app.post("/api/posts", requireUser, async (req, res) => {
       name: req.auth.profile.name,
       handle: req.auth.profile.handle,
       flag: req.auth.profile.country?.flag || "🌐",
+      avatarUrl: req.auth.profile.avatarUrl || "",
     },
     text,
     language: optionalString(req.body?.language, "language", 10) || req.auth.profile.learningLanguages?.[0]?.code || "en",
@@ -1157,6 +1188,7 @@ app.post("/api/posts", requireUser, async (req, res) => {
     tags,
     visibility,
     requestCorrection: optionalBoolean(req.body?.requestCorrection, "requestCorrection", false),
+    imageUrl: optionalString(req.body?.imageUrl, "imageUrl", 400000) || "",
     likes: 0,
     comments: 0,
     corrections: 0,
@@ -1223,8 +1255,8 @@ app.get("/api/posts/:postId/replies", requireUser, async (req, res) => {
     rows.map((row) => ({
       ...row,
       author: profiles.get(row.authorId)
-        ? { id: row.authorId, name: profiles.get(row.authorId).name, handle: profiles.get(row.authorId).handle, flag: profiles.get(row.authorId).country?.flag || "🌐" }
-        : { id: row.authorId, name: null, handle: null, flag: "🌐" },
+        ? { id: row.authorId, name: profiles.get(row.authorId).name, handle: profiles.get(row.authorId).handle, flag: profiles.get(row.authorId).country?.flag || "🌐", avatarUrl: profiles.get(row.authorId).avatarUrl || "" }
+        : { id: row.authorId, name: null, handle: null, flag: "🌐", avatarUrl: "" },
     })),
     200,
     { pagination: { total: rows.length, nextCursor: null } },
@@ -1263,7 +1295,20 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
       updatedAt: timestamp,
     });
   });
-  return success(res, req, reply, 201);
+  return success(
+    res,
+    req,
+    {
+      ...reply,
+      author: {
+        id: req.auth.uid,
+        name: req.auth.profile.name,
+        handle: req.auth.profile.handle,
+        flag: req.auth.profile.country?.flag || "🌐",
+      },
+    },
+    201,
+  );
 });
 
 /** 내 글에 달린 교정. 학습 화면이 "받은 교정" 으로 보여줍니다. */
@@ -1308,7 +1353,7 @@ app.get("/api/likes/sent", requireUser, async (req, res) => {
     .filter((row) => profiles.get(row.toUserId))
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
     .map((row) => ({
-      partner: publicProfile(profiles.get(row.toUserId)),
+      partner: profileForOthers(profiles.get(row.toUserId)),
       createdAt: row.createdAt,
       mutual: likedMe.has(row.toUserId),
     }));
@@ -1330,7 +1375,7 @@ app.get("/api/likes/received", requireUser, async (req, res) => {
     .filter((row) => profiles.get(row.fromUserId))
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
     .map((row) => ({
-      partner: publicProfile(profiles.get(row.fromUserId)),
+      partner: profileForOthers(profiles.get(row.fromUserId)),
       createdAt: row.createdAt,
       mutual: sentTo.has(row.fromUserId),
     }));
@@ -1787,7 +1832,7 @@ app.get("/api/search", requireUser, async (req, res) => {
     .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
     .filter((profile) => !blocked.has(profile.id))
     .filter((profile) => [profile.name, profile.handle, profile.bio, ...(profile.interests || [])].join(" ").toLocaleLowerCase().includes(query))
-    .map(publicProfile);
+    .map(profileForOthers);
   const posts = postsSnapshot.docs
     .map((document) => document.data())
     .filter(
@@ -1838,7 +1883,7 @@ app.post("/api/conversation-support", requireUser, async (req, res) => {
   if (!partnerSnapshot.exists) throw new ApiError(404, "PARTNER_NOT_FOUND", "대화 상대를 찾을 수 없습니다.");
   const stage = optionalString(req.body?.stage, "stage", 32) || "first-message";
   const draft = optionalString(req.body?.draft, "draft", 1000) || "";
-  const partner = publicProfile(partnerSnapshot.data());
+  const partner = profileForOthers(partnerSnapshot.data());
   const schema = {
     type: "object",
     additionalProperties: false,
