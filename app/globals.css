@@ -613,23 +613,27 @@ p {
 .conversation-item .avatar { width: 50px; height: 50px; flex: none; }
 .avatar-xl { width: 82px; height: 82px; font-size: 24px; }
 
+/* 아바타 오른쪽 아래에 붙는 국기 배지. 안쪽 SVG 가 배지를 꽉 채웁니다. */
 .avatar-flag {
   position: absolute;
   right: -3px;
   bottom: -2px;
   display: inline-flex;
-  min-width: 18px;
+  width: 18px;
   height: 18px;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   border: 2px solid var(--surface);
   border-radius: 50%;
   background: var(--surface);
-  font-size: 13px;
+  font-size: 12px;
 }
 
-.avatar-lg .avatar-flag { min-width: 21px; height: 21px; font-size: 15px; }
-.avatar-xl .avatar-flag { min-width: 24px; height: 24px; font-size: 15px; }
+.avatar-flag .flag-icon { width: 100%; height: 100%; vertical-align: top; }
+
+.avatar-lg .avatar-flag { width: 21px; height: 21px; font-size: 14px; }
+.avatar-xl .avatar-flag { width: 24px; height: 24px; font-size: 15px; }
 
 .avatar-online {
   position: absolute;
@@ -1767,6 +1771,20 @@ p {
 .translation-box p { color: var(--subtle); font-size: 13px; line-height: 1.4; }
 .translation-box p span { display: block; margin-bottom: 2px; color: var(--ink); font-size: 13px; font-weight: 700; }
 
+
+/* 글에 붙인 사진. 본문과 붙지 않게 띄우고 카드와 같은 곡률을 씁니다. */
+.post-image {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  margin-top: var(--sp-4);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-lg);
+  object-fit: cover;
+}
+
+.post-audio { display: block; width: 100%; margin-top: var(--sp-3); }
+
 .post-tags {
   display: flex;
   flex-wrap: wrap;
@@ -2047,7 +2065,7 @@ p {
   height: 40px;                  /* 실측 */
   align-items: center;
   gap: var(--sp-2);
-  margin: 0 24px;
+  margin: 0 12px;
   padding: 0 16px;
   border: 0;
   border-radius: 22px;           /* 실측 */
@@ -2080,7 +2098,7 @@ p {
 }
 
 .chat-list-tabs button:hover { background: var(--hover-bg); }
-.chat-list-tabs button.active { background: var(--sunken); }
+.chat-list-tabs button.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); font-weight: 600; }
 
 .chat-list-tabs span { margin-left: 0; color: var(--subtle); }
 
@@ -2429,8 +2447,96 @@ p {
 }
 
 .message-input:focus-within { border-color: var(--line-structure); box-shadow: 0 0 0 3px rgba(161, 161, 161, .08); }
-.message-input textarea { width: 100%; min-height: 24px; max-height: 74px; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 1.4; }
+.message-input textarea { display: block; width: 100%; height: 24px; min-height: 24px; max-height: 74px; padding: 0; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 24px; }
 .message-input button { display: inline-flex; width: 26px; height: 26px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--muted); }
+/* 첨부(+) — 보내기 버튼과 같은 크기로 한 줄에 섭니다. */
+.composer-attach {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: var(--bw-thin) solid var(--line-strong);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--muted);
+}
+.composer-attach.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); }
+
+/* + 를 누르면 위로 펼쳐지는 메뉴. */
+.composer-attach-wrap { position: relative; display: inline-flex; }
+.menu-scrim { position: fixed; z-index: 40; inset: 0; border: 0; background: transparent; }
+.composer-attach-menu {
+  position: absolute;
+  z-index: 41;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  min-width: 148px;
+  flex-direction: column;
+  padding: var(--sp-1);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,.28));
+}
+.composer-attach-menu button {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+}
+.composer-attach-menu button:hover { background: var(--hover-bg); }
+.composer-attach-menu button.recording { color: var(--danger, #e5484d); }
+
+/* 대화 코치 — 첨부와 별개 버튼입니다. */
+.composer-coach {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: var(--bw-thin) solid var(--line-strong);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--muted);
+}
+.composer-coach.active { border-color: var(--primary); color: var(--primary); }
+
+/* 글쓰기에 붙인 사진·음성 미리보기 */
+.compose-preview { position: relative; margin-top: var(--sp-3); }
+.compose-preview img { display: block; width: 100%; max-height: 240px; border-radius: var(--r-btn); object-fit: cover; }
+.compose-preview audio { width: 100%; }
+.compose-preview > button {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: rgba(0, 0, 0, .58);
+  color: #fff;
+}
+.compose-preview-audio > button { position: static; margin-top: var(--sp-1); background: var(--sunken); color: var(--muted); }
+.compose-option.recording { border-color: var(--danger, #e5484d); color: var(--danger, #e5484d); }
+
+/* 말풍선에 담긴 사진·음성 */
+.message-media { display: block; max-width: 260px; margin-top: var(--sp-1); border-radius: var(--r-btn); }
+.message-audio { width: 240px; margin-top: var(--sp-1); }
+
 .send-button { display: inline-flex; width: 44px; height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: var(--r-btn); background: var(--primary); color: var(--primary-text); }
 .send-button:disabled { background: var(--line-structure); color: var(--muted); }
 .composer-hint { display: flex; align-items: center; gap: var(--sp-1); margin: var(--sp-1) 0 0 88px; color: var(--subtle); font-size: 12px; }
@@ -3349,6 +3455,33 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 .search-result small { margin-top: var(--sp-1); overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .search-result > svg { color: var(--subtle); }
 /* 목록이 빈 화면 — 아이콘·제목·설명을 가운데로 모읍니다. */
+/* 상대 프로필에 붙는 그 사람의 글 목록. */
+.partner-post-list { display: flex; flex-direction: column; gap: var(--sp-2); }
+.partner-post-list > button {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+.partner-post-list > button:hover { background: var(--hover-bg); }
+.partner-post-meta { color: var(--subtle); font-size: 12px; }
+.partner-post-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+.partner-post-stats { display: flex; gap: var(--sp-3); color: var(--subtle); font-size: 12px; }
+.partner-post-stats > span { display: inline-flex; align-items: center; gap: 3px; }
+
 .empty-state { display: flex; align-items: center; justify-content: center; flex-direction: column; min-height: 240px; padding: var(--sp-6) var(--sp-4); color: var(--subtle); text-align: center; }
 .empty-state > svg { color: var(--line-structure); }
 .empty-state strong { margin-top: var(--sp-3); color: var(--ink); font-size: 15px; }
@@ -4109,6 +4242,16 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 
 .avatar-initials { overflow: hidden; border-radius: var(--r-pill); }
 .avatar-photo { width: 100%; height: 100%; border-radius: var(--r-pill); object-fit: cover; }
+
+/* 국기 — 정사각형 SVG 를 원으로 자릅니다. 이모지처럼 글꼴에 휘둘리지 않습니다. */
+.flag-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: var(--r-pill);
+  object-fit: cover;
+  vertical-align: -2px;
+}
+.flag-fallback { line-height: 1; }
 .avatar-initials svg { width: 100%; height: 100%; fill: currentColor; }
 
 /* ─────────────────────────────────────────────
@@ -5855,17 +5998,7 @@ label > svg { flex: none; }
 
 /* 태그·교정 카드 안 버튼은 줄 자체에 높이를 줘야 이웃과 겹치지 않고 24px 을 만족합니다 */
 @media (max-width: 640px) {
-  .app-root .post-image {
-  display: block;
-  width: 100%;
-  max-height: 340px;
-  margin-top: var(--sp-3);
-  border: var(--bw-hair) solid var(--line);
-  border-radius: var(--r-btn);
-  object-fit: cover;
-}
-
-.post-tags { row-gap: var(--sp-1); }
+  .post-tags { row-gap: var(--sp-1); }
   .app-root .post-tags button { min-height: 24px; }
   .app-root .correction-card > button,
   .app-root .chat-correction-card > button,

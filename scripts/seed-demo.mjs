@@ -67,7 +67,7 @@ const POSTS = [
   { by: 1, text: "오늘 처음으로 한국 카페에서 한국어로 주문했어요!\n\"아이스 아메리카노 한 잔 주세요\" 라고 했는데 통했어요. 조금 뿌듯했습니다.", tags: ["오늘의연습"], correction: true, image: scene("#1B2A4A", "#3E5C8C", "#0F1B33") },
   { by: 2, text: "Korean word order still breaks my brain. I keep saying \"저는 커피 좋아요 마셔요\" 😅\nAny trick for remembering the verb goes last?", tags: ["문법질문"], correction: true },
   { by: 3, text: "Made 김치찌개 for the first time today. My Korean flatmate said it was \"괜찮아\" which I have learned means it was not good.", tags: ["음식"], correction: false, image: scene("#3A1E24", "#7A3B3B", "#241318") },
-  { by: 4, text: "일본어 공부 3일차. 오늘 배운 문장:\n「はじめまして、セナです。よろしくおねがいします。」\n발음이 아직 어색해요.", tags: ["오늘의연습"], correction: true },
+  { by: 4, text: "일본어 공부 3일차. 오늘 배운 문장:\n「はじめまして、セナです。よろしくおねがいします。」\n발음이 아직 어색해요.", tags: ["오늘의연습"], correction: true, image: scene("#2C2140", "#5A4478", "#1B1428") },
   { by: 5, text: "존댓말과 반말을 언제 바꿔야 하는지 아직도 헷갈려요.\n처음 만난 사람에게는 무조건 존댓말이 맞나요?", tags: ["문법질문"], correction: true },
   { by: 2, text: "Watched a Korean film without subtitles for the first time. I understood maybe 30% but that is 30% more than last year.", tags: ["영화"], correction: false, image: scene("#20304A", "#4E6B96", "#16202F") },
   { by: 0, text: "출근길에 팟캐스트를 들으면서 따라 말해봤어요. 입이 안 따라가는데 계속하면 나아지겠죠?", tags: ["일상"], correction: false },

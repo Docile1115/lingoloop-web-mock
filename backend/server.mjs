@@ -1159,7 +1159,11 @@ app.get("/api/posts", requireUser, async (req, res) => {
   const withReactions = posts.map((post, index) => ({
     ...post,
     liked: reactions[index].exists,
-    author: { ...post.author, avatarUrl: authors.get(post.authorId)?.avatarUrl || "" },
+    author: {
+      ...post.author,
+      avatarUrl: authors.get(post.authorId)?.avatarUrl || "",
+      countryCode: authors.get(post.authorId)?.country?.code || "",
+    },
   }));
   return success(res, req, withReactions, 200, { pagination: { total: posts.length, nextCursor: null } });
 });
@@ -1181,6 +1185,7 @@ app.post("/api/posts", requireUser, async (req, res) => {
       handle: req.auth.profile.handle,
       flag: req.auth.profile.country?.flag || "🌐",
       avatarUrl: req.auth.profile.avatarUrl || "",
+      countryCode: req.auth.profile.country?.code || "",
     },
     text,
     language: optionalString(req.body?.language, "language", 10) || req.auth.profile.learningLanguages?.[0]?.code || "en",
@@ -1188,7 +1193,8 @@ app.post("/api/posts", requireUser, async (req, res) => {
     tags,
     visibility,
     requestCorrection: optionalBoolean(req.body?.requestCorrection, "requestCorrection", false),
-    imageUrl: optionalString(req.body?.imageUrl, "imageUrl", 400000) || "",
+    imageUrl: optionalString(req.body?.imageUrl, "imageUrl", 700000) || "",
+    audioUrl: optionalString(req.body?.audioUrl, "audioUrl", 700000) || "",
     likes: 0,
     comments: 0,
     corrections: 0,
@@ -1255,7 +1261,7 @@ app.get("/api/posts/:postId/replies", requireUser, async (req, res) => {
     rows.map((row) => ({
       ...row,
       author: profiles.get(row.authorId)
-        ? { id: row.authorId, name: profiles.get(row.authorId).name, handle: profiles.get(row.authorId).handle, flag: profiles.get(row.authorId).country?.flag || "🌐", avatarUrl: profiles.get(row.authorId).avatarUrl || "" }
+        ? { id: row.authorId, name: profiles.get(row.authorId).name, handle: profiles.get(row.authorId).handle, flag: profiles.get(row.authorId).country?.flag || "🌐", avatarUrl: profiles.get(row.authorId).avatarUrl || "", countryCode: profiles.get(row.authorId).country?.code || "" }
         : { id: row.authorId, name: null, handle: null, flag: "🌐", avatarUrl: "" },
     })),
     200,
@@ -1586,14 +1592,26 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
 
 async function createMessage(req, res, conversationId) {
   const id = safeString(conversationId, "conversationId", { min: 4, max: 128 });
-  const text = safeString(req.body?.text, "text", { min: 1, max: 4000 });
   const type = req.body?.type ?? "text";
-  if (!["text", "voice"].includes(type)) {
+  if (!["text", "voice", "image"].includes(type)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 메시지 형식입니다.", { field: "type" });
   }
-  if (type === "voice") {
-    throw new ApiError(501, "VOICE_MESSAGE_NOT_CONFIGURED", "보이스 메시지 전송은 아직 연결되지 않았습니다.");
+  /**
+   * 사진·음성은 지금 데이터 URI 로 문서에 함께 담습니다.
+   *
+   * 파일 저장소(버킷)가 아직 없어서입니다. 화면이 보내기 전에 사진을 줄이고
+   * 압축하므로 보통 100~200KB 이고, Firestore 문서 한도(1MB)를 넘지 않게
+   * 여기서도 한 번 더 막습니다. 버킷이 생기면 이 자리에 그 주소가 들어오면 됩니다.
+   */
+  const media = type === "text" ? "" : optionalString(req.body?.media, "media", 700000) || "";
+  if (type !== "text" && !media) {
+    throw new ApiError(422, "VALIDATION_ERROR", "보낼 파일이 없습니다.", { field: "media" });
   }
+  // 사진·음성 메시지의 text 는 목록에 보일 한 줄입니다(빈 값이면 화면이 형식으로 채웁니다).
+  const text =
+    type === "text"
+      ? safeString(req.body?.text, "text", { min: 1, max: 4000 })
+      : optionalString(req.body?.text, "text", 200) || (type === "image" ? "사진" : "음성 메시지");
   const clientMessageId =
     typeof req.body?.clientMessageId === "string" && /^[a-zA-Z0-9_-]{8,128}$/.test(req.body.clientMessageId)
       ? req.body.clientMessageId
@@ -1616,6 +1634,7 @@ async function createMessage(req, res, conversationId) {
     senderId: req.auth.uid,
     type,
     text,
+    media,
     sentAt: timestamp,
     status: "sent",
   };

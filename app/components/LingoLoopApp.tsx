@@ -28,6 +28,7 @@ import {
   Globe2,
   Hand,
   Heart,
+  Image as ImageIcon,
   Languages,
   Link as LinkIcon,
   LogOut,
@@ -175,7 +176,7 @@ type ModalState =
   | null;
 
 /** 게시물 작성 화면에서 넘기는 옵션. */
-type PublishOptions = { requestCorrection: boolean; visibility: "public" | "partners"; tags: string[] };
+type PublishOptions = { requestCorrection: boolean; visibility: "public" | "partners"; tags: string[]; image: string; audio: string };
 
 /** 신고 제출 시 화면에서 넘기는 선택값. */
 type ReportOptions = {
@@ -382,6 +383,25 @@ const accentStyle = (accent: Accent): CSSProperties => ({
   "--avatar-accent": `var(--accent-${accent})`,
 } as CSSProperties);
 
+/**
+ * 국기.
+ *
+ * 이모지 대신 SVG 를 씁니다 — 이모지는 글꼴에 따라 크기와 모양이 제각각이고,
+ * 윈도우에서는 국기가 아예 두 글자(KR)로 보입니다. 정사각형 SVG 라 원형으로
+ * 잘라도 찌그러지지 않습니다.
+ *
+ * 아직 파일이 없는 나라는 지구본으로 둡니다 — 다른 나라 국기를 대신 보여주는
+ * 것보다는 낫습니다.
+ */
+function CountryFlag({ code, size = 16 }: { code?: string; size?: number }) {
+  const lower = (code || "").trim().toLocaleLowerCase();
+  if (!/^[a-z]{2}$/.test(lower)) return <span className="flag-fallback" style={{ fontSize: size }} aria-hidden="true">🌐</span>;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img className="flag-icon" src={`/flags/${lower}.svg`} alt="" width={size} height={size} loading="lazy" />
+  );
+}
+
 function Avatar({
   name,
   flag,
@@ -389,6 +409,7 @@ function Avatar({
   size = "md",
   online,
   photo,
+  countryCode,
 }: {
   name: string;
   flag?: string;
@@ -397,6 +418,8 @@ function Avatar({
   online?: boolean;
   /** 프로필 사진. 없으면 사람 모양 자리표시자를 그립니다. */
   photo?: string;
+  /** 국가 코드(KR·JP…). 있으면 국기 배지를 답니다. */
+  countryCode?: string;
 }) {
   return (
     <span className={`avatar avatar-${size}`} style={accentStyle(accent)} role="img" aria-label={name}>
@@ -411,7 +434,7 @@ function Avatar({
         </svg>
       </span>
       )}
-      {flag ? <span className="avatar-flag">{flag}</span> : null}
+      {countryCode || flag ? <span className="avatar-flag"><CountryFlag code={countryCode} /></span> : null}
       {online ? <span className="avatar-online" /> : null}
     </span>
   );
@@ -1273,6 +1296,41 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     }
   };
 
+  /**
+   * 사진·음성 보내기.
+   *
+   * 저장소 버킷이 아직 없어서 파일을 데이터 URI 로 함께 보냅니다. 그대로 보내면
+   * 문서 한도(1MB)를 넘기니 사진은 보내기 전에 긴 변 1280px 로 줄이고 JPEG 로
+   * 다시 눌러 담습니다(보통 100~200KB). 버킷이 생기면 이 함수가 업로드하고
+   * 받은 주소를 media 에 넣기만 하면 됩니다.
+   */
+  const sendAttachment = async (kind: "image" | "voice", media: string, label: string) => {
+    if (!selectedConversation) return;
+    const newMessage = { id: `local-${Date.now()}`, mine: true, text: label, time: t("지금"), media, kind };
+    setConversations((items) =>
+      items.map((conversation) =>
+        conversation.id === selectedConversation.id
+          ? { ...conversation, preview: label, time: t("지금"), messages: [...conversation.messages, newMessage] }
+          : conversation,
+      ),
+    );
+    try {
+      await api("/api/conversations/" + encodeURIComponent(selectedConversation.id) + "/messages", {
+        method: "POST",
+        body: JSON.stringify({ type: kind, media, text: label }),
+      });
+    } catch (caught) {
+      setConversations((items) =>
+        items.map((conversation) =>
+          conversation.id === selectedConversation.id
+            ? { ...conversation, messages: conversation.messages.filter((message) => message.id !== newMessage.id) }
+            : conversation,
+        ),
+      );
+      showToast(caught instanceof Error ? caught.message : t("보내지 못했어요."));
+    }
+  };
+
   const acceptChatRequest = async (id: string) => {
     try {
       await api(`/api/conversations/${encodeURIComponent(id)}/accept`, { method: "POST", body: JSON.stringify({}) });
@@ -1319,6 +1377,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           visibility: options.visibility,
           requestCorrection: options.requestCorrection,
           tags: options.tags,
+          imageUrl: options.image,
+          audioUrl: options.audio,
         }),
       });
       const post = toFeedPost(saved);
@@ -1465,7 +1525,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         <div className="sidebar-spacer" />
         <div className="sidebar-profile-row">
           <button className="sidebar-profile" type="button" aria-label={t("내 프로필")} onClick={() => goToSection("learn")}>
-            <Avatar name={profile.name} flag={me.country?.flag ?? "🌐"} accent="violet" size="sm" online photo={me.avatarUrl} />
+            <Avatar name={profile.name} flag={me.country?.flag ?? "🌐"} accent="violet" size="sm" online photo={me.avatarUrl} countryCode={me.country?.code} />
             <span><strong>{profile.name}</strong><small>{tx(languageName(me.nativeLanguages?.[0] ?? "ko"))} → {tx(languageName(me.learningLanguages?.[0]?.code ?? "en"))}</small></span>
           </button>
           <MenuPopover
@@ -1543,6 +1603,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onReport={() => setModal({ type: "report", target: detail.partner.name, targetId: detail.partner.id })}
                 following={followingIds.includes(detail.partner.id)}
                 onToggleFollow={(partner) => void toggleFollow(partner)}
+                posts={posts.filter((post) => post.authorId === detail.partner.id)}
+                onOpenPost={openPost}
                 connection={connectionWith(detail.partner)}
                 onSignal={(partner) => { signalPartner(partner); closeDetail(); }}
               />
@@ -1615,6 +1677,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 draft={draft}
                 setDraft={setDraft}
                 onSend={sendMessage}
+                onSendAttachment={sendAttachment}
                 onExchange={() => setModal({ type: "exchange" })}
                 onProfile={() => {
                   const partner = findPartner(selectedConversation?.partnerId);
@@ -1806,10 +1869,10 @@ function PartnerCard({
           disabled={!top}
           aria-label={t("{name} 프로필 보기", { name: partner.name })}
         >
-          <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} />
+          <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
           <div>
             <span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={17} className="verified" aria-label={t("인증됨")} /> : null}</span>
-            <p>{partner.flag} {tx(partner.country)}{partner.city ? ` · ${partner.city}` : ""}</p>
+            <p><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.country)}{partner.city ? ` · ${partner.city}` : ""}</p>
             <small className={partner.online ? "is-online" : ""}>
               {partner.online ? t("지금 접속 중") : t("오늘 접속함")}{localTime ? t(" · 현지 {localTime}", { localTime: localizeClock(localTime) }) : ""}
             </small>
@@ -2188,7 +2251,7 @@ function PostDetailView({
   const renderReply = (reply: PostReply, isChild: boolean) => (
     <article className={`thread-item reply ${isChild ? "child" : ""}`} key={reply.id}>
       <div className="thread-gutter">
-        <Avatar name={reply.author} flag={reply.flag} accent={reply.accent} size={isChild ? "xs" : "sm"} photo={reply.photo} />
+        <Avatar name={reply.author} flag={reply.flag} accent={reply.accent} size={isChild ? "xs" : "sm"} photo={reply.photo} countryCode={reply.countryCode} />
       </div>
       <div className="thread-body">
         <div className="thread-head">
@@ -2233,7 +2296,7 @@ function PostDetailView({
       <article className="thread-item">
         <div className="thread-gutter">
           <button type="button" className="thread-avatar" onClick={() => onProfile(post.authorId)} aria-label={t("{author} 프로필", { author: post.author })}>
-            <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} />
+            <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} countryCode={post.countryCode} />
           </button>
         </div>
         <div className="thread-body">
@@ -2365,6 +2428,8 @@ function ProfileDetailView({
   onToggleFollow,
   connection,
   onSignal,
+  posts,
+  onOpenPost,
 }: {
   partner: Partner;
   onBack: () => void;
@@ -2374,6 +2439,9 @@ function ProfileDetailView({
      같은 뜻이면서 서버에 남는 팔로우로 합쳤습니다. */
   following: boolean;
   onToggleFollow: (partner: Partner) => void;
+  /** 이 사람이 쓴 글. 프로필에서 바로 볼 수 있어야 어떤 사람인지 알 수 있습니다. */
+  posts: FeedPost[];
+  onOpenPost: (post: FeedPost) => void;
   /** 이 사람과 지금 어떤 사이인지. 대화를 열 수 있는지가 여기서 갈립니다. */
   connection: "chatting" | "matched" | "signaled" | "none";
   onSignal: (partner: Partner) => void;
@@ -2390,7 +2458,7 @@ function ProfileDetailView({
           </span>
           <p className="profile-head-handle">{partner.handle} · {partner.city}</p>
         </div>
-        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} />
+        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
       </header>
 
       <p className="profile-head-bio">{partner.bio}</p>
@@ -2431,7 +2499,7 @@ function ProfileDetailView({
       <section className="profile-detail-section">
         <h3>{t("언어 교환")}</h3>
         <div className="profile-language-grid">
-          <span><small>{t("가르칠 수 있어요")}</small><strong>{partner.flag} {tx(partner.native)}</strong><em>{t("원어민")}</em></span>
+          <span><small>{t("가르칠 수 있어요")}</small><strong><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.native)}</strong><em>{t("원어민")}</em></span>
           <span><small>{t("배우고 있어요")}</small><strong>🇰🇷 {tx(partner.learning)}</strong><em>{partner.level}</em></span>
         </div>
       </section>
@@ -2439,6 +2507,28 @@ function ProfileDetailView({
       <section className="profile-detail-section">
         <h3>{t("관심사")}</h3>
         <div className="interest-row large">{partner.interests.map((item) => <span key={item}>{item}</span>)}</div>
+      </section>
+
+      {/* 이 사람이 쓴 글. 어떤 사람인지 아는 데는 소개글보다 쓴 글이 더 도움이 됩니다. */}
+      <section className="profile-detail-section">
+        <h3>{t("{name}님의 글", { name: partner.name })}</h3>
+        {posts.length === 0 ? (
+          <p className="phrase-empty">{t("아직 올린 글이 없어요.")}</p>
+        ) : (
+          <div className="partner-post-list">
+            {posts.map((post) => (
+              <button type="button" key={post.id} onClick={() => onOpenPost(post)}>
+                <span className="partner-post-meta">{tx(post.time)} · {tx(post.language)}</span>
+                <span className="partner-post-text">{post.text}</span>
+                <span className="partner-post-stats">
+                  <span><Heart size={13} /> {post.likes}</span>
+                  <span><MessageCircle size={13} /> {post.comments}</span>
+                  <span><PenLine size={13} /> {post.corrections}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="profile-detail-section">
@@ -2889,7 +2979,7 @@ function CommunityView({
             <article className="feed-post" key={post.id}>
               <header className="post-header">
                 <button className="post-author" type="button" onClick={() => onProfile(post.authorId)}>
-                  <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" online={post.authorId === "maya"} photo={post.photo} />
+                  <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" online={post.authorId === "maya"} photo={post.photo} countryCode={post.countryCode} />
                   <span><strong>{post.author}{post.authorId === "maya" ? <BadgeCheck size={14} className="verified" /> : null}</strong><small>{post.handle} · {tx(post.time)}</small></span>
                 </button>
                 <div className="post-meta">
@@ -2917,6 +3007,10 @@ function CommunityView({
               {post.image ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img className="post-image" src={post.image} alt="" loading="lazy" />
+              ) : null}
+              {post.audio ? (
+                // eslint-disable-next-line jsx-a11y/media-has-caption
+                <audio className="post-audio" src={post.audio} controls preload="none" />
               ) : null}
               <div className="post-tags">{post.tags.map((tag) => <button type="button" key={tag} className={activeTag === tag ? "active" : ""} onClick={() => onTagSelect(activeTag === tag ? null : tag)}>{tag}</button>)}</div>
               {post.visual ? (
@@ -2950,6 +3044,18 @@ function CommunityView({
         <div className="feed-sentinel" ref={sentinel} aria-hidden="true">
           <span className="feed-spinner" />
         </div>
+      ) : filteredPosts.length === 0 ? (
+        <div className="empty-state">
+          <UsersRound size={30} strokeWidth={1.5} />
+          <strong>{tab === "following" ? t("팔로우한 사람의 글이 없어요") : activeTag ? t("이 주제의 글이 없어요") : t("아직 글이 없어요")}</strong>
+          <p>
+            {tab === "following"
+              ? t("프로필에서 팔로우하면 그 사람의 글이 여기 모여요.")
+              : activeTag
+                ? t("다른 주제를 골라보거나 직접 글을 올려보세요.")
+                : t("첫 글을 올려보세요. 원어민이 고쳐줄 수 있어요.")}
+          </p>
+        </div>
       ) : (
         <p className="feed-end">{t("모든 글을 확인했어요 · {n}개", { n: filteredPosts.length })}</p>
       )}
@@ -2969,6 +3075,7 @@ function ChatsView({
   draft,
   setDraft,
   onSend,
+  onSendAttachment,
   onExchange,
   onProfile,
   onReport,
@@ -2999,6 +3106,7 @@ function ChatsView({
   draft: string;
   setDraft: (text: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
+  onSendAttachment: (kind: "image" | "voice", media: string, label: string) => Promise<void>;
   onExchange: () => void;
   onProfile: () => void;
   onReport: () => void;
@@ -3008,7 +3116,70 @@ function ChatsView({
   const [listQuery, setListQuery] = useState("");
   const [translatedMessages, setTranslatedMessages] = useState<Set<string>>(new Set(["m1"]));
   const [messageTranslations, setMessageTranslations] = useState<Record<string, string>>({});
-  const [coachOpen, setCoachOpen] = useState(true);
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+
+  /**
+   * 사진 보내기.
+   *
+   * 원본을 그대로 보내면 몇 MB 라 서버에 담기지 않습니다. 긴 변 1280px 로 줄이고
+   * JPEG 로 다시 눌러 담습니다 — 대화 사진으로는 충분하고 보통 100~200KB 입니다.
+   */
+  const pickPhoto = async (file: File) => {
+    if (!file.type.startsWith("image/")) return onToast(t("사진 파일만 보낼 수 있어요"));
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 1280 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const media = canvas.toDataURL("image/jpeg", 0.75);
+      if (media.length > 700000) return onToast(t("사진이 너무 커요. 더 작은 사진을 골라주세요."));
+      await onSendAttachment("image", media, t("사진"));
+    } catch {
+      onToast(t("사진을 읽지 못했어요."));
+    }
+  };
+
+  /** 음성 메시지 — 브라우저 녹음기를 그대로 씁니다. 다시 누르면 멈추고 보냅니다. */
+  const toggleRecording = async () => {
+    if (recorderRef.current) {
+      recorderRef.current.stop();
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      return onToast(t("이 브라우저에서는 녹음을 쓸 수 없어요"));
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: BlobPart[] = [];
+      recorder.ondataavailable = (event) => chunks.push(event.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recorderRef.current = null;
+        setRecording(false);
+        const reader = new FileReader();
+        reader.onload = () => {
+          const media = String(reader.result || "");
+          if (media.length > 700000) return onToast(t("녹음이 너무 길어요. 짧게 다시 녹음해 주세요."));
+          void onSendAttachment("voice", media, t("음성 메시지"));
+        };
+        reader.readAsDataURL(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+      onToast(t("녹음 중이에요. 다시 누르면 보내요."));
+    } catch {
+      onToast(t("마이크를 쓸 수 없어요. 브라우저 권한을 확인해 주세요."));
+    }
+  };
 
   /** 메시지 번역 — 열려 있으면 닫고, fixture 번역이 없으면 mock 번역 API 를 호출합니다. */
   const translateMessage = async (message: ChatMessage) => {
@@ -3138,7 +3309,7 @@ function ChatsView({
                 className={`conversation-item ${selected.id === conversation.id ? "active" : ""}`}
                 onClick={() => onSelect(conversation.id)}
               >
-                <Avatar name={conversation.name} flag={conversation.flag} accent={conversation.accent} size="lg" online={conversation.online} photo={conversation.photo} />
+                <Avatar name={conversation.name} flag={conversation.flag} accent={conversation.accent} size="lg" online={conversation.online} photo={conversation.photo} countryCode={conversation.countryCode} />
                 <span className="conversation-copy">
                   <span className="conversation-name"><strong>{conversation.name}</strong>{mutedChatIds.has(conversation.id) ? <BellOff size={12} className="conversation-muted" /> : null}<small>{tx(conversation.time)}</small></span>
                   <span className={conversation.typing ? "typing" : ""}>{conversation.typing ? t("입력 중…") : conversation.preview}</span>
@@ -3168,7 +3339,7 @@ function ChatsView({
         <header className="thread-header">
           <button className="mobile-back" type="button" onClick={onBack} aria-label={t("대화 목록으로")}><ArrowLeft size={21} /></button>
           <button className="thread-person" type="button" onClick={onProfile}>
-            <Avatar name={selected.name} flag={selected.flag} accent={selected.accent} size="sm" online={selected.online} photo={selected.photo} />
+            <Avatar name={selected.name} flag={selected.flag} accent={selected.accent} size="sm" online={selected.online} photo={selected.photo} countryCode={selected.countryCode} />
             <span><strong>{selected.name}</strong><small>{selected.online ? t("온라인 · 영어 ⇄ 한국어") : t("최근 활동 어제")}</small></span>
           </button>
           <div className="thread-actions">
@@ -3237,7 +3408,7 @@ function ChatsView({
             if (message.correction) {
               return (
                 <div className="message-row correction-message" key={message.id}>
-                  <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} />
+                  <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} />
                   <div className="chat-correction-card">
                     <span className="correction-label"><PenLine size={14} /> {t("{name}님이 문장을 고쳤어요", { name: selected.name })}</span>
                     <p className="before">{message.correction.original}</p>
@@ -3251,11 +3422,19 @@ function ChatsView({
             }
             return (
               <div className={`message-row ${message.mine ? "mine" : "theirs"}`} key={message.id}>
-                {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} /> : null}
+                {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} /> : null}
                 <div className="message-stack">
                   <div className="message-bubble">
                     {message.voice ? <button className="voice-message" type="button" onClick={() => { if (message.text) speakText(message.text); onToast(t("음성 메시지를 재생 중이에요")); }}><span className="play-dot"><Play size={13} fill="currentColor" /></span><span className="waveform"><i /><i /><i /><i /><i /><i /><i /><i /><i /></span><small>{message.voice}</small></button> : null}
-                    {message.text ? <p>{message.text}</p> : null}
+                    {message.kind === "image" && message.media ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img className="message-media" src={message.media} alt={t("사진")} loading="lazy" />
+                    ) : null}
+                    {message.kind === "voice" && message.media ? (
+                      // eslint-disable-next-line jsx-a11y/media-has-caption
+                      <audio className="message-audio" src={message.media} controls preload="none" />
+                    ) : null}
+                    {message.text && !message.kind ? <p>{message.text}</p> : null}
                   </div>
                   {translatedMessages.has(message.id) && (messageTranslations[message.id] ?? message.translated) ? <div className="message-translation"><Languages size={13} /> {messageTranslations[message.id] ?? message.translated}</div> : null}
                   <div className="message-tools">
@@ -3269,17 +3448,58 @@ function ChatsView({
               </div>
             );
           })}
-          {selected.typing ? <div className="typing-indicator"><Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} /><span><i /><i /><i /></span><small>{t("{name}님이 입력 중", { name: selected.name })}</small></div> : null}
+          {selected.typing ? <div className="typing-indicator"><Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} /><span><i /><i /><i /></span><small>{t("{name}님이 입력 중", { name: selected.name })}</small></div> : null}
         </div>
 
         {selectedIsRequest ? <div className="request-composer-lock"><LockKeyhole size={17} /><span><strong>{tx(msg("요청을 수락하면 답장할 수 있어요"))}</strong><small>{tx(msg("삭제하거나 수락해도 상대에게 별도 알림은 가지 않아요."))}</small></span></div> : <form className="message-composer" onSubmit={onSend}>
-          <div className="writing-language"><span>EN</span> {t("영어로 작성 중")} <ChevronDown size={13} /></div>
           <div className="composer-row">
+            <input
+              ref={photoInputRef}
+              className="sr-only"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              aria-label={t("사진 고르기")}
+              onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void pickPhoto(file); }}
+            />
+            <div className="composer-attach-wrap">
+              <button
+                type="button"
+                className={attachOpen ? "composer-attach active" : "composer-attach"}
+                aria-label={t("첨부")}
+                aria-haspopup="menu"
+                aria-expanded={attachOpen}
+                onClick={() => setAttachOpen(!attachOpen)}
+              >
+                <Plus size={19} />
+              </button>
+              {attachOpen ? (
+                <>
+                  <button type="button" className="menu-scrim" aria-label={t("닫기")} onClick={() => setAttachOpen(false)} />
+                  <div className="composer-attach-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); photoInputRef.current?.click(); }}>
+                      <ImageIcon size={17} /> {t("사진")}
+                    </button>
+                    <button type="button" role="menuitem" className={recording ? "recording" : ""} onClick={() => { setAttachOpen(false); void toggleRecording(); }}>
+                      <Mic size={17} /> {recording ? t("녹음 멈추기") : t("음성")}
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
             <label className="message-input">
               <span className="sr-only">{t("메시지 입력")}</span>
               <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t("{name}님에게 메시지 보내기", { name: selected.name })} rows={1} maxLength={LIMITS.message} />
               <button type="button" aria-label={t("이모지")} onClick={() => setDraft(`${draft} 😊`)}><Smile size={18} /></button>
             </label>
+            <button
+              type="button"
+              className={coachOpen ? "composer-coach active" : "composer-coach"}
+              aria-label={t("대화 코치")}
+              aria-pressed={coachOpen}
+              onClick={() => { const next = !coachOpen; setCoachOpen(next); if (next && !supportResult) void requestConversationSupport(false); }}
+            >
+              <WandSparkles size={18} />
+            </button>
             <button className="send-button" type="submit" disabled={!draft.trim()} aria-label={t("메시지 보내기")}><Send size={18} /></button>
           </div>
         </form>}
@@ -3630,6 +3850,14 @@ function LearnView({
         onSelect={setProfileTab}
       />
 
+      {profileTab === "posts" && myPostList.length === 0 ? (
+        <div className="empty-state">
+          <PenLine size={30} strokeWidth={1.5} />
+          <strong>{t("아직 쓴 글이 없어요")}</strong>
+          <p>{t("연습하고 싶은 문장을 짧게 올려보세요. 원어민이 고쳐줄 수 있어요.")}</p>
+        </div>
+      ) : null}
+
       {profileTab === "posts" ? (
         <div className="profile-posts">
           {myPostList.map((post) => (
@@ -3692,6 +3920,9 @@ function LearnView({
         {/* 지금까지 "받은 교정 N개"는 숫자뿐이고 실체가 없었습니다. 여기서 실제로 읽습니다. */}
         <section className="received-corrections-card">
           <header><span><strong>{t("받은 교정")}</strong><small>{t("{n}개 · 내 문장이 어떻게 바뀌었는지", { n: corrections.length })}</small></span></header>
+          {corrections.length === 0 ? (
+            <p className="phrase-empty">{t("아직 받은 교정이 없어요. 글을 올릴 때 교정을 부탁해 보세요.")}</p>
+          ) : null}
           <ul className="received-correction-list">
             {corrections.map((item) => (
               <li key={item.id}>
@@ -3971,7 +4202,7 @@ function LikeMeta({ partner, time }: { partner: Partner; time: string }) {
   const localTime = useLocalTime(partner.timeOffset);
   return (
     <small>
-      {partner.flag} {tx(partner.country)}
+      <CountryFlag code={partner.countryCode} size={15} /> {tx(partner.country)}
       {localTime ? t(" · 현지 {localTime}", { localTime: localizeClock(localTime) }) : ""}
       {time ? ` · ${time}` : ""}
     </small>
@@ -4016,7 +4247,7 @@ function LikesModal({
           {list.map(({ partner, time, note }) => (
             <li key={partner.id}>
               <button type="button" className="likes-row" onClick={() => onProfile(partner)}>
-                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} />
+                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
                 <span className="likes-copy">
                   <strong>{partner.name}</strong>
                   <LikeMeta partner={partner} time={time} />
@@ -4093,7 +4324,7 @@ function NewChatModal({
           {candidates.map((partner) => (
             <li key={partner.id}>
               <button type="button" onClick={() => onPick(partner)}>
-                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} />
+                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
                 <span>
                   <strong>{partner.name}</strong>
                   <small>{tx(partner.native)} ⇄ {tx(partner.learning)} · {partner.interests.slice(0, 2).join(" · ")}</small>
@@ -4141,7 +4372,7 @@ function PartnerListModal({
           return (
             <li key={partner.id} className={isCurrent ? "current" : ""}>
               <button type="button" className="partner-list-row" onClick={() => onJump(position)}>
-                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} />
+                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
                 <span className="partner-list-copy">
                   <strong>{partner.name}</strong>
                   <small>{t("{native} 가르치고 {learning} 배워요", { native: tx(partner.native), learning: tx(partner.learning) })}</small>
@@ -4174,7 +4405,7 @@ function ProfileModal({ partner, following, onToggleFollow, onStartChat, onRepor
     <div className="profile-modal-content">
       <div className={`profile-cover cover-${partner.accent}`}><span className="cover-pattern" /></div>
       <div className="profile-modal-head">
-        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} />
+        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
         <div><span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={18} className="verified" /> : null}</span><p>{partner.handle} · {partner.city}</p></div>
         <div className="profile-head-actions"><button className="primary-button" type="button" onClick={() => onStartChat(partner)}><MessageCircle size={17} /> {t("대화 시작")}</button><button className={following ? "secondary-button active" : "secondary-button"} type="button" aria-pressed={following} onClick={() => onToggleFollow(partner)}><UserPlus size={16} /> {following ? t("팔로잉") : t("팔로우")}</button><button className="secondary-button" type="button" onClick={onReport}><Flag size={16} /> {t("신고")}</button></div>
       </div>
@@ -4182,7 +4413,7 @@ function ProfileModal({ partner, following, onToggleFollow, onStartChat, onRepor
       <div className="profile-modal-grid">
         <div className="profile-main">
           <section><h3>{t("자기소개")}</h3><p>{partner.bio}</p></section>
-          <section><h3>{t("언어 교환")}</h3><div className="profile-language-grid"><span><small>{t("가르칠 수 있어요")}</small><strong>{partner.flag} {tx(partner.native)}</strong><em>{t("원어민")}</em></span><span><small>{t("배우고 있어요")}</small><strong>🇰🇷 {tx(partner.learning)}</strong><em>{partner.level}</em></span></div></section>
+          <section><h3>{t("언어 교환")}</h3><div className="profile-language-grid"><span><small>{t("가르칠 수 있어요")}</small><strong><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.native)}</strong><em>{t("원어민")}</em></span><span><small>{t("배우고 있어요")}</small><strong>🇰🇷 {tx(partner.learning)}</strong><em>{partner.level}</em></span></div></section>
           <section><h3>{t("관심사")}</h3><div className="interest-row large">{partner.interests.map((item) => <span key={item}>{item}</span>)}</div></section>
         </div>
         <aside className="profile-details"><h3>{t("잘 맞는 이유")}</h3><p><Clock3 size={16} /><span><strong>{t("활동 시간")}</strong><small>{partner.activeTime}</small></span></p><p><Trophy size={16} /><span><strong>{t("학습 목표")}</strong><small>{partner.goal}</small></span></p><p><PenLine size={16} /><span><strong>{t("교정 스타일")}</strong><small>{t("중요한 오류를 대화 후에")}</small></span></p></aside>
@@ -4325,6 +4556,49 @@ function MatchingPreferencesModal({
   );
 }
 
+/**
+ * 고른 사진을 보낼 수 있는 크기로 줄입니다.
+ *
+ * 원본은 몇 MB 라 그대로는 담기지 않습니다. 긴 변 1280px 로 줄이고 JPEG 로
+ * 다시 눌러 담으면 보통 100~200KB 입니다. 저장소 버킷이 생기면 이 함수 대신
+ * 업로드하고 받은 주소를 쓰면 됩니다.
+ */
+async function shrinkImage(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1280 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL("image/jpeg", 0.75);
+}
+
+/** 브라우저 녹음기. 멈추면 데이터 URI 를 돌려줍니다. */
+function startRecorder(onDone: (media: string) => void, onFail: () => void) {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) { onFail(); return null; }
+  let recorder: MediaRecorder | null = null;
+  void navigator.mediaDevices
+    .getUserMedia({ audio: true })
+    .then((stream) => {
+      recorder = new MediaRecorder(stream);
+      const chunks: BlobPart[] = [];
+      recorder.ondataavailable = (event) => chunks.push(event.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const reader = new FileReader();
+        reader.onload = () => onDone(String(reader.result || ""));
+        reader.readAsDataURL(new Blob(chunks, { type: recorder?.mimeType || "audio/webm" }));
+      };
+      recorder.start();
+    })
+    .catch(onFail);
+  return () => recorder?.stop();
+}
+
+/** 붙일 수 있는 파일 크기 상한. 문서 한도(1MB)에 여유를 둡니다. */
+const MAX_ATTACHMENT = 700000;
+
 /** 글에 달 수 있는 주제. 서버의 tags 로 그대로 갑니다. */
 const POST_TOPICS: MessageKey[] = [
   msg("오늘의연습"),
@@ -4343,6 +4617,35 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
   const [visibility, setVisibility] = useState<PublishOptions["visibility"]>("public");
   const [topics, setTopics] = useState<string[]>([]);
   const [topicsOpen, setTopicsOpen] = useState(false);
+  const [image, setImage] = useState("");
+  const [audio, setAudio] = useState("");
+  const [recording, setRecording] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const stopRef = useRef<(() => void) | null>(null);
+
+  const pickPhoto = async (file: File) => {
+    try {
+      const media = await shrinkImage(file);
+      if (media.length > MAX_ATTACHMENT) return onToast(t("사진이 너무 커요. 더 작은 사진을 골라주세요."));
+      setImage(media);
+    } catch {
+      onToast(t("사진을 읽지 못했어요."));
+    }
+  };
+
+  const toggleRecording = () => {
+    if (stopRef.current) { stopRef.current(); stopRef.current = null; setRecording(false); return; }
+    const stop = startRecorder(
+      (media) => {
+        setRecording(false);
+        stopRef.current = null;
+        if (media.length > MAX_ATTACHMENT) return onToast(t("녹음이 너무 길어요. 짧게 다시 녹음해 주세요."));
+        setAudio(media);
+      },
+      () => { setRecording(false); stopRef.current = null; onToast(t("마이크를 쓸 수 없어요. 브라우저 권한을 확인해 주세요.")); },
+    );
+    if (stop) { stopRef.current = stop; setRecording(true); onToast(t("녹음 중이에요. 다시 누르면 멈춰요.")); }
+  };
 
   const toggleTopic = (topic: string) =>
     setTopics((current) =>
@@ -4361,7 +4664,37 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
         <small>{text.length}/{LIMITS.post}</small>
       </label>
 
+      {image ? (
+        <div className="compose-preview">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={image} alt="" />
+          <button type="button" aria-label={t("사진 빼기")} onClick={() => setImage("")}><X size={15} /></button>
+        </div>
+      ) : null}
+      {audio ? (
+        <div className="compose-preview compose-preview-audio">
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <audio src={audio} controls preload="none" />
+          <button type="button" aria-label={t("음성 빼기")} onClick={() => setAudio("")}><X size={15} /></button>
+        </div>
+      ) : null}
+
+      <input
+        ref={photoInputRef}
+        className="sr-only"
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        aria-label={t("사진 고르기")}
+        onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void pickPhoto(file); }}
+      />
+
       <div className="compose-options">
+        <button type="button" className="compose-option" onClick={() => photoInputRef.current?.click()}>
+          <ImageIcon size={16} /> {t("사진")}
+        </button>
+        <button type="button" className={recording ? "compose-option recording" : "compose-option"} onClick={toggleRecording}>
+          <Mic size={16} /> {recording ? t("녹음 멈추기") : t("음성")}
+        </button>
         <button type="button" className="compose-option" onClick={() => setVisibility(visibility === "public" ? "partners" : "public")}>
           <Users size={16} /> {visibility === "public" ? t("전체 공개") : t("파트너만 공개")} <ChevronDown size={14} />
         </button>
@@ -4396,7 +4729,7 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
 
       <div className="modal-footer">
         <span className="safety-note"><ShieldCheck size={14} /> {t("연락처와 정밀 위치는 공유하지 마세요.")}</span>
-        <button className="primary-button" type="button" disabled={!canSubmit(text, "post")} onClick={() => { const checked = checkText(text, "post"); if (!checked.ok) { if (checked.error) onToast(checked.error); return; } onPublish(checked.value, { requestCorrection: correction, visibility, tags: topics }); }}>{t("게시하기")} <Send size={16} /></button>
+        <button className="primary-button" type="button" disabled={!canSubmit(text, "post")} onClick={() => { const checked = checkText(text, "post"); if (!checked.ok) { if (checked.error) onToast(checked.error); return; } onPublish(checked.value, { requestCorrection: correction, visibility, tags: topics, image, audio }); }}>{t("게시하기")} <Send size={16} /></button>
       </div>
     </div>
   );
@@ -4428,13 +4761,13 @@ function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, 
       <div className="search-chips"><span>{t("빠른 검색")}</span>{[t("영어 원어민"), t("지금 온라인"), t("#여행"), t("저장한 표현")].map((item) => <button type="button" key={item} onClick={() => setQuery(item.replace("#", ""))}>{item}</button>)}</div>
       <section>
         <h3>{query ? t("“{query}” 검색 결과", { query }) : t("추천 파트너")}</h3>
-        {partnerResults.map((partner) => <button className="search-result" type="button" key={partner.id} aria-label={t("{name} 프로필 보기", { name: partner.name })} onClick={() => onOpenProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning} · {partner.interests.join(" · ")}</small></span><Pill tone="success">{partner.compatibility}%</Pill><ChevronRight size={16} /></button>)}
+        {partnerResults.map((partner) => <button className="search-result" type="button" key={partner.id} aria-label={t("{name} 프로필 보기", { name: partner.name })} onClick={() => onOpenProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning} · {partner.interests.join(" · ")}</small></span><Pill tone="success">{partner.compatibility}%</Pill><ChevronRight size={16} /></button>)}
         {nothingFound ? <div className="empty-search"><Search size={28} /><strong>{t("검색 결과가 없어요")}</strong><p>{t("언어나 관심사를 더 짧게 입력해보세요.")}</p></div> : null}
       </section>
       {postResults.length ? (
         <section>
           <h3>{t("게시물")}</h3>
-          {postResults.map((post) => <button className="search-result" type="button" key={post.id} onClick={() => onOpenPost(post)}><Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} /><span><strong>{post.author}</strong><small>{post.text.length > 64 ? `${post.text.slice(0, 64)}…` : post.text}</small></span><ChevronRight size={16} /></button>)}
+          {postResults.map((post) => <button className="search-result" type="button" key={post.id} onClick={() => onOpenPost(post)}><Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} countryCode={post.countryCode} /><span><strong>{post.author}</strong><small>{post.text.length > 64 ? `${post.text.slice(0, 64)}…` : post.text}</small></span><ChevronRight size={16} /></button>)}
         </section>
       ) : null}
       {phraseResults.length ? (

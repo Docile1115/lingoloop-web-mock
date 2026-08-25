@@ -75,7 +75,7 @@ export interface ApiProfile {
 export interface ApiPost {
   id: string;
   authorId: string;
-  author: { id: string; name: string; handle: string; flag: string; avatarUrl?: string };
+  author: { id: string; name: string; handle: string; flag: string; avatarUrl?: string; countryCode?: string };
   text: string;
   language: string;
   targetLanguage: string;
@@ -83,6 +83,7 @@ export interface ApiPost {
   visibility: string;
   requestCorrection: boolean;
   imageUrl?: string;
+  audioUrl?: string;
   likes: number;
   comments: number;
   corrections: number;
@@ -95,8 +96,9 @@ export interface ApiMessage {
   id: string;
   conversationId: string;
   senderId: string;
-  type: "text" | "voice";
+  type: "text" | "voice" | "image";
   text: string;
+  media?: string;
   sentAt: string;
   status: string;
   readByPartner?: boolean;
@@ -219,6 +221,7 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
     compatibility: score,
     accent: accentFor(profile.id),
     photo: profile.avatarUrl || "",
+    countryCode: profile.country?.code || "",
     goal: learning?.goal || "",
     activeTime: (profile.availability || [])
       .map((code) => AVAILABILITY_NAMES[code])
@@ -241,7 +244,9 @@ export function toFeedPost(post: ApiPost): FeedPost {
     flag: post.author.flag || "🌐",
     accent: accentFor(post.authorId),
     photo: post.author.avatarUrl || "",
+    countryCode: post.author.countryCode || "",
     image: post.imageUrl || "",
+    audio: post.audioUrl || "",
     time: relativeTime(post.createdAt),
     language: languageName(post.language),
     level: "",
@@ -267,6 +272,8 @@ export function toChatMessage(message: ApiMessage, myId: string): ChatMessage {
     text: message.text,
     time: clockTime(message.sentAt),
     readByPartner: message.readByPartner,
+    media: message.media || "",
+    kind: message.type === "text" ? undefined : message.type,
   };
 }
 
@@ -278,6 +285,7 @@ export function toConversation(conversation: ApiConversation, messages: ChatMess
     name: partner?.name || t("알 수 없는 상대"),
     flag: partner?.country?.flag || "🌐",
     photo: partner?.avatarUrl || "",
+    countryCode: partner?.country?.code || "",
     accent: accentFor(partner?.id || conversation.id),
     preview: conversation.preview,
     time: relativeTime(conversation.updatedAt),
@@ -297,7 +305,7 @@ export interface ApiReply {
   parentId: string;
   likes: number;
   createdAt: string;
-  author: { id: string; name: string | null; handle: string | null; flag: string; avatarUrl?: string };
+  author: { id: string; name: string | null; handle: string | null; flag: string; avatarUrl?: string; countryCode?: string };
 }
 
 export interface ApiReceivedLike {
@@ -335,6 +343,7 @@ export function toPostReply(reply: ApiReply): PostReply {
     flag: reply.author?.flag || "🌐",
     accent: accentFor(reply.authorId),
     photo: reply.author?.avatarUrl || "",
+    countryCode: reply.author?.countryCode || "",
     time: relativeTime(reply.createdAt),
     text: reply.text,
     likes: reply.likes,

@@ -23,6 +23,8 @@ export type Partner = {
   activeTime: string;
   /** 프로필 사진. */
   photo?: string;
+  /** 국가 코드(KR·JP…). 국기 아이콘을 고르는 값입니다. */
+  countryCode?: string;
   balance: string;
   verified?: boolean;
 };
@@ -51,8 +53,12 @@ export type FeedPost = {
   requestCorrection?: boolean;
   /** 글쓴이 프로필 사진. */
   photo?: string;
+  /** 글쓴이 국가 코드. */
+  countryCode?: string;
   /** 글에 붙인 사진. */
   image?: string;
+  /** 글에 붙인 음성. */
+  audio?: string;
   visual?: {
     emoji: string;
     eyebrow: string;
@@ -73,6 +79,10 @@ export type ChatMessage = {
   time: string;
   /** 내 메시지를 상대가 읽었는가. 내 메시지에만 뜻이 있습니다. */
   readByPartner?: boolean;
+  /** 붙인 사진·음성(데이터 URI 또는 주소). */
+  media?: string;
+  /** 첨부 종류. */
+  kind?: "image" | "voice";
   translated?: string;
   voice?: string;
   correction?: {
@@ -90,6 +100,8 @@ export type Conversation = {
   flag: string;
   /** 상대 프로필 사진. */
   photo?: string;
+  /** 상대 국가 코드. */
+  countryCode?: string;
   accent: Accent;
   preview: string;
   time: string;
@@ -785,6 +797,8 @@ export type PostReply = {
   replies?: PostReply[];
   /** 작성자 프로필 사진. */
   photo?: string;
+  /** 작성자 국가 코드. */
+  countryCode?: string;
 };
 
 /** 게시물별 답글. 상세 화면에서 원글 아래에 이어집니다. */

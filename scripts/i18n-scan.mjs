@@ -40,9 +40,15 @@ const files = SRC_DIRS.flatMap((d) => walk(join(ROOT, d))).filter(
 
 const keys = new Set();
 const where = new Map();
-/** 주석 안의 예시 코드까지 키로 걷지 않도록 먼저 지웁니다. */
+/**
+ * 주석 안의 예시 코드까지 키로 걷지 않도록 먼저 지웁니다.
+ *
+ * 여는 표시 뒤에 공백이나 * 가 와야 진짜 주석으로 봅니다 — 그러지 않으면
+ * accept="image/*" 같은 문자열의 /* 를 주석 시작으로 읽고 그 뒤 문구를 통째로
+ * 삼킵니다(실제로 t() 몇 개가 조용히 사라졌습니다).
+ */
 function stripComments(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  return src.replace(/\/\*(?=[\s*])[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
 
 for (const file of files) {
