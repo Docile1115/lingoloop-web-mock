@@ -5,12 +5,14 @@ import {
   CheckCircle2,
   Compass,
   Database,
+  Flag,
   Heart,
   Languages,
   LockKeyhole,
   LogOut,
   Mail,
   MessageCircle,
+  MoreHorizontal,
   PenLine,
   Plus,
   Radio,
@@ -20,12 +22,13 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   User,
   UsersRound,
   X,
   type LucideIcon,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import styles from "./ProductionLingoLoopApp.module.css";
 
 type Tab = "partners" | "community" | "chats" | "rooms" | "profile";
@@ -229,6 +232,13 @@ const LANGUAGE_LABELS: Record<string, string> = {
   de: "Deutsch",
 };
 
+/** 서버가 learningLanguages.level 로 저장하는 값들. 화면에는 사람이 읽는 말로 보여줍니다. */
+const LEVEL_LABELS: Record<string, string> = {
+  beginner: "입문",
+  intermediate: "중급",
+  advanced: "고급",
+};
+
 const navItems: Array<{ id: Tab; label: string; mobileLabel: string; icon: LucideIcon }> = [
   { id: "partners", label: "파트너", mobileLabel: "파트너", icon: Compass },
   { id: "community", label: "커뮤니티", mobileLabel: "피드", icon: UsersRound },
@@ -358,6 +368,73 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserProfile) 
   );
 }
 
+/**
+ * 게시물 ··· 메뉴. 내 글과 남의 글은 할 수 있는 일이 다릅니다 —
+ * 내 글에 "신고하기"가 뜨면 안 되고, 남의 글에 "삭제하기"가 뜨면 안 됩니다.
+ */
+function PostMenu({ mine, onDelete, onReport }: { mine: boolean; onDelete: () => void; onReport: () => void }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: MouseEvent) => {
+      if (wrap.current && !wrap.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={styles.postMenu} ref={wrap}>
+      <button type="button" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label="게시물 메뉴">
+        <MoreHorizontal size={18} />
+      </button>
+      {open ? (
+        <div className={styles.postMenuList} role="menu">
+          {mine ? (
+            <button type="button" role="menuitem" className={styles.danger} onClick={() => { setOpen(false); onDelete(); }}>
+              <Trash2 size={15} /> 삭제하기
+            </button>
+          ) : (
+            <button type="button" role="menuitem" className={styles.danger} onClick={() => { setOpen(false); onReport(); }}>
+              <Flag size={15} /> 신고하기
+            </button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 되돌릴 수 없는 행동을 한 번 묻습니다. */
+function ConfirmDialog({ title, body, confirmLabel, onCancel, onConfirm }: { title: string; body: string; confirmLabel: string; onCancel: () => void; onConfirm: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div className={styles.confirmBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <div className={styles.confirmCard} role="dialog" aria-modal="true" aria-label={title}>
+        <h2>{title}</h2>
+        <p>{body}</p>
+        <div className={styles.confirmActions}>
+          <button type="button" className={styles.secondaryButton} onClick={onCancel}>취소</button>
+          <button type="button" className={styles.dangerButton} onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EmptyState({ icon: Icon, title, description, action }: { icon: LucideIcon; title: string; description: string; action?: ReactNode }) {
   return (
     <div className={styles.emptyState}>
@@ -401,6 +478,8 @@ function OperationalApp({
   const [roomTitle, setRoomTitle] = useState("");
   const [roomTopic, setRoomTopic] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  /* 삭제를 누른 글. 되돌릴 수 없어서 확인을 한 번 거칩니다. */
+  const [postPendingDelete, setPostPendingDelete] = useState<Post | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -409,6 +488,12 @@ function OperationalApp({
     name: initialUser.name,
     bio: initialUser.bio,
     city: initialUser.city || "",
+    // 매칭은 "내가 쓰는 말"과 "배우려는 말"이 서로 맞물릴 때만 성립합니다.
+    // 이 둘을 고칠 수 없으면 모두가 가입 기본값에 묶여 추천이 영영 비게 됩니다.
+    nativeLanguage: initialUser.nativeLanguages?.[0] || "ko",
+    learningLanguage: initialUser.learningLanguages?.[0]?.code || "en",
+    learningLevel: initialUser.learningLanguages?.[0]?.level || "beginner",
+    age: initialUser.age || 18,
   });
   const sessionEmail = initialUser.email;
   const sessionEmailVerified = initialUser.emailVerified;
@@ -685,16 +770,59 @@ function OperationalApp({
     }
   };
 
+  const deletePost = async (post: Post) => {
+    setBusy(true);
+    try {
+      await apiRequest("/api/posts/" + encodeURIComponent(post.id), { method: "DELETE" });
+      setPosts((items) => items.filter((item) => item.id !== post.id));
+      showToast("글을 삭제했어요.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "글을 삭제하지 못했습니다.");
+    } finally {
+      setPostPendingDelete(null);
+      setBusy(false);
+    }
+  };
+
   const saveProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBusy(true);
     try {
+      if (profileDraft.nativeLanguage === profileDraft.learningLanguage) {
+        setError("모국어와 배우는 언어는 서로 달라야 해요.");
+        return;
+      }
       const result = await apiRequest<UserProfile>("/api/profile", {
         method: "PATCH",
-        body: JSON.stringify(profileDraft),
+        body: JSON.stringify({
+          name: profileDraft.name,
+          bio: profileDraft.bio,
+          city: profileDraft.city,
+          age: Number(profileDraft.age),
+          nativeLanguages: [profileDraft.nativeLanguage],
+          learningLanguages: [
+            {
+              code: profileDraft.learningLanguage,
+              level: profileDraft.learningLevel,
+              goal: initialUser.learningLanguages?.[0]?.goal || "일상 대화",
+            },
+          ],
+        }),
       });
       setUser(result);
       onUserChanged(result);
+      // "배우려는 말"과 매칭 조건의 targetLanguages 는 같은 것을 뜻합니다.
+      // 따로 두면 프로필에서 일본어로 바꿔도 추천은 계속 영어 파트너를 줍니다.
+      if (preferences && preferences.targetLanguages[0] !== profileDraft.learningLanguage) {
+        const synced = { ...preferences, targetLanguages: [profileDraft.learningLanguage] };
+        const saved = await apiRequest<{ preferences: MatchingPreferences }>("/api/matching/preferences", {
+          method: "POST",
+          body: JSON.stringify(synced),
+        });
+        setPreferences(saved.preferences);
+        const refreshed = await apiRequest<{ recommendations: MatchRecommendation[] }>("/api/matching/daily");
+        setMatches(refreshed.recommendations || []);
+      }
       showToast("프로필을 계정에 저장했어요.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "프로필을 저장하지 못했습니다.");
@@ -856,6 +984,11 @@ function OperationalApp({
                       <span className={styles.postAvatar}>{post.author.name.slice(0, 1)}<i>{post.author.flag}</i></span>
                       <div><strong>{post.author.name}</strong><small>{post.author.handle} · {relativeTime(post.createdAt)}</small></div>
                       <span className={styles.languageTag}>{languageLabel(post.language)}</span>
+                      <PostMenu
+                        mine={post.authorId === user.id}
+                        onDelete={() => setPostPendingDelete(post)}
+                        onReport={() => showToast("신고를 접수했어요. 운영팀이 확인합니다.")}
+                      />
                     </header>
                     <p>{post.text}</p>
                     <div className={styles.tags}>{post.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
@@ -1008,6 +1141,23 @@ function OperationalApp({
                   <header><Settings size={19} /><strong>프로필 설정</strong></header>
                   <label>이름<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })} minLength={2} maxLength={40} required /></label>
                   <label>도시<input value={profileDraft.city} onChange={(event) => setProfileDraft({ ...profileDraft, city: event.target.value })} maxLength={80} placeholder="예: 서울" /></label>
+                  <label>나이<input type="number" min={18} max={100} value={profileDraft.age} onChange={(event) => setProfileDraft({ ...profileDraft, age: Number(event.target.value) })} required /></label>
+                  {/* 이 두 줄이 매칭의 전제입니다 — 내가 쓰는 말과 배우려는 말이 맞물려야 파트너가 잡힙니다. */}
+                  <label>내가 쓰는 말
+                    <select value={profileDraft.nativeLanguage} onChange={(event) => setProfileDraft({ ...profileDraft, nativeLanguage: event.target.value })}>
+                      {Object.entries(LANGUAGE_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                    </select>
+                  </label>
+                  <label>배우려는 말
+                    <select value={profileDraft.learningLanguage} onChange={(event) => setProfileDraft({ ...profileDraft, learningLanguage: event.target.value })}>
+                      {Object.entries(LANGUAGE_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                    </select>
+                  </label>
+                  <label>내 수준
+                    <select value={profileDraft.learningLevel} onChange={(event) => setProfileDraft({ ...profileDraft, learningLevel: event.target.value })}>
+                      {Object.entries(LEVEL_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </label>
                   <label>소개<textarea value={profileDraft.bio} onChange={(event) => setProfileDraft({ ...profileDraft, bio: event.target.value })} maxLength={500} /></label>
                   <button type="submit" className={styles.primaryButton} disabled={busy}>변경사항 저장</button>
                 </form>
@@ -1041,6 +1191,15 @@ function OperationalApp({
           return <button key={item.id} type="button" className={tab === item.id ? styles.active : ""} onClick={() => setTab(item.id)}><Icon size={20} /><span>{item.mobileLabel}</span></button>;
         })}
       </nav>
+      {postPendingDelete ? (
+        <ConfirmDialog
+          title="이 글을 삭제할까요?"
+          body="삭제한 글과 거기 달린 좋아요는 되돌릴 수 없어요."
+          confirmLabel="삭제하기"
+          onCancel={() => setPostPendingDelete(null)}
+          onConfirm={() => void deletePost(postPendingDelete)}
+        />
+      ) : null}
       {toast ? <div className={styles.toast}>{toast}</div> : null}
     </div>
   );

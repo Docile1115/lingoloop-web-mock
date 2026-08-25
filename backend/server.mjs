@@ -8,6 +8,10 @@ import { decideDmRoute } from "./policy.mjs";
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
 const IDENTITY_API_KEY = process.env.IDENTITY_API_KEY;
+// 기본값은 실제 Identity Platform 입니다. 로컬에서 Auth 에뮬레이터를 붙일 때만
+// 이 값을 바꿔 씁니다 — GEMINI_API_BASE_URL 과 같은 방식입니다.
+const IDENTITY_API_BASE_URL =
+  process.env.IDENTITY_API_BASE_URL || "https://identitytoolkit.googleapis.com";
 const PROXY_SHARED_SECRET = process.env.PROXY_SHARED_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
@@ -287,7 +291,7 @@ async function identityPost(method, payload) {
   let response;
   try {
     response = await fetch(
-      "https://identitytoolkit.googleapis.com/v1/accounts:" + method + "?key=" + encodeURIComponent(IDENTITY_API_KEY),
+      IDENTITY_API_BASE_URL + "/v1/accounts:" + method + "?key=" + encodeURIComponent(IDENTITY_API_KEY),
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -884,7 +888,11 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
   const version = preferenceVersion(preferences);
   const dailyReference = db.collection("dailyMatches").doc(req.auth.uid).collection("days").doc(date);
   const dailySnapshot = await dailyReference.get();
-  if (dailySnapshot.exists && dailySnapshot.data().preferenceVersion === version) {
+  // 하루치 추천은 캐시해 매일 같은 얼굴을 보여줍니다. 다만 "추천 0명"까지 캐시하면
+  // 가입 첫날 아직 아무도 없던 사람은 그날 내내 빈 화면을 봅니다 — 한 시간 뒤 딱 맞는
+  // 파트너가 가입해도요. 빈 결과일 때만 다시 계산합니다.
+  const storedRecommendations = dailySnapshot.exists ? dailySnapshot.data().recommendations || [] : [];
+  if (dailySnapshot.exists && dailySnapshot.data().preferenceVersion === version && storedRecommendations.length > 0) {
     const stored = dailySnapshot.data();
     const profileMap = await profilesByIds((stored.recommendations || []).map((item) => item.partnerId));
     const recommendations = (stored.recommendations || [])
@@ -1006,6 +1014,27 @@ app.post("/api/posts", requireUser, async (req, res) => {
   };
   await db.collection("posts").doc(post.id).create(post);
   return success(res, req, post, 201);
+});
+
+/**
+ * 내 글 삭제. 남의 글은 지울 수 없으므로 작성자를 서버에서 확인합니다
+ * (화면이 메뉴를 숨기는 것만으로는 권한이 되지 않습니다).
+ * 좋아요 하위 컬렉션도 함께 지워 고아 문서를 남기지 않습니다.
+ */
+app.delete("/api/posts/:postId", requireUser, async (req, res) => {
+  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postReference = db.collection("posts").doc(postId);
+  const snapshot = await postReference.get();
+  if (!snapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
+  if (snapshot.data().authorId !== req.auth.uid) {
+    throw new ApiError(403, "POST_FORBIDDEN", "내가 쓴 글만 삭제할 수 있습니다.");
+  }
+  const reactions = await postReference.collection("reactions").get();
+  const batch = db.batch();
+  reactions.docs.forEach((document) => batch.delete(document.ref));
+  batch.delete(postReference);
+  await batch.commit();
+  return success(res, req, { id: postId, deleted: true });
 });
 
 app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
