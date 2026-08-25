@@ -4,7 +4,7 @@ import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { extractGeminiText, GeminiProviderError, generateGeminiContent } from "./gemini.mjs";
-import { decideDmRoute } from "./policy.mjs";
+import { decideDmRoute, spamSignals } from "./policy.mjs";
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
 const IDENTITY_API_KEY = process.env.IDENTITY_API_KEY;
@@ -23,6 +23,17 @@ const GEMINI_PROVIDER = "google-vertex-ai";
 const AI_TRANSLATION_DAILY_LIMIT = Number(process.env.AI_TRANSLATION_DAILY_LIMIT || 100);
 const AI_SUPPORT_DAILY_LIMIT = Number(process.env.AI_SUPPORT_DAILY_LIMIT || 30);
 const PORT = Number(process.env.PORT || 8080);
+/**
+ * 신고를 볼 수 있는 사람. 쉼표로 구분한 uid 목록입니다.
+ * 역할 데이터를 따로 두지 않은 것은, 운영자가 몇 명뿐이고 배포 설정에 드러나 있는
+ * 편이 "누가 신고를 볼 수 있나"를 확인하기 쉽기 때문입니다. 사람이 늘면 그때 옮깁니다.
+ */
+const ADMIN_UIDS = new Set(
+  String(process.env.ADMIN_UIDS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
 const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false";
 const COOKIE_NAME = COOKIE_SECURE ? "__Host-lingoloop_session" : "lingoloop_session";
 const SESSION_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
@@ -98,6 +109,8 @@ const DEFAULT_MATCHING_PREFERENCES = {
 const DEFAULT_DM_PRIVACY = {
   whoCanMessage: "matches",
   routeOthersToRequests: true,
+  /** 요청함에 들어온 첫 메시지에서 스팸 신호를 찾아 표시합니다. 막지는 않습니다. */
+  flagSuspectedSpam: true,
 };
 
 class ApiError extends Error {
@@ -595,6 +608,8 @@ async function conversationView(conversation, uid, includeMessages = false) {
     partner,
     preview: conversation.lastMessage || "새 대화를 시작해 보세요.",
     updatedAt: conversation.updatedAt,
+    /* 요청함에서 받는 사람이 먼저 알아보라고 붙이는 표시입니다. 막지는 않습니다. */
+    spamSignals: conversation.requestSpamSignals || [],
     unreadCount: 0,
     requestStatus: conversationStatus(conversation),
     isIncomingRequest: conversationStatus(conversation) === "pending" && conversation.requestRecipientId === uid,
@@ -866,6 +881,7 @@ app.get("/api/bootstrap", requireUser, async (req, res) => {
     languages: LANGUAGES,
     countries: COUNTRIES,
     unread: { conversations: 0, notifications: 0, requests: 0 },
+    isAdmin: ADMIN_UIDS.has(req.auth.uid),
     featureFlags: {
       persistentProfiles: true,
       persistentCommunity: true,
@@ -1302,7 +1318,25 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
   }
   const snapshot = await db.collection("conversations").doc(id).collection("messages").orderBy("sentAt", "desc").limit(200).get();
   const messages = snapshot.docs.map((document) => document.data()).reverse();
-  return success(res, req, messages, 200, { pagination: { total: messages.length, nextCursor: null } });
+
+  // 지금 읽었다고 기록합니다. 상대는 이 시각으로 자기 메시지가 읽혔는지 압니다.
+  const conversation = conversationSnapshot.data();
+  const readAt = conversation.readAt || {};
+  const latest = messages.length ? messages[messages.length - 1].sentAt : null;
+  if (latest && readAt[req.auth.uid] !== latest) {
+    await db.collection("conversations").doc(id).update({ [`readAt.${req.auth.uid}`]: latest });
+  }
+
+  // 내가 보낸 메시지에만 읽음 여부를 붙입니다 — 남이 내 걸 언제 읽었는지가 궁금한 것이지,
+  // 내가 남의 걸 읽었는지는 화면에 필요 없습니다.
+  const partnerId = (conversation.memberIds || []).find((memberId) => memberId !== req.auth.uid);
+  const partnerReadAt = partnerId ? readAt[partnerId] : null;
+  const withRead = messages.map((message) =>
+    message.senderId === req.auth.uid
+      ? { ...message, readByPartner: Boolean(partnerReadAt && String(partnerReadAt) >= String(message.sentAt)) }
+      : message,
+  );
+  return success(res, req, withRead, 200, { pagination: { total: withRead.length, nextCursor: null } });
 });
 
 async function createMessage(req, res, conversationId) {
@@ -1372,7 +1406,9 @@ async function createMessage(req, res, conversationId) {
       lastMessage: text,
       lastSenderId: req.auth.uid,
       updatedAt: timestamp,
-      ...(conversationStatus(conversation) === "pending" ? { requestMessageSent: true } : {}),
+      ...(conversationStatus(conversation) === "pending"
+        ? { requestMessageSent: true, requestSpamSignals: spamSignals(text) }
+        : {}),
     });
     return { message, created: true };
   });
@@ -1405,6 +1441,11 @@ app.post("/api/dm/privacy", requireUser, async (req, res) => {
       "routeOthersToRequests",
       Boolean(current.routeOthersToRequests),
     ),
+    flagSuspectedSpam: optionalBoolean(
+      req.body?.flagSuspectedSpam,
+      "flagSuspectedSpam",
+      current.flagSuspectedSpam === undefined ? true : Boolean(current.flagSuspectedSpam),
+    ),
     updatedAt: nowIso(),
   };
   await db.collection("dmPolicies").doc(req.auth.uid).set(settings);
@@ -1420,6 +1461,67 @@ app.get("/api/dm/sync", requireUser, async (req, res) => {
     encryption: { inTransit: true, atRest: true, endToEnd: false },
     lastSyncedAt: nowIso(),
   });
+});
+
+function requireAdmin(req, _res, next) {
+  if (!ADMIN_UIDS.has(req.auth.uid)) {
+    // 있는지 없는지도 알려주지 않습니다 — 운영 화면의 존재를 광고할 이유가 없습니다.
+    next(new ApiError(404, "NOT_FOUND", "API 경로를 찾을 수 없습니다: " + req.path));
+    return;
+  }
+  next();
+}
+
+/** 운영자용 — 접수된 신고 전체. 신고자 신원은 필요할 때만 보이도록 따로 담습니다. */
+app.get("/api/admin/reports", requireUser, requireAdmin, async (req, res) => {
+  const status = req.query.status === undefined ? "open" : safeString(req.query.status, "status", { min: 2, max: 16 });
+  if (!["open", "closed", "all"].includes(status)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 상태입니다.", { field: "status" });
+  }
+  const snapshot = await db.collection("reports").limit(200).get();
+  const rows = snapshot.docs
+    .map((document) => document.data())
+    .filter((row) => (status === "all" ? true : status === "open" ? row.status === "received" : row.status !== "received"))
+    .sort((left, right) => String(right.submittedAt).localeCompare(String(left.submittedAt)));
+  const profiles = await profilesByIds([...rows.map((r) => r.reporterId), ...rows.map((r) => r.targetId)]);
+  const named = (id) => (profiles.get(id) ? { id, name: profiles.get(id).name, handle: profiles.get(id).handle } : { id, name: null, handle: null });
+  return success(
+    res,
+    req,
+    rows.map((row) => ({
+      id: row.id,
+      targetType: row.targetType,
+      reason: row.reason,
+      details: row.details || "",
+      status: row.status,
+      submittedAt: row.submittedAt,
+      resolution: row.resolution || "",
+      reporter: named(row.reporterId),
+      target: named(row.targetId),
+    })),
+    200,
+    { pagination: { total: rows.length, nextCursor: null } },
+  );
+});
+
+/** 신고를 닫습니다. 어떻게 판단했는지 한 줄 남겨야 나중에 이유를 알 수 있습니다. */
+app.patch("/api/admin/reports/:reportId", requireUser, requireAdmin, async (req, res) => {
+  const reportId = safeString(req.params.reportId, "reportId", { min: 4, max: 128 });
+  const outcome = safeString(req.body?.outcome, "outcome", { min: 2, max: 24 });
+  if (!["actioned", "dismissed", "received"].includes(outcome)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 처리 결과입니다.", { field: "outcome" });
+  }
+  const reference = db.collection("reports").doc(reportId);
+  const snapshot = await reference.get();
+  if (!snapshot.exists) throw new ApiError(404, "REPORT_NOT_FOUND", "신고를 찾을 수 없습니다.");
+  const patch = {
+    status: outcome,
+    resolution: optionalString(req.body?.resolution, "resolution", 500) || "",
+    reviewedBy: req.auth.uid,
+    updatedAt: nowIso(),
+  };
+  await reference.update(patch);
+  return success(res, req, { id: reportId, ...patch });
 });
 
 app.get("/api/reports", requireUser, async (req, res) => {

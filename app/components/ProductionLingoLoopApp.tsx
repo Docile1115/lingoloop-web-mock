@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Send,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -34,7 +35,7 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useStat
 import { I18nProvider, type MessageKey, msg, t, tx, useLocale, useLocaleRerender, LOCALES, LOCALE_LABEL } from "../lib/i18n";
 import styles from "./ProductionLingoLoopApp.module.css";
 
-type Tab = "partners" | "community" | "chats" | "profile";
+type Tab = "partners" | "community" | "chats" | "profile" | "reports";
 
 type Country = {
   code: string;
@@ -109,6 +110,8 @@ type Message = {
   text: string;
   sentAt: string;
   status: string;
+  /** 내가 보낸 메시지에만 옵니다 — 상대가 읽었는지. */
+  readByPartner?: boolean;
 };
 
 type Conversation = {
@@ -118,6 +121,8 @@ type Conversation = {
   updatedAt: string;
   unreadCount: number;
   messages?: Message[];
+  /** 요청함으로 들어온 대화에서 발견한 스팸 신호. 막지는 않고 표시만 합니다. */
+  spamSignals?: string[];
 };
 
 type MatchingPreferences = {
@@ -138,6 +143,8 @@ type DmPrivacy = {
   whoCanMessage: string;
   /** 수신 범위 밖에서 온 대화를 요청함으로 보낼지. 끄면 아예 막습니다. */
   routeOthersToRequests: boolean;
+  /** 요청함의 첫 메시지에서 스팸 신호를 찾아 표시할지. */
+  flagSuspectedSpam: boolean;
 };
 
 type AiUsage = {
@@ -166,6 +173,19 @@ type ConversationSupport = {
 
 type FeatureFlags = {
   aiConfigured: boolean;
+};
+
+/** 운영자가 보는 신고 한 건. */
+type AdminReport = {
+  id: string;
+  targetType: string;
+  reason: string;
+  details: string;
+  status: string;
+  submittedAt: string;
+  resolution: string;
+  reporter: { id: string; name: string | null; handle: string | null };
+  target: { id: string; name: string | null; handle: string | null };
 };
 
 type ApiEnvelope<T> = {
@@ -278,6 +298,32 @@ const ERROR_MESSAGES: Record<string, string> = {
   WEAK_PASSWORD: msg("비밀번호는 10자 이상으로 정해 주세요."),
 };
 
+/** 신고 사유·대상을 사람이 읽는 말로. 서버가 저장하는 값과 짝이 맞아야 합니다. */
+const REPORT_REASON_LABELS: Record<string, string> = {
+  spam: msg("스팸·광고"),
+  scam: msg("사기·금전 요구"),
+  harassment: msg("괴롭힘·욕설"),
+  dating: msg("데이트 목적 접근"),
+  sexual_content: msg("성적인 내용"),
+  hate: msg("혐오 표현"),
+  impersonation: msg("사칭"),
+  other: msg("기타"),
+};
+
+const REPORT_TARGET_LABELS: Record<string, string> = {
+  user: msg("사용자"),
+  post: msg("게시물"),
+  message: msg("메시지"),
+};
+
+/** 서버가 요청함 첫 메시지에서 찾은 신호. 판정이 아니라 "먼저 살펴보라"는 표시입니다. */
+const SPAM_LABELS: Record<string, string> = {
+  "off-platform": msg("다른 앱으로 옮기자고 해요"),
+  money: msg("돈 이야기가 있어요"),
+  link: msg("링크가 있어요"),
+  contact: msg("연락처가 있어요"),
+};
+
 /** 서버가 받는 신고 사유. 목록이 어긋나면 422 로 되돌아옵니다. */
 const REPORT_REASONS: Array<{ value: string; label: string }> = [
   { value: "spam", label: msg("스팸·광고") },
@@ -303,6 +349,9 @@ const navItems: Array<{ id: Tab; label: string; mobileLabel: string; icon: Lucid
   { id: "chats", label: msg("대화"), mobileLabel: msg("대화"), icon: MessageCircle },
   { id: "profile", label: msg("프로필"), mobileLabel: msg("프로필"), icon: User },
 ];
+
+/** 운영자에게만 붙는 메뉴. 서버가 운영자라고 알려줄 때만 보여줍니다. */
+const adminNavItem = { id: "reports" as Tab, label: msg("신고"), mobileLabel: msg("신고"), icon: Flag };
 
 function languageLabel(code: string) {
   const label = LANGUAGE_LABELS[code];
@@ -611,6 +660,57 @@ function ReportDialog({ title, onCancel, onSubmit }: { title: string; onCancel: 
   );
 }
 
+/**
+ * 신고 한 건. 목록에서 바로 판단할 수 있게 필요한 것만 보여줍니다 —
+ * 누가 누구를, 왜, 언제. 닫을 때는 왜 그렇게 판단했는지 한 줄 남깁니다.
+ */
+function ReportRow({
+  report,
+  busy,
+  onResolve,
+}: {
+  report: AdminReport;
+  busy: boolean;
+  onResolve: (report: AdminReport, outcome: "actioned" | "dismissed", note: string) => void;
+}) {
+  const [note, setNote] = useState(report.resolution || "");
+  const open = report.status === "received";
+  const who = (person: AdminReport["reporter"]) => person.name ?? t("탈퇴한 사용자");
+  return (
+    <article className={styles.reportRow}>
+      <header>
+        <strong>{t(REPORT_REASON_LABELS[report.reason] as MessageKey)}</strong>
+        <span className={styles.languageTag}>{t(REPORT_TARGET_LABELS[report.targetType] as MessageKey)}</span>
+        <time>{relativeTime(report.submittedAt)}</time>
+      </header>
+      <p>{t("{reporter}님이 {target}님을 신고했어요.", { reporter: who(report.reporter), target: who(report.target) })}</p>
+      {report.details ? <blockquote>{report.details}</blockquote> : null}
+      {open ? (
+        <div className={styles.reportActions}>
+          <input
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={500}
+            placeholder={t("어떻게 판단했는지 한 줄")}
+            aria-label={t("어떻게 판단했는지 한 줄")}
+          />
+          <button type="button" className={styles.secondaryButton} disabled={busy} onClick={() => onResolve(report, "dismissed", note)}>
+            {t("문제없음")}
+          </button>
+          <button type="button" className={styles.dangerButton} disabled={busy} onClick={() => onResolve(report, "actioned", note)}>
+            {t("조치함")}
+          </button>
+        </div>
+      ) : (
+        <p className={styles.reportClosed}>
+          {report.status === "actioned" ? t("조치함") : t("문제없음")}
+          {report.resolution ? " · " + report.resolution : ""}
+        </p>
+      )}
+    </article>
+  );
+}
+
 function LanguagePicker() {
   const { locale, setLocale } = useLocale();
   return (
@@ -679,6 +779,10 @@ function OperationalApp({
   /* 요청함 — 수신 범위 밖에서 온 대화. 화면이 없으면 영영 안 보입니다. */
   const [requests, setRequests] = useState<Conversation[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
+  /* 운영자에게만 보이는 신고 처리 화면. 서버가 판단해서 알려줍니다. */
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [reports, setReports] = useState<AdminReport[]>([]);
+  const [reportBox, setReportBox] = useState<"open" | "closed">("open");
   /* 좁은 화면에서는 목록과 대화창을 한 번에 보여줄 자리가 없어 번갈아 보여줍니다.
      넓은 화면에서는 이 값과 상관없이 둘 다 보입니다. */
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
@@ -706,6 +810,15 @@ function OperationalApp({
     window.setTimeout(() => setToast(""), 2800);
   };
 
+  const loadReports = useCallback(async (box: "open" | "closed") => {
+    try {
+      const rows = await apiRequest<AdminReport[]>("/api/admin/reports?status=" + box);
+      setReports(rows || []);
+    } catch {
+      /* 운영자가 아니면 404 입니다. 화면에는 메뉴 자체가 없으니 조용히 넘어갑니다. */
+    }
+  }, []);
+
   const loadBlocks = useCallback(async () => {
     try {
       const rows = await apiRequest<Array<{ blockedId: string; partner: UserProfile }>>("/api/blocks");
@@ -718,7 +831,7 @@ function OperationalApp({
   const loadData = useCallback(async () => {
     try {
       const [bootstrap, matchData, postData, conversationData, requestData, preferenceData, privacyData] = await Promise.all([
-        apiRequest<{ currentUser: UserProfile; featureFlags: FeatureFlags; countries: Country[] }>("/api/bootstrap"),
+        apiRequest<{ currentUser: UserProfile; featureFlags: FeatureFlags; countries: Country[]; isAdmin?: boolean }>("/api/bootstrap"),
         apiRequest<{ recommendations: MatchRecommendation[] }>("/api/matching/daily"),
         apiRequest<Post[]>("/api/posts"),
         apiRequest<Conversation[]>("/api/conversations"),
@@ -741,6 +854,7 @@ function OperationalApp({
       setPrivacy(privacyData.settings);
       setAiConfigured(Boolean(bootstrap.featureFlags?.aiConfigured));
       setCountries(bootstrap.countries || []);
+      setIsAdmin(Boolean(bootstrap.isAdmin));
       setSelectedConversationId((current) => current || conversationData[0]?.id || "");
     } catch (caught) {
       setError(errorText(caught));
@@ -753,6 +867,12 @@ function OperationalApp({
     const timer = window.setTimeout(() => { void loadData(); void loadBlocks(); }, 0);
     return () => window.clearTimeout(timer);
   }, [loadData, loadBlocks]);
+
+  useEffect(() => {
+    if (tab !== "reports") return;
+    const timer = window.setTimeout(() => void loadReports(reportBox), 0);
+    return () => window.clearTimeout(timer);
+  }, [tab, reportBox, loadReports]);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId);
 
@@ -1016,6 +1136,22 @@ function OperationalApp({
     }
   };
 
+  const resolveReport = async (report: AdminReport, outcome: "actioned" | "dismissed", note: string) => {
+    setBusy(true);
+    try {
+      await apiRequest("/api/admin/reports/" + encodeURIComponent(report.id), {
+        method: "PATCH",
+        body: JSON.stringify({ outcome, resolution: note }),
+      });
+      showToast(outcome === "actioned" ? t("조치했다고 기록했어요.") : t("문제없음으로 닫았어요."));
+      await loadReports(reportBox);
+    } catch (caught) {
+      setError(errorText(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const deletePost = async (post: Post) => {
     setBusy(true);
     try {
@@ -1152,7 +1288,7 @@ function OperationalApp({
           <span>Lingo<strong>Loop</strong></span>
         </button>
         <nav>
-          {navItems.map((item) => {
+          {(isAdmin ? [...navItems, adminNavItem] : navItems).map((item) => {
             const Icon = item.icon;
             return (
               <button key={item.id} type="button" className={tab === item.id ? styles.active : ""} onClick={() => setTab(item.id)}>
@@ -1286,7 +1422,15 @@ function OperationalApp({
                   {requests.map((request) => (
                     <div key={request.id} className={styles.requestRow}>
                       {request.partner ? <Avatar profile={request.partner} size="small" /> : null}
-                      <span><strong>{request.partner?.name}</strong><small>{request.preview}</small></span>
+                      <span>
+                        <strong>{request.partner?.name}</strong>
+                        <small>{request.preview}</small>
+                        {request.spamSignals?.length ? (
+                          <em className={styles.spamFlag}>
+                            <ShieldAlert size={13} /> {request.spamSignals.map((code) => t(SPAM_LABELS[code] as MessageKey)).join(" · ")}
+                          </em>
+                        ) : null}
+                      </span>
                       <button type="button" className={styles.secondaryButton} disabled={busy} onClick={() => request.partner && setPartnerPendingBlock(request.partner)}>{t("차단")}</button>
                       <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => void acceptRequest(request)}>{t("수락")}</button>
                     </div>
@@ -1339,6 +1483,7 @@ function OperationalApp({
                               </p>
                               <footer className={styles.messageMeta}>
                                 <small>{relativeTime(message.sentAt)}</small>
+                                {message.senderId === user.id && message.readByPartner ? <small>{t("읽음")}</small> : null}
                                 {message.senderId !== user.id && aiConfigured ? (
                                   <button type="button" onClick={() => void translateMessage(message)} disabled={translatingMessageId === message.id}>
                                     <Languages size={12} />
@@ -1387,6 +1532,31 @@ function OperationalApp({
             </section>
           ) : null}
 
+
+          {!loading && tab === "reports" ? (
+            <section className={styles.pageSection}>
+              <header className={styles.pageHeader}>
+                <div><p className={styles.eyebrow}>REPORTS</p><h1>{t("신고 처리")}</h1><p>{t("접수된 신고를 확인하고 닫습니다.")}</p></div>
+                <div className={styles.scopeButtons}>
+                  <button type="button" className={reportBox === "open" ? styles.active : ""} onClick={() => setReportBox("open")}>{t("처리 전")}</button>
+                  <button type="button" className={reportBox === "closed" ? styles.active : ""} onClick={() => setReportBox("closed")}>{t("처리함")}</button>
+                </div>
+              </header>
+              {reports.length ? (
+                <div className={styles.reportList}>
+                  {reports.map((report) => (
+                    <ReportRow key={report.id} report={report} busy={busy} onResolve={resolveReport} />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={Flag}
+                  title={reportBox === "open" ? t("처리할 신고가 없어요") : t("처리한 신고가 없어요")}
+                  description={t("신고가 들어오면 여기에 모입니다.")}
+                />
+              )}
+            </section>
+          ) : null}
 
           {!loading && tab === "profile" ? (
             <section className={styles.pageSection}>
@@ -1456,6 +1626,18 @@ function OperationalApp({
                       <small>{t("끄면 범위 밖에서 오는 대화를 아예 받지 않아요.")}</small>
                     </span>
                   </label>
+                  <label className={styles.checkLabel}>
+                    <input
+                      type="checkbox"
+                      aria-label={t("수상한 첫 메시지에 표시하기")}
+                      checked={Boolean(privacy?.flagSuspectedSpam)}
+                      onChange={(event) => void savePrivacy({ flagSuspectedSpam: event.target.checked })}
+                    />
+                    <span aria-hidden="true">
+                      <strong>{t("수상한 첫 메시지에 표시하기")}</strong>
+                      <small>{t("링크·연락처처럼 자주 쓰이는 수법이 보이면 요청함에 알려드려요. 막지는 않아요.")}</small>
+                    </span>
+                  </label>
                 </article>
                 <article className={styles.blockCard}>
                   <header><Ban size={19} /><strong>{t("차단한 사용자")}</strong></header>
@@ -1485,7 +1667,7 @@ function OperationalApp({
       </div>
 
       <nav className={styles.mobileNav}>
-        {navItems.map((item) => {
+        {(isAdmin ? [...navItems, adminNavItem] : navItems).map((item) => {
           const Icon = item.icon;
           return <button key={item.id} type="button" className={tab === item.id ? styles.active : ""} onClick={() => setTab(item.id)}><Icon size={20} /><span>{t(item.mobileLabel as MessageKey)}</span></button>;
         })}

@@ -948,6 +948,74 @@
 }
 .requestRow button { min-height: 36px; padding: 0 13px; font-size: 13px; }
 
+/* 신고 처리 — 목록과 버튼 두 개. 판단에 필요한 것만 둡니다. */
+.reportList { display: grid; gap: 11px; }
+
+.reportRow {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.reportRow > header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 7px;
+}
+
+.reportRow > header strong { font-size: 15px; }
+.reportRow > header time { margin-left: auto; color: var(--subtle); font-size: 12px; }
+.reportRow > p { margin: 0; color: var(--muted); font-size: 14px; }
+
+.reportRow blockquote {
+  margin: 9px 0 0;
+  padding: 9px 11px;
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--sunken);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.reportActions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  margin-top: 13px;
+}
+
+.reportActions input {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line-structure);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.reportActions button { min-height: 40px; padding: 0 14px; font-size: 13px; }
+
+.reportClosed { margin: 11px 0 0; color: var(--subtle); font-size: 13px; }
+
+@media (max-width: 720px) {
+  .reportActions { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 요청함의 스팸 표시 — 경고가 아니라 "먼저 살펴보라"는 귀띔입니다. */
+.spamFlag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  color: var(--danger);
+  font-size: 12px;
+  font-style: normal;
+}
+
 /* 차단한 사용자 */
 .blockCard { padding: 18px; }
 .blockCard > header { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
