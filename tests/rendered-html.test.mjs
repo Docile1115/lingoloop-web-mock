@@ -61,22 +61,33 @@ test("운영 메타데이터와 인증 확인 화면을 서버 렌더링한다",
   assert.doesNotMatch(html, /Mock API 연결됨|오프라인 데모|웹 mock|mock API 프로토타입/i);
 });
 
-test("운영 화면 진입점은 fixture 기반 앱 대신 Production 앱을 사용한다", async () => {
-  const [page, productionApp] = await Promise.all([
+test("운영 화면은 원래 디자인을 쓰고 데이터는 서버에서 온다", async () => {
+  // 화면은 오래 다듬어 온 LingoLoopApp 을 그대로 쓰고, fixture 대신 서버를 봅니다.
+  // 디자인과 데이터 출처는 따로 정할 수 있는 문제라 둘을 함께 고정합니다.
+  const [page, app, adapter] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(
-      new URL("../app/components/ProductionLingoLoopApp.tsx", import.meta.url),
-      "utf8",
-    ),
+    readFile(new URL("../app/components/LingoLoopApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/live-data.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /import ProductionLingoLoopApp from/);
-  assert.match(page, /return <ProductionLingoLoopApp \/>/);
-  assert.doesNotMatch(page, /import LingoLoopApp from/);
-  assert.match(productionApp, /\/api\/auth\/me/);
-  assert.match(productionApp, /\/api\/auth\/register/);
-  assert.match(productionApp, /\/api\/auth\/login/);
-  assert.doesNotMatch(productionApp, /demo-data|initialPosts|initialConversations/);
+  assert.match(page, /import LingoLoopApp from/);
+  assert.match(page, /return <LingoLoopApp \/>/);
+  assert.doesNotMatch(page, /ProductionLingoLoopApp/);
+
+  // 로그인을 거쳐야 안쪽 화면이 나옵니다.
+  assert.match(app, /"\/api\/auth\/me"/);
+  assert.match(app, /<AuthGate \/>/);
+
+  // 목록은 fixture 가 아니라 서버에서 받습니다.
+  for (const route of ["/api/posts", "/api/conversations", "/api/saved-phrases", "/api/corrections/received"]) {
+    assert.ok(app.includes(`"${route}"`) || app.includes(`\`${route}`), `${route} 를 불러와야 합니다`);
+  }
+  assert.doesNotMatch(app, /useState<FeedPost\[\]>\(initialPosts\)/);
+  assert.doesNotMatch(app, /useState<Conversation\[\]>\(initialConversations\)/);
+
+  // 서버에 없는 값(색·시차)은 어댑터에서만 만듭니다.
+  assert.match(adapter, /export function toPartner/);
+  assert.match(adapter, /export function toFeedPost/);
 });
 
 test("API 프록시는 설정이 없을 때 mock으로 후퇴하지 않고 닫힌 상태로 실패한다", async () => {

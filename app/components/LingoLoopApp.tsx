@@ -436,7 +436,6 @@ const navItems: Array<{
   { id: "discover", label: msg("파트너"), shortLabel: msg("파트너"), icon: Compass, description: msg("나와 잘 맞는 언어 파트너를 찾아보세요") },
   { id: "community", label: msg("커뮤니티"), shortLabel: msg("피드"), icon: UsersRound, description: msg("짧은 글과 교정을 빠르게 확인하세요") },
   { id: "chats", label: msg("대화"), shortLabel: msg("대화"), icon: MessageCircle, description: msg("대화 속에서 바로 배우고 복습하세요") },
-  { id: "practice", label: msg("보이스룸"), shortLabel: msg("연습"), icon: Radio, description: msg("보이스룸을 만들거나 바로 참여하세요") },
   { id: "learn", label: msg("프로필"), shortLabel: msg("프로필"), icon: User, description: msg("내 글과 학습 기록을 확인하세요") },
 ];
 
