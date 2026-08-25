@@ -153,6 +153,7 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
     "/api/conversations/:conversationId/accept",
     "/api/reports",
     "/api/blocks",
+    "/api/countries",
     "/api/partners/:partnerId/block",
   ]) {
     assert.ok(source.includes(`"${route}"`), `${route} 운영 route가 필요합니다`);

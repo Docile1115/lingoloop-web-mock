@@ -975,6 +975,48 @@
 
 .confirmActions button { min-height: 40px; padding: 0 17px; }
 
+/* 신고 사유 고르기 */
+.reasonGrid {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 15px;
+}
+
+.reasonGrid button {
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--line-structure);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.reasonGrid button:hover { border-color: var(--line-strong); }
+.reasonGrid button.selected {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-weight: 700;
+}
+
+/* 설정 안의 체크 항목 — 라벨과 설명을 함께 보여줍니다. */
+.privacyCard .checkLabel {
+  display: grid;
+  align-items: start;
+  gap: 11px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid var(--line);
+}
+
+.privacyCard .checkLabel span { display: grid; gap: 3px; }
+.privacyCard .checkLabel strong { font-size: 14px; }
+.privacyCard .checkLabel small { color: var(--subtle); font-size: 12px; line-height: 1.5; }
+
 .postCard > header > div {
   display: grid;
   min-width: 0;
