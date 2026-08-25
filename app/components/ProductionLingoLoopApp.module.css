@@ -168,16 +168,14 @@
 
 .authForm,
 .profileForm,
-.settingsPanel,
-.roomForm {
+.settingsPanel {
   display: grid;
   gap: 16px;
 }
 
 .authForm label,
 .profileForm label,
-.settingsPanel label,
-.roomForm label {
+.settingsPanel label {
   display: grid;
   gap: 8px;
   color: var(--muted);
@@ -189,7 +187,6 @@
 .profileForm input,
 .profileForm textarea,
 .settingsPanel input,
-.roomForm input,
 .composeCard textarea,
 .messageForm input {
   width: 100%;
@@ -637,8 +634,7 @@
   to { transform: rotate(360deg); }
 }
 
-.settingsPanel,
-.roomForm {
+.settingsPanel {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
   margin-bottom: 20px;
@@ -664,7 +660,6 @@
 }
 
 .partnerGrid,
-.roomGrid,
 .feed,
 .profileGrid {
   display: grid;
@@ -677,7 +672,8 @@
 
 .partnerCard,
 .postCard,
-.roomCard,
+.requestBox,
+.blockCard,
 .profileSummary,
 .profileForm,
 .privacyCard,
@@ -710,7 +706,6 @@
 .partnerCard header p,
 .partnerCard header small,
 .postCard small,
-.roomCard small,
 .profileSummary small {
   color: var(--subtle);
 }
@@ -914,6 +909,40 @@
 .postMenuList button.danger { color: var(--danger); }
 
 /* 되돌릴 수 없는 행동을 묻는 창 */
+/* 메시지 요청함 — 수신 범위 밖에서 온 대화. 화면이 없으면 영영 안 보입니다. */
+.requestBox { margin-bottom: 18px; padding: 18px; }
+.requestBox > header { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.requestBox > header strong { font-size: 15px; }
+.requestBox > p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+
+.requestRow {
+  display: grid;
+  align-items: center;
+  gap: 11px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+
+.requestRow > span { display: grid; min-width: 0; gap: 2px; }
+.requestRow > span strong { font-size: 14px; }
+.requestRow > span small {
+  overflow: hidden;
+  color: var(--subtle);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.requestRow button { min-height: 36px; padding: 0 13px; font-size: 13px; }
+
+/* 차단한 사용자 */
+.blockCard { padding: 18px; }
+.blockCard > header { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.blockCard > header strong { font-size: 15px; }
+.blockCard > p { margin: 0 0 6px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.blockCard > small { color: var(--subtle); font-size: 13px; }
+.blockList .requestRow { grid-template-columns: auto minmax(0, 1fr) auto; }
+
 .confirmBackdrop {
   position: fixed;
   z-index: 60;
@@ -1336,68 +1365,15 @@
   padding: 0;
 }
 
-.voiceNotice {
-  display: flex;
-  align-items: flex-start;
-  gap: 11px;
-  margin-bottom: 18px;
-  border: 1px solid var(--primary-border);
-  border-radius: var(--r-md);
-  background: var(--primary-soft);
-  color: var(--primary-ink);
-  padding: 13px 15px;
-}
 
-.voiceNotice > span {
-  display: grid;
-  gap: 3px;
-}
 
-.voiceNotice small {
-  color: var(--muted);
-  line-height: 1.5;
-}
 
-.roomForm {
-  grid-template-columns: 1fr 1fr auto auto;
-}
 
-.roomGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
 
-.roomCard {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 14px;
-  padding: 18px;
-}
 
-.roomCard > button {
-  grid-column: 1 / -1;
-}
 
-.roomIcon {
-  display: grid;
-  width: 46px;
-  height: 46px;
-  place-items: center;
-  border-radius: 14px;
-  background: var(--primary-soft);
-  color: var(--primary-ink);
-}
 
-.roomCard > div {
-  display: grid;
-  gap: 5px;
-}
 
-.roomCard p,
-.roomCard span {
-  color: var(--muted);
-  line-height: 1.5;
-}
 
 .profileGrid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1562,8 +1538,7 @@
   }
 
   .partnerGrid,
-  .feed,
-  .roomGrid {
+  .feed {
     grid-template-columns: 1fr;
   }
 
@@ -1571,9 +1546,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .roomForm {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 @media (max-width: 720px) {
@@ -1678,19 +1650,16 @@
   }
 
   .settingsPanel,
-  .roomForm,
   .profileGrid {
     grid-template-columns: 1fr;
   }
 
-  .settingsPanel,
-  .roomForm {
+  .settingsPanel {
     padding: 14px;
   }
 
   .partnerCard,
   .postCard,
-  .roomCard,
   .profileSummary,
   .profileForm,
   .privacyCard,
