@@ -6,7 +6,7 @@ LingoLoop는 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화�
 > LingoLoop는 HelloTalk과 제휴·후원·승인 관계가 없는 독립 서비스입니다. HelloTalk의 상표, 로고, 문구, 소스 코드나 사용자 데이터를 사용하지 않습니다.
 
 > [!NOTE]
-> 이 저장소는 더 이상 메모리 fixture를 운영 데이터처럼 보여주는 mock 런타임을 사용하지 않습니다. 다만 아래의 “아직 연결하지 않은 기능”까지 완성된 것은 아닙니다. 특히 보이스룸은 방 정보만 저장하며 실제 음성 전송은 아직 제공하지 않습니다.
+> 이 저장소는 더 이상 메모리 fixture를 운영 데이터처럼 보여주는 mock 런타임을 사용하지 않습니다. 다만 아래의 “아직 연결하지 않은 기능”까지 완성된 것은 아닙니다.
 
 ## 현재 제공 범위
 
@@ -20,7 +20,6 @@ LingoLoop는 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화�
 | 커뮤니티 | 게시물 작성·조회·좋아요를 Firestore에 영속 저장 |
 | 대화 | 대화방 생성, 메시지 전송·조회, 재로그인 후 복원 |
 | DM 정책 | 수신 범위 설정 저장, 매칭·좋아요·팔로우 관계 확인, 허용되지 않은 DM의 요청함 분기 또는 차단 |
-| 보이스룸 | 방 제목·언어·참여자 수 등 룸 메타데이터 생성·조회 |
 | 신고 | 신고 내용과 처리 상태를 Firestore에 접수·조회 |
 | AI 지원 | Gemini 2.5 Flash-Lite 번역, 메시지별 번역 보기, 대화 주제·추천 문장 지원 |
 
@@ -37,7 +36,7 @@ API 성공 응답에는 다음 메타데이터가 포함됩니다.
 
 ### 아직 연결하지 않은 기능
 
-- 보이스룸의 실제 음성 전송(WebRTC/SFU), 녹음 및 음성 신고 증거 보존
+- 음성 대화(보이스룸, WebRTC/SFU). Phase 1 범위에서 제외했습니다.
 - 전화번호·신분증 인증. 현재 실제 인증 상태는 이메일 인증까지만 확인
 - 모바일 푸시 알림과 네이티브 앱
 - 영어·일본어 UI. 운영 데이터 전환 화면은 현재 한국어 MVP이며 기존 다국어 사전과 통합 예정
@@ -108,8 +107,8 @@ posts/{postId}
 posts/{postId}/reactions/{uid}
 conversations/{conversationId}
 conversations/{conversationId}/messages/{messageId}
-voiceRooms/{roomId}
 dmPolicies/{uid}
+blocks/{blockerUid_blockedUid}
 reports/{reportId}
 aiUsage/{uid}/days/{yyyy-mm-dd}
 ```
@@ -162,9 +161,10 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 | `GET` | `/api/conversations?box=requests` | 내 DM 요청함 조회 |
 | `POST` | `/api/conversations/:id/accept` | DM 요청 수락 |
 | `GET/POST` | `/api/conversations/:id/messages` | 메시지 조회·전송 |
-| `GET/POST` | `/api/rooms` | 보이스룸 메타데이터 조회·생성 |
 | `GET/POST` | `/api/dm/privacy` | DM 수신 정책 조회·저장 |
 | `GET` | `/api/dm/sync` | 서버 저장·복원 상태 확인 |
+| `GET` | `/api/blocks` | 내가 차단한 사용자 목록 |
+| `POST/DELETE` | `/api/partners/{id}/block` | 차단·차단 해제 |
 | `GET/POST` | `/api/reports` | 내 신고 내역 조회·신고 접수 |
 | `GET` | `/api/account/verification` | 이메일·전화·신원 인증 상태 조회 |
 | `GET` | `/api/search?q=...` | 사용자·게시물 검색 |

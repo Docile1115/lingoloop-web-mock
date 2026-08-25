@@ -490,6 +490,38 @@ async function acceptedPartnerIds(uid) {
   return new Set(ids);
 }
 
+/**
+ * 차단. blocks/{blockerId}_{blockedId} 한 문서가 "내가 저 사람을 차단했다"를 뜻합니다.
+ *
+ * 차단은 한 방향으로 만들지만 효과는 양쪽에 걸립니다 — 내가 차단하면 상대도 나를
+ * 볼 수 없어야 합니다. 그렇지 않으면 차단당한 쪽이 계속 말을 걸 수 있고, 차단한
+ * 사람은 그 사실을 모른 채 노출됩니다. 그래서 조회는 항상 양방향으로 봅니다.
+ */
+function blockId(blockerId, blockedId) {
+  return blockerId + "_" + blockedId;
+}
+
+/** 나와 어느 쪽으로든 차단 관계인 사람들의 id. 목록·검색·피드에서 서로 지웁니다. */
+async function blockedBothWays(uid) {
+  const [mine, theirs] = await Promise.all([
+    db.collection("blocks").where("blockerId", "==", uid).limit(500).get(),
+    db.collection("blocks").where("blockedId", "==", uid).limit(500).get(),
+  ]);
+  const ids = new Set();
+  mine.docs.forEach((document) => ids.add(document.data().blockedId));
+  theirs.docs.forEach((document) => ids.add(document.data().blockerId));
+  return ids;
+}
+
+/** 두 사람 사이에 차단이 있는지. 대화·메시지처럼 상대가 정해진 자리에 씁니다. */
+async function isBlockedBetween(a, b) {
+  const [ab, ba] = await Promise.all([
+    db.collection("blocks").doc(blockId(a, b)).get(),
+    db.collection("blocks").doc(blockId(b, a)).get(),
+  ]);
+  return ab.exists || ba.exists;
+}
+
 async function directMessageDecision(senderId, recipientId) {
   const date = todayInSeoul();
   const references = [
@@ -864,11 +896,15 @@ app.patch("/api/profile", requireUser, async (req, res) => {
 });
 
 app.get("/api/partners", requireUser, async (req, res) => {
-  const snapshot = await db.collection("profiles").limit(100).get();
+  const [snapshot, blocked] = await Promise.all([
+    db.collection("profiles").limit(100).get(),
+    blockedBothWays(req.auth.uid),
+  ]);
   const query = String(req.query.q || "").trim().toLocaleLowerCase();
   const partners = snapshot.docs
     .map((document) => document.data())
     .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
+    .filter((profile) => !blocked.has(profile.id))
     .filter((profile) => {
       if (!query) return true;
       return [profile.name, profile.handle, profile.bio, ...(profile.interests || [])]
@@ -911,9 +947,13 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
   const storedRecommendations = dailySnapshot.exists ? dailySnapshot.data().recommendations || [] : [];
   if (dailySnapshot.exists && dailySnapshot.data().preferenceVersion === version && storedRecommendations.length > 0) {
     const stored = dailySnapshot.data();
-    const profileMap = await profilesByIds((stored.recommendations || []).map((item) => item.partnerId));
+    const [profileMap, blockedNow] = await Promise.all([
+      profilesByIds((stored.recommendations || []).map((item) => item.partnerId)),
+      blockedBothWays(req.auth.uid),
+    ]);
     const recommendations = (stored.recommendations || [])
       .filter((item) => profileMap.get(item.partnerId)?.accountStatus === "active")
+      .filter((item) => !blockedNow.has(item.partnerId))
       .map((item) => ({ ...item, partner: publicProfile(profileMap.get(item.partnerId)) }));
     return success(res, req, {
       date,
@@ -924,10 +964,14 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
     });
   }
 
-  const snapshot = await db.collection("profiles").limit(200).get();
+  const [snapshot, blocked] = await Promise.all([
+    db.collection("profiles").limit(200).get(),
+    blockedBothWays(req.auth.uid),
+  ]);
   const candidates = snapshot.docs
     .map((document) => document.data())
     .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
+    .filter((profile) => !blocked.has(profile.id))
     .map((profile) => matchCandidate(profile, req.auth.profile, preferences, date))
     .filter((item) => item.partner.nativeLanguages.some((code) => preferences.targetLanguages.includes(code)))
     .sort((left, right) => Number(right.meetsAllPreferences) - Number(left.meetsAllPreferences) || right.score - left.score || stableHash(date + left.partner.id) - stableHash(date + right.partner.id))
@@ -948,12 +992,54 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
   });
 });
 
+app.get("/api/blocks", requireUser, async (req, res) => {
+  const snapshot = await db.collection("blocks").where("blockerId", "==", req.auth.uid).limit(200).get();
+  const rows = snapshot.docs.map((document) => document.data());
+  const profiles = await profilesByIds(rows.map((row) => row.blockedId));
+  const blocked = rows
+    .map((row) => ({ ...row, partner: profiles.get(row.blockedId) ? publicProfile(profiles.get(row.blockedId)) : null }))
+    .filter((row) => row.partner)
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+  return success(res, req, blocked, 200, { pagination: { total: blocked.length, nextCursor: null } });
+});
+
+app.post("/api/partners/:partnerId/block", requireUser, async (req, res) => {
+  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인을 차단할 수 없습니다.");
+  const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
+  if (!partnerSnapshot.exists) throw new ApiError(404, "PARTNER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
+  await db.collection("blocks").doc(blockId(req.auth.uid, partnerId)).set({
+    id: blockId(req.auth.uid, partnerId),
+    blockerId: req.auth.uid,
+    blockedId: partnerId,
+    createdAt: nowIso(),
+  });
+  // 차단하면 서로 보낸 마음도 지웁니다 — 남겨두면 매칭·알림에서 다시 이어집니다.
+  const batch = db.batch();
+  batch.delete(db.collection("likes").doc(req.auth.uid + "_" + partnerId));
+  batch.delete(db.collection("likes").doc(partnerId + "_" + req.auth.uid));
+  await batch.commit();
+  return success(res, req, { blockedId: partnerId, blocked: true }, 201);
+});
+
+app.delete("/api/partners/:partnerId/block", requireUser, async (req, res) => {
+  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const reference = db.collection("blocks").doc(blockId(req.auth.uid, partnerId));
+  const snapshot = await reference.get();
+  if (!snapshot.exists) throw new ApiError(404, "BLOCK_NOT_FOUND", "차단하지 않은 사용자입니다.");
+  await reference.delete();
+  return success(res, req, { blockedId: partnerId, blocked: false });
+});
+
 app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
   const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인에게 마음을 보낼 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
     throw new ApiError(404, "PARTNER_NOT_FOUND", "파트너를 찾을 수 없습니다.");
+  }
+  if (await isBlockedBetween(req.auth.uid, partnerId)) {
+    throw new ApiError(403, "PARTNER_BLOCKED", "차단된 상대에게는 마음을 보낼 수 없습니다.");
   }
   const timestamp = nowIso();
   await db.collection("likes").doc(req.auth.uid + "_" + partnerId).set({
@@ -984,12 +1070,14 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
 });
 
 app.get("/api/posts", requireUser, async (req, res) => {
-  const [snapshot, partnerIds] = await Promise.all([
+  const [snapshot, partnerIds, blocked] = await Promise.all([
     db.collection("posts").orderBy("createdAt", "desc").limit(100).get(),
     acceptedPartnerIds(req.auth.uid),
+    blockedBothWays(req.auth.uid),
   ]);
   const posts = snapshot.docs
     .map((document) => document.data())
+    .filter((post) => !blocked.has(post.authorId))
     .filter(
       (post) =>
         post.visibility === "public" ||
@@ -1087,6 +1175,10 @@ app.post("/api/conversations", requireUser, async (req, res) => {
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
     throw new ApiError(404, "PARTNER_NOT_FOUND", "대화 상대를 찾을 수 없습니다.");
   }
+  // 차단한 쪽도, 차단당한 쪽도 새 대화를 열 수 없습니다.
+  if (await isBlockedBetween(req.auth.uid, partnerId)) {
+    throw new ApiError(403, "PARTNER_BLOCKED", "차단된 상대와는 대화할 수 없습니다.");
+  }
   const id = conversationIdFor(req.auth.uid, partnerId);
   const reference = db.collection("conversations").doc(id);
   const timestamp = nowIso();
@@ -1137,9 +1229,13 @@ app.get("/api/conversations", requireUser, async (req, res) => {
   if (!["inbox", "requests"].includes(box)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 대화함입니다.", { field: "box" });
   }
-  const snapshot = await db.collection("conversations").where("memberIds", "array-contains", req.auth.uid).limit(100).get();
+  const [snapshot, blocked] = await Promise.all([
+    db.collection("conversations").where("memberIds", "array-contains", req.auth.uid).limit(100).get(),
+    blockedBothWays(req.auth.uid),
+  ]);
   const conversations = snapshot.docs
     .map((document) => document.data())
+    .filter((conversation) => !(conversation.memberIds || []).some((memberId) => blocked.has(memberId)))
     .filter((conversation) => {
       const status = conversationStatus(conversation);
       if (box === "requests") return status === "pending" && conversation.requestRecipientId === req.auth.uid;
@@ -1200,6 +1296,15 @@ async function createMessage(req, res, conversationId) {
       : "message-" + crypto.randomUUID();
   const conversationReference = db.collection("conversations").doc(id);
   const messageReference = conversationReference.collection("messages").doc(clientMessageId);
+  // 차단 관계면 어느 쪽도 보낼 수 없습니다. 트랜잭션 밖에서 먼저 걸러
+  // 상대 id 를 알아야 하므로 대화 문서를 한 번 읽습니다.
+  const preflight = await conversationReference.get();
+  if (preflight.exists) {
+    const otherId = (preflight.data().memberIds || []).find((memberId) => memberId !== req.auth.uid);
+    if (otherId && (await isBlockedBetween(req.auth.uid, otherId))) {
+      throw new ApiError(403, "CONVERSATION_BLOCKED", "차단된 상대에게는 메시지를 보낼 수 없습니다.");
+    }
+  }
   const timestamp = nowIso();
   const message = {
     id: clientMessageId,
@@ -1256,49 +1361,6 @@ app.post("/api/messages", requireUser, async (req, res) =>
   createMessage(req, res, req.body?.conversationId),
 );
 
-app.get("/api/rooms", requireUser, async (req, res) => {
-  const snapshot = await db.collection("voiceRooms").where("active", "==", true).limit(50).get();
-  const rooms = snapshot.docs.map((document) => document.data()).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-  return success(res, req, rooms, 200, { pagination: { total: rooms.length, nextCursor: null } });
-});
-
-app.post("/api/rooms", requireUser, async (req, res) => {
-  const timestamp = nowIso();
-  const room = {
-    id: "room-" + crypto.randomUUID(),
-    title: safeString(req.body?.title, "title", { min: 2, max: 80 }),
-    topic: safeString(req.body?.topic, "topic", { min: 2, max: 160 }),
-    language: safeString(req.body?.language || "en", "language", { min: 2, max: 10 }),
-    level: safeString(req.body?.level || "all", "level", { min: 2, max: 20 }),
-    hostId: req.auth.uid,
-    host: req.auth.profile.name,
-    hostFlag: req.auth.profile.country?.flag || "🌐",
-    listeners: 0,
-    speakers: [],
-    active: true,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    audioTransport: "not-configured",
-  };
-  await db.collection("voiceRooms").doc(room.id).create(room);
-  return success(res, req, room, 201);
-});
-
-app.post("/api/rooms/:roomId/close", requireUser, async (req, res) => {
-  const roomId = safeString(req.params.roomId, "roomId", { min: 4, max: 128 });
-  const reference = db.collection("voiceRooms").doc(roomId);
-  const room = await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(reference);
-    if (!snapshot.exists) throw new ApiError(404, "ROOM_NOT_FOUND", "보이스 룸을 찾을 수 없습니다.");
-    const current = snapshot.data();
-    if (current.hostId !== req.auth.uid) throw new ApiError(403, "ROOM_CLOSE_FORBIDDEN", "호스트만 룸을 종료할 수 있습니다.");
-    const patch = { active: false, listeners: 0, speakers: [], updatedAt: nowIso(), closedAt: nowIso() };
-    transaction.update(reference, patch);
-    return { ...current, ...patch };
-  });
-  return success(res, req, room);
-});
-
 app.get("/api/dm/privacy", requireUser, async (req, res) => {
   const snapshot = await db.collection("dmPolicies").doc(req.auth.uid).get();
   return success(res, req, { settings: snapshot.exists ? snapshot.data() : DEFAULT_DM_PRIVACY, persisted: true });
@@ -1353,7 +1415,7 @@ app.get("/api/reports", requireUser, async (req, res) => {
 });
 
 app.post("/api/reports", requireUser, async (req, res) => {
-  const targetTypes = ["user", "post", "message", "room"];
+  const targetTypes = ["user", "post", "message"];
   const reasons = ["spam", "scam", "harassment", "dating", "sexual_content", "hate", "impersonation", "other"];
   const targetType = safeString(req.body?.targetType, "targetType", { min: 2, max: 32 });
   const targetId = safeString(req.body?.targetId, "targetId", { min: 2, max: 128 });
@@ -1398,14 +1460,16 @@ app.get("/api/account/verification", requireUser, async (req, res) => {
 
 app.get("/api/search", requireUser, async (req, res) => {
   const query = safeString(req.query.q, "q", { min: 2, max: 80 }).toLocaleLowerCase();
-  const [profilesSnapshot, postsSnapshot, partnerIds] = await Promise.all([
+  const [profilesSnapshot, postsSnapshot, partnerIds, blocked] = await Promise.all([
     db.collection("profiles").limit(100).get(),
     db.collection("posts").orderBy("createdAt", "desc").limit(100).get(),
     acceptedPartnerIds(req.auth.uid),
+    blockedBothWays(req.auth.uid),
   ]);
   const partners = profilesSnapshot.docs
     .map((document) => document.data())
     .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
+    .filter((profile) => !blocked.has(profile.id))
     .filter((profile) => [profile.name, profile.handle, profile.bio, ...(profile.interests || [])].join(" ").toLocaleLowerCase().includes(query))
     .map(publicProfile);
   const posts = postsSnapshot.docs
@@ -1416,6 +1480,7 @@ app.get("/api/search", requireUser, async (req, res) => {
         post.authorId === req.auth.uid ||
         (post.visibility === "partners" && partnerIds.has(post.authorId)),
     )
+    .filter((post) => !blocked.has(post.authorId))
     .filter((post) => [post.text, ...(post.tags || [])].join(" ").toLocaleLowerCase().includes(query));
   return success(res, req, { partners, posts }, 200, { total: partners.length + posts.length });
 });

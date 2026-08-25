@@ -134,10 +134,10 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
     "reactions",
     "conversations",
     "messages",
-    "voiceRooms",
     "dmPolicies",
     "reports",
     "aiUsage",
+    "blocks",
   ]) {
     assert.match(source, new RegExp(`collection\\("${collection}"\\)`));
   }
@@ -151,14 +151,15 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
     "/api/posts",
     "/api/conversations",
     "/api/conversations/:conversationId/accept",
-    "/api/rooms",
     "/api/reports",
+    "/api/blocks",
+    "/api/partners/:partnerId/block",
   ]) {
     assert.ok(source.includes(`"${route}"`), `${route} 운영 route가 필요합니다`);
   }
 });
 
-test("Gemini AI는 운영 API와 실제 대화 UI에 연결되고 음성 미구성 상태는 정직하게 표시한다", async () => {
+test("Gemini AI는 운영 API와 실제 대화 UI에 연결된다", async () => {
   const [backend, productionApp, backendDockerfile] = await Promise.all([
     readFile(new URL("../backend/server.mjs", import.meta.url), "utf8"),
     readFile(
@@ -178,10 +179,8 @@ test("Gemini AI는 운영 API와 실제 대화 UI에 연결되고 음성 미구�
   assert.match(backend, /AI_TRANSLATION_DAILY_LIMIT/);
   assert.match(backend, /AI_SUPPORT_DAILY_LIMIT/);
   assert.match(backend, /collection\("aiUsage"\)/);
-  assert.match(backend, /audioTransport: "not-configured"/);
   assert.match(productionApp, /"\/api\/translate"/);
   assert.match(productionApp, /"\/api\/conversation-support"/);
   assert.match(productionApp, /AI 대화 도움/);
-  assert.match(productionApp, /실시간 음성은 아직 연결되지 않았습니다/);
   assert.doesNotMatch(backend, /api\.openai\.com|OPENAI_API_KEY|gpt-5-nano|handleMockApi|translationFree|mock translation/i);
 });

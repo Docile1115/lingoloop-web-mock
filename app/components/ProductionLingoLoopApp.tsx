@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Compass,
+  Ban,
   Database,
   Flag,
   Heart,
@@ -16,8 +17,6 @@ import {
   MessageCircle,
   MoreHorizontal,
   PenLine,
-  Plus,
-  Radio,
   RefreshCw,
   Send,
   Settings,
@@ -34,7 +33,7 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useStat
 import { I18nProvider, type MessageKey, msg, t, tx, useLocale, LOCALES, LOCALE_LABEL } from "../lib/i18n";
 import styles from "./ProductionLingoLoopApp.module.css";
 
-type Tab = "partners" | "community" | "chats" | "rooms" | "profile";
+type Tab = "partners" | "community" | "chats" | "profile";
 
 type Country = {
   code: string;
@@ -118,21 +117,6 @@ type Conversation = {
   updatedAt: string;
   unreadCount: number;
   messages?: Message[];
-};
-
-type VoiceRoom = {
-  id: string;
-  title: string;
-  topic: string;
-  language: string;
-  level: string;
-  hostId: string;
-  host: string;
-  hostFlag: string;
-  listeners: number;
-  active: boolean;
-  audioTransport: string;
-  createdAt: string;
 };
 
 type MatchingPreferences = {
@@ -248,7 +232,6 @@ const navItems: Array<{ id: Tab; label: string; mobileLabel: string; icon: Lucid
   { id: "partners", label: msg("파트너"), mobileLabel: msg("파트너"), icon: Compass },
   { id: "community", label: msg("커뮤니티"), mobileLabel: msg("피드"), icon: UsersRound },
   { id: "chats", label: msg("대화"), mobileLabel: msg("대화"), icon: MessageCircle },
-  { id: "rooms", label: msg("보이스룸"), mobileLabel: msg("연습"), icon: Radio },
   { id: "profile", label: msg("프로필"), mobileLabel: msg("프로필"), icon: User },
 ];
 
@@ -376,7 +359,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserProfile) 
  * 게시물 ··· 메뉴. 내 글과 남의 글은 할 수 있는 일이 다릅니다 —
  * 내 글에 "신고하기"가 뜨면 안 되고, 남의 글에 "삭제하기"가 뜨면 안 됩니다.
  */
-function PostMenu({ mine, onDelete, onReport }: { mine: boolean; onDelete: () => void; onReport: () => void }) {
+function OverflowMenu({ label, items }: { label: string; items: Array<{ id: string; label: string; icon: LucideIcon; danger?: boolean; onSelect: () => void }> }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement | null>(null);
 
@@ -398,20 +381,25 @@ function PostMenu({ mine, onDelete, onReport }: { mine: boolean; onDelete: () =>
 
   return (
     <div className={styles.postMenu} ref={wrap}>
-      <button type="button" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label={t("게시물 메뉴")}>
+      <button type="button" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open} aria-label={label}>
         <MoreHorizontal size={18} />
       </button>
       {open ? (
         <div className={styles.postMenuList} role="menu">
-          {mine ? (
-            <button type="button" role="menuitem" className={styles.danger} onClick={() => { setOpen(false); onDelete(); }}>
-              <Trash2 size={15} /> {t("삭제하기")}
-            </button>
-          ) : (
-            <button type="button" role="menuitem" className={styles.danger} onClick={() => { setOpen(false); onReport(); }}>
-              <Flag size={15} /> {t("신고하기")}
-            </button>
-          )}
+          {items.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="menuitem"
+                className={item.danger ? styles.danger : ""}
+                onClick={() => { setOpen(false); item.onSelect(); }}
+              >
+                <Icon size={15} /> {item.label}
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -559,7 +547,6 @@ function OperationalApp({
   const [matches, setMatches] = useState<MatchRecommendation[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [rooms, setRooms] = useState<VoiceRoom[]>([]);
   const [preferences, setPreferences] = useState<MatchingPreferences | null>(null);
   const [privacy, setPrivacy] = useState<DmPrivacy | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState("");
@@ -573,12 +560,14 @@ function OperationalApp({
   const [aiBusy, setAiBusy] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [postDraft, setPostDraft] = useState("");
-  const [roomFormOpen, setRoomFormOpen] = useState(false);
-  const [roomTitle, setRoomTitle] = useState("");
-  const [roomTopic, setRoomTopic] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   /* 삭제를 누른 글. 되돌릴 수 없어서 확인을 한 번 거칩니다. */
   const [postPendingDelete, setPostPendingDelete] = useState<Post | null>(null);
+  /* 차단은 되돌릴 수 있지만 대화가 사라지므로 한 번 묻습니다. */
+  const [partnerPendingBlock, setPartnerPendingBlock] = useState<UserProfile | null>(null);
+  const [blockedPartners, setBlockedPartners] = useState<Array<{ blockedId: string; partner: UserProfile }>>([]);
+  /* 요청함 — 수신 범위 밖에서 온 대화. 화면이 없으면 영영 안 보입니다. */
+  const [requests, setRequests] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -602,14 +591,23 @@ function OperationalApp({
     window.setTimeout(() => setToast(""), 2800);
   };
 
+  const loadBlocks = useCallback(async () => {
+    try {
+      const rows = await apiRequest<Array<{ blockedId: string; partner: UserProfile }>>("/api/blocks");
+      setBlockedPartners(rows || []);
+    } catch {
+      /* 차단 목록은 없어도 나머지 화면이 동작해야 합니다. */
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     try {
-      const [bootstrap, matchData, postData, conversationData, roomData, preferenceData, privacyData] = await Promise.all([
+      const [bootstrap, matchData, postData, conversationData, requestData, preferenceData, privacyData] = await Promise.all([
         apiRequest<{ currentUser: UserProfile; featureFlags: FeatureFlags }>("/api/bootstrap"),
         apiRequest<{ recommendations: MatchRecommendation[] }>("/api/matching/daily"),
         apiRequest<Post[]>("/api/posts"),
         apiRequest<Conversation[]>("/api/conversations"),
-        apiRequest<VoiceRoom[]>("/api/rooms"),
+        apiRequest<Conversation[]>("/api/conversations?box=requests"),
         apiRequest<{ preferences: MatchingPreferences }>("/api/matching/preferences"),
         apiRequest<{ settings: DmPrivacy }>("/api/dm/privacy"),
       ]);
@@ -623,7 +621,7 @@ function OperationalApp({
       setMatches(matchData.recommendations || []);
       setPosts(postData || []);
       setConversations(conversationData || []);
-      setRooms(roomData || []);
+      setRequests(requestData || []);
       setPreferences(preferenceData.preferences);
       setPrivacy(privacyData.settings);
       setAiConfigured(Boolean(bootstrap.featureFlags?.aiConfigured));
@@ -636,9 +634,9 @@ function OperationalApp({
   }, [onUserChanged, sessionEmail, sessionEmailVerified]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadData(), 0);
+    const timer = window.setTimeout(() => { void loadData(); void loadBlocks(); }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadData]);
+  }, [loadData, loadBlocks]);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId);
 
@@ -823,31 +821,6 @@ function OperationalApp({
     }
   };
 
-  const createRoom = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setBusy(true);
-    try {
-      const room = await apiRequest<VoiceRoom>("/api/rooms", {
-        method: "POST",
-        body: JSON.stringify({
-          title: roomTitle,
-          topic: roomTopic,
-          language: user.learningLanguages[0]?.code || "en",
-          level: user.learningLanguages[0]?.level || "all",
-        }),
-      });
-      setRooms((current) => [room, ...current]);
-      setRoomTitle("");
-      setRoomTopic("");
-      setRoomFormOpen(false);
-      showToast(t("보이스룸 정보가 서버에 저장됐어요."));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("보이스룸을 만들지 못했습니다."));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const savePreferences = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!preferences) return;
@@ -864,6 +837,61 @@ function OperationalApp({
       showToast(t("매칭 조건을 계정에 저장했어요."));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("매칭 설정을 저장하지 못했습니다."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 신고는 접수 화면이 따로 없으므로 사유를 other 로 보내고 접수만 확인시킵니다. */
+  const reportTarget = async (targetType: "user" | "post" | "message", targetId: string) => {
+    try {
+      await apiRequest("/api/reports", {
+        method: "POST",
+        body: JSON.stringify({ targetType, targetId, reason: "other" }),
+      });
+      showToast(t("신고를 접수했어요. 운영팀이 확인합니다."));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t("신고를 접수하지 못했습니다."));
+    }
+  };
+
+  const blockPartner = async (partner: UserProfile) => {
+    setBusy(true);
+    try {
+      await apiRequest("/api/partners/" + encodeURIComponent(partner.id) + "/block", { method: "POST", body: JSON.stringify({}) });
+      showToast(t("{name}님을 차단했어요.", { name: partner.name }));
+      await loadData();
+      await loadBlocks();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t("차단하지 못했습니다."));
+    } finally {
+      setPartnerPendingBlock(null);
+      setBusy(false);
+    }
+  };
+
+  const unblockPartner = async (partner: UserProfile) => {
+    setBusy(true);
+    try {
+      await apiRequest("/api/partners/" + encodeURIComponent(partner.id) + "/block", { method: "DELETE" });
+      showToast(t("{name}님 차단을 풀었어요.", { name: partner.name }));
+      await loadData();
+      await loadBlocks();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t("차단을 풀지 못했습니다."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const acceptRequest = async (conversation: Conversation) => {
+    setBusy(true);
+    try {
+      await apiRequest("/api/conversations/" + encodeURIComponent(conversation.id) + "/accept", { method: "POST", body: JSON.stringify({}) });
+      showToast(t("메시지 요청을 수락했어요."));
+      await loadData();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t("요청을 수락하지 못했습니다."));
     } finally {
       setBusy(false);
     }
@@ -968,6 +996,13 @@ function OperationalApp({
           <small>{recommendation.partner.status === "online" ? t("지금 접속 중") : t("최근 활동")}</small>
         </div>
         <span className={styles.score}><strong>{recommendation.score}%</strong><small>{t("잘 맞아요")}</small></span>
+        <OverflowMenu
+          label={t("파트너 메뉴")}
+          items={[
+            { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: () => void reportTarget("user", recommendation.partner.id) },
+            { id: "block", label: t("차단하기"), icon: Ban, danger: true, onSelect: () => setPartnerPendingBlock(recommendation.partner) },
+          ]}
+        />
       </header>
       <p className={styles.partnerBio}>{recommendation.partner.bio}</p>
       <div className={styles.languagePair}>
@@ -1088,10 +1123,14 @@ function OperationalApp({
                       <span className={styles.postAvatar}>{post.author.name.slice(0, 1)}<i>{post.author.flag}</i></span>
                       <div><strong>{post.author.name}</strong><small>{post.author.handle} · {relativeTime(post.createdAt)}</small></div>
                       <span className={styles.languageTag}>{languageLabel(post.language)}</span>
-                      <PostMenu
-                        mine={post.authorId === user.id}
-                        onDelete={() => setPostPendingDelete(post)}
-                        onReport={() => showToast(t("신고를 접수했어요. 운영팀이 확인합니다."))}
+                      <OverflowMenu
+                        label={t("게시물 메뉴")}
+                        items={post.authorId === user.id
+                          ? [{ id: "delete", label: t("삭제하기"), icon: Trash2, danger: true, onSelect: () => setPostPendingDelete(post) }]
+                          : [
+                              { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: () => void reportTarget("post", post.id) },
+                              { id: "block", label: t("이 사람 차단하기"), icon: Ban, danger: true, onSelect: () => setPartnerPendingBlock({ id: post.authorId, name: post.author.name } as UserProfile) },
+                            ]}
                       />
                     </header>
                     <p>{post.text}</p>
@@ -1112,6 +1151,20 @@ function OperationalApp({
               <header className={styles.pageHeader}>
                 <div><p className={styles.eyebrow}>MESSAGES</p><h1>{t("대화")}</h1><p>{t("메시지는 서버에 저장되어 다시 로그인해도 복원됩니다.")}</p></div>
               </header>
+              {requests.length ? (
+                <section className={styles.requestBox} aria-label={t("메시지 요청")}>
+                  <header><Mail size={18} /><strong>{t("메시지 요청 {n}건", { n: requests.length })}</strong></header>
+                  <p>{t("수신 범위 밖에서 온 대화입니다. 수락해야 답장할 수 있어요.")}</p>
+                  {requests.map((request) => (
+                    <div key={request.id} className={styles.requestRow}>
+                      {request.partner ? <Avatar profile={request.partner} size="small" /> : null}
+                      <span><strong>{request.partner?.name}</strong><small>{request.preview}</small></span>
+                      <button type="button" className={styles.secondaryButton} disabled={busy} onClick={() => request.partner && setPartnerPendingBlock(request.partner)}>{t("차단")}</button>
+                      <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => void acceptRequest(request)}>{t("수락")}</button>
+                    </div>
+                  ))}
+                </section>
+              ) : null}
               {conversations.length ? (
                 <div className={styles.chatLayout}>
                   <aside className={styles.chatList}>
@@ -1203,32 +1256,6 @@ function OperationalApp({
             </section>
           ) : null}
 
-          {!loading && tab === "rooms" ? (
-            <section className={styles.pageSection}>
-              <header className={styles.pageHeader}>
-                <div><p className={styles.eyebrow}>VOICE ROOMS</p><h1>{t("보이스룸")}</h1><p>{t("방 정보와 참여 목록은 실제 서버 데이터로 관리합니다.")}</p></div>
-                <button type="button" className={styles.primaryButton} onClick={() => setRoomFormOpen(true)}><Plus size={17} /> {t("방 만들기")}</button>
-              </header>
-              <div className={styles.voiceNotice}><Radio size={18} /><span><strong>{t("현재 운영 범위")}</strong><small>{t("방 생성·목록은 실제 저장됩니다. 실시간 음성은 아직 연결되지 않았습니다(WebRTC/SFU 준비 중).")}</small></span></div>
-              {roomFormOpen ? (
-                <form className={styles.roomForm} onSubmit={createRoom}>
-                  <label>{t("방 제목")}<input value={roomTitle} onChange={(event) => setRoomTitle(event.target.value)} minLength={2} maxLength={80} required /></label>
-                  <label>{t("대화 주제")}<input value={roomTopic} onChange={(event) => setRoomTopic(event.target.value)} minLength={2} maxLength={160} required /></label>
-                  <button className={styles.primaryButton} type="submit" disabled={busy}>{t("서버에 방 만들기")}</button>
-                  <button className={styles.secondaryButton} type="button" onClick={() => setRoomFormOpen(false)}>{t("취소")}</button>
-                </form>
-              ) : null}
-              <div className={styles.roomGrid}>
-                {rooms.length ? rooms.map((room) => (
-                  <article key={room.id} className={styles.roomCard}>
-                    <span className={styles.roomIcon}><Radio size={22} /></span>
-                    <div><small>{languageLabel(room.language)} · {room.level}</small><h3>{room.title}</h3><p>{room.topic}</p><span>{t("{flag} {host} 호스트 · {n}명", { flag: room.hostFlag, host: room.host, n: room.listeners })}</span></div>
-                    <button type="button" className={styles.secondaryButton} disabled>{t("음성 연결 준비 중")}</button>
-                  </article>
-                )) : <EmptyState icon={Radio} title={t("열린 보이스룸이 없어요")} description={t("새 방을 만들면 다른 계정의 목록에도 실제로 표시됩니다.")} />}
-              </div>
-            </section>
-          ) : null}
 
           {!loading && tab === "profile" ? (
             <section className={styles.pageSection}>
@@ -1281,6 +1308,21 @@ function OperationalApp({
                     ))}
                   </div>
                 </article>
+                <article className={styles.blockCard}>
+                  <header><Ban size={19} /><strong>{t("차단한 사용자")}</strong></header>
+                  <p>{t("차단하면 서로의 글·프로필·대화가 보이지 않고 메시지도 오가지 않아요.")}</p>
+                  {blockedPartners.length ? (
+                    <div className={styles.blockList}>
+                      {blockedPartners.map((row) => (
+                        <div key={row.blockedId} className={styles.requestRow}>
+                          <Avatar profile={row.partner} size="small" />
+                          <span><strong>{row.partner.name}</strong><small>{row.partner.handle}</small></span>
+                          <button type="button" className={styles.secondaryButton} disabled={busy} onClick={() => void unblockPartner(row.partner)}>{t("차단 풀기")}</button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <small>{t("아직 차단한 사용자가 없어요.")}</small>}
+                </article>
                 <LanguagePicker />
                 <article className={styles.accountCard}>
                   <header><LockKeyhole size={19} /><strong>{t("계정 및 세션")}</strong></header>
@@ -1299,6 +1341,15 @@ function OperationalApp({
           return <button key={item.id} type="button" className={tab === item.id ? styles.active : ""} onClick={() => setTab(item.id)}><Icon size={20} /><span>{t(item.mobileLabel as MessageKey)}</span></button>;
         })}
       </nav>
+      {partnerPendingBlock ? (
+        <ConfirmDialog
+          title={t("{name}님을 차단할까요?", { name: partnerPendingBlock.name })}
+          body={t("서로의 글·프로필·대화가 보이지 않게 되고 메시지도 오가지 않아요. 나중에 차단을 풀면 다시 이어집니다.")}
+          confirmLabel={t("차단하기")}
+          onCancel={() => setPartnerPendingBlock(null)}
+          onConfirm={() => void blockPartner(partnerPendingBlock)}
+        />
+      ) : null}
       {postPendingDelete ? (
         <ConfirmDialog
           title={t("이 글을 삭제할까요?")}
