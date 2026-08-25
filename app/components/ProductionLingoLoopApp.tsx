@@ -177,6 +177,16 @@ type ApiEnvelope<T> = {
   };
 };
 
+/** 서버 오류를 화면에 보여줄 문구로. 모르는 code 는 서버가 준 말을 그대로 씁니다. */
+function errorText(caught: unknown): string {
+  if (caught instanceof ApiClientError) {
+    const known = ERROR_MESSAGES[caught.code];
+    if (known) return t(known as MessageKey);
+    return caught.message;
+  }
+  return caught instanceof Error ? caught.message : t("문제가 생겼어요. 잠시 후 다시 시도해 주세요.");
+}
+
 class ApiClientError extends Error {
   constructor(
     readonly status: number,
@@ -203,20 +213,68 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiClientError(
       response.status,
       body.error?.code || "REQUEST_FAILED",
-      body.error?.message || t("요청을 처리하지 못했습니다."),
+      body.error?.message || t("요청을 처리하지 못했어요."),
     );
   }
   return body.data;
 }
 
+/**
+ * 파트너가 쓰는·배우는 언어 이름.
+ * 화면 언어로 번역합니다 — 영어 화면에서 "Learning 한국어" 는 읽히지 않습니다.
+ * (표시 언어를 고르는 목록은 반대로 각 언어를 그 언어로 적습니다. 자기 언어를
+ *  찾아야 하는 자리라 번역하면 오히려 못 찾습니다 — LOCALE_LABEL 참고.)
+ */
 const LANGUAGE_LABELS: Record<string, string> = {
-  ko: "한국어",
-  en: "English",
-  ja: "日本語",
-  zh: "中文",
-  es: "Español",
-  fr: "Français",
-  de: "Deutsch",
+  ko: msg("한국어"),
+  en: msg("영어"),
+  ja: msg("일본어"),
+  zh: msg("중국어"),
+  es: msg("스페인어"),
+  fr: msg("프랑스어"),
+  de: msg("독일어"),
+};
+
+/**
+ * 서버 오류를 화면 언어로 옮깁니다.
+ *
+ * 서버는 한 벌의 한국어 메시지만 보냅니다 — 로그와 디버깅에는 그게 편하지만
+ * 화면에 그대로 내보내면 영어·일본어 사용자가 한국어 오류를 보게 됩니다.
+ * 같이 오는 code 로 우리 문구를 고르고, 모르는 code 는 서버 메시지를 그대로 씁니다
+ * (문구가 없다고 오류를 숨기는 것보다 낫습니다).
+ */
+const ERROR_MESSAGES: Record<string, string> = {
+  ACCOUNT_DISABLED: msg("사용할 수 없는 계정이에요."),
+  ACCOUNT_RESTRICTED: msg("이용이 제한된 계정이에요."),
+  AI_DAILY_LIMIT_REACHED: msg("오늘 쓸 수 있는 AI 도움을 다 썼어요. 내일 다시 만나요."),
+  AI_NOT_CONFIGURED: msg("AI 기능은 아직 연결되지 않았어요."),
+  AI_INVALID_RESPONSE: msg("AI 응답을 읽지 못했어요. 다시 시도해 주세요."),
+  AUTH_REQUIRED: msg("로그인이 필요해요."),
+  BLOCK_NOT_FOUND: msg("차단하지 않은 사람이에요."),
+  CONVERSATION_BLOCKED: msg("차단한 사이에는 메시지를 보낼 수 없어요."),
+  CONVERSATION_CLOSED: msg("이 대화에는 메시지를 보낼 수 없어요."),
+  CONVERSATION_FORBIDDEN: msg("이 대화를 열 수 없어요."),
+  CONVERSATION_NOT_FOUND: msg("대화를 찾을 수 없어요."),
+  DM_NOT_ALLOWED: msg("상대가 정한 수신 범위 밖이라 대화를 시작할 수 없어요."),
+  EMAIL_EXISTS: msg("이미 가입된 이메일이에요."),
+  IDENTITY_PROVIDER_ERROR: msg("로그인 처리 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요."),
+  IDENTITY_PROVIDER_UNAVAILABLE: msg("로그인 서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요."),
+  INTERNAL_ERROR: msg("문제가 생겼어요. 잠시 후 다시 시도해 주세요."),
+  INVALID_EMAIL: msg("이메일 주소를 다시 확인해 주세요."),
+  INVALID_LOGIN_CREDENTIALS: msg("이메일이나 비밀번호가 맞지 않아요."),
+  INVALID_PARTNER: msg("나에게는 할 수 없는 동작이에요."),
+  INVALID_SESSION: msg("로그인이 만료됐어요. 다시 로그인해 주세요."),
+  MESSAGE_REQUEST_LIMIT: msg("상대가 요청을 수락하기 전까지는 한 통만 보낼 수 있어요."),
+  MESSAGE_REQUEST_PENDING: msg("요청을 수락해야 답장할 수 있어요."),
+  PARTNER_BLOCKED: msg("차단한 사이라 할 수 없어요."),
+  PARTNER_NOT_FOUND: msg("그 사용자를 찾을 수 없어요."),
+  POST_FORBIDDEN: msg("내가 쓴 글만 지울 수 있어요."),
+  POST_NOT_FOUND: msg("글을 찾을 수 없어요."),
+  RATE_LIMITED: msg("시도가 너무 잦아요. 잠시 후 다시 해주세요."),
+  RECENT_LOGIN_REQUIRED: msg("보안을 위해 다시 로그인해 주세요."),
+  REQUEST_ACCEPT_FORBIDDEN: msg("이 요청은 수락할 수 없어요."),
+  TOO_MANY_ATTEMPTS: msg("시도가 너무 잦아요. 잠시 후 다시 해주세요."),
+  WEAK_PASSWORD: msg("비밀번호는 10자 이상으로 정해 주세요."),
 };
 
 /** 서버가 받는 신고 사유. 목록이 어긋나면 422 로 되돌아옵니다. */
@@ -246,7 +304,8 @@ const navItems: Array<{ id: Tab; label: string; mobileLabel: string; icon: Lucid
 ];
 
 function languageLabel(code: string) {
-  return LANGUAGE_LABELS[code] || code.toLocaleUpperCase();
+  const label = LANGUAGE_LABELS[code];
+  return label ? t(label as MessageKey) : code.toLocaleUpperCase();
 }
 
 function relativeTime(value: string) {
@@ -274,7 +333,7 @@ function LoadingScreen() {
     <main className={styles.loading}>
       <span className={styles.brandMark}><Languages size={24} /></span>
       <strong>LingoLoop</strong>
-      <p>{t("안전한 로그인 상태를 확인하고 있어요.")}</p>
+      <p>{t("로그인 상태를 확인하고 있어요.")}</p>
     </main>
   );
 }
@@ -301,10 +360,10 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserProfile) 
           body: JSON.stringify(mode === "login" ? { email, password } : { name, email, password }),
         },
       );
-      if (result.emailVerificationSent) setNotice(t("확인 메일을 보냈습니다."));
+      if (result.emailVerificationSent) setNotice(t("확인 메일을 보냈어요."));
       onAuthenticated(result.user);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("로그인 요청을 처리하지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setBusy(false);
     }
@@ -318,14 +377,14 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserProfile) 
           <span>Lingo<strong>Loop</strong></span>
         </div>
         <p className={styles.eyebrow}>REAL LANGUAGE EXCHANGE</p>
-        <h1>{t("실제 사람과 대화하고, 기록은 계정에 안전하게 남겨요.")}</h1>
+        <h1>{t("진짜 사람과 이야기하며 배워요.")}</h1>
         <p className={styles.authDescription}>
-          {t("프로필, 커뮤니티 글, 매칭 설정과 모든 메시지는 Firestore에 저장되어 기기를 바꾸거나 다시 로그인해도 이어집니다.")}
+          {t("주고받은 대화와 써둔 글은 계정에 남아요. 폰을 바꿔도 그대로 이어져요.")}
         </p>
         <ul className={styles.authFacts}>
-          <li><Database size={18} /> {t("서버 영구 저장")}</li>
-          <li><LockKeyhole size={18} /> {t("보안 세션 쿠키")}</li>
-          <li><ShieldCheck size={18} /> {t("사용자별 접근 권한")}</li>
+          <li><Database size={18} /> {t("기록이 남아요")}</li>
+          <li><LockKeyhole size={18} /> {t("안전한 로그인")}</li>
+          <li><ShieldCheck size={18} /> {t("내 정보는 나만")}</li>
         </ul>
       </section>
 
@@ -336,13 +395,13 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserProfile) 
         </div>
         <div>
           <h2>{mode === "login" ? t("다시 만나서 반가워요") : t("LingoLoop 시작하기")}</h2>
-          <p>{mode === "login" ? t("기존 대화와 학습 기록을 불러옵니다.") : t("첫 프로필은 가입 후 언제든 수정할 수 있어요.")}</p>
+          <p>{mode === "login" ? t("하던 대화와 기록을 그대로 가져올게요.") : t("프로필은 가입한 뒤에 천천히 채워도 돼요.")}</p>
         </div>
         <form onSubmit={submit} className={styles.authForm}>
           {mode === "register" ? (
             <label>
               {t("이름")}
-              <input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={40} placeholder={t("표시할 이름")} autoComplete="name" required />
+              <input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={40} placeholder={t("다른 사람에게 보일 이름")} autoComplete="name" required />
             </label>
           ) : null}
           <label>
@@ -359,7 +418,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserProfile) 
             {busy ? t("처리 중…") : mode === "login" ? t("로그인") : t("계정 만들기")}
           </button>
         </form>
-        <small className={styles.authLegal}>{t("가입하면 커뮤니티 운영정책과 개인정보 처리 기준에 동의하는 것으로 간주합니다.")}</small>
+        <small className={styles.authLegal}>{t("가입하면 커뮤니티 운영정책과 개인정보 처리 방침에 동의하게 돼요.")}</small>
       </section>
     </main>
   );
@@ -507,12 +566,12 @@ function SelectField({
 
 /** 매칭 이유를 화면 언어로 그립니다. 서버가 코드를 안 주면 받은 문장을 그대로 씁니다. */
 function matchReasonText(reason: { code: string; languages?: string; interests?: string; flag?: string; country?: string }): string {
-  if (reason.code === "native-speaker") return t("{languages} 원어민 파트너예요", { languages: reason.languages ?? "" });
-  if (reason.code === "preferred-country") return t("희망 지역인 {flag} {country}에 있어요", { flag: reason.flag ?? "", country: tx(reason.country ?? "") });
-  if (reason.code === "shared-interests") return t("{interests} 관심사가 같아요", { interests: reason.interests ?? "" });
-  if (reason.code === "time-overlap") return t("선호하는 학습 시간대가 겹쳐요");
-  if (reason.code === "broadened") return t("일부 조건을 넓혀 찾은 가까운 파트너예요");
-  return t("새로운 실제 회원과 첫 언어 교환을 시작해 보세요");
+  if (reason.code === "native-speaker") return t("{languages}를 모국어로 쓰는 사람이에요", { languages: reason.languages ?? "" });
+  if (reason.code === "preferred-country") return t("찾던 지역인 {flag} {country}에 살아요", { flag: reason.flag ?? "", country: tx(reason.country ?? "") });
+  if (reason.code === "shared-interests") return t("{interests}에 같이 관심이 있어요", { interests: reason.interests ?? "" });
+  if (reason.code === "time-overlap") return t("연습하고 싶은 시간대가 비슷해요");
+  if (reason.code === "broadened") return t("조건을 조금 넓혀서 찾은 사람이에요");
+  return t("새로 들어온 사람과 첫 대화를 시작해 보세요");
 }
 
 /** 신고 사유를 고르는 창. 사유 없이 보내면 운영이 판단할 근거가 없습니다. */
@@ -527,7 +586,7 @@ function ReportDialog({ title, onCancel, onSubmit }: { title: string; onCancel: 
     <div className={styles.confirmBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
       <div className={styles.confirmCard} role="dialog" aria-modal="true" aria-label={title}>
         <h2>{title}</h2>
-        <p>{t("가장 가까운 사유를 골라주세요. 접수 내역은 운영팀만 봅니다.")}</p>
+        <p>{t("가장 가까운 이유를 골라주세요. 내용은 운영팀만 봐요.")}</p>
         <div className={styles.reasonGrid} role="radiogroup" aria-label={t("신고 사유")}>
           {REPORT_REASONS.map((item) => (
             <button
@@ -556,7 +615,7 @@ function LanguagePicker() {
   return (
     <article className={styles.localeCard}>
       <header><Languages size={19} /><strong>{t("표시 언어")}</strong></header>
-      <p>{t("앱 화면에 쓰는 언어를 고릅니다. 선택은 이 기기에 저장돼요.")}</p>
+      <p>{t("앱을 어떤 언어로 볼지 고르세요. 이 기기에만 적용돼요.")}</p>
       <div className={styles.scopeButtons}>
         {LOCALES.map((code) => (
           <button key={code} type="button" className={locale === code ? styles.active : ""} onClick={() => setLocale(code)}>
@@ -606,6 +665,8 @@ function OperationalApp({
   const [aiBusy, setAiBusy] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [postDraft, setPostDraft] = useState("");
+  /* 교정 요청은 글마다 다른 선택입니다 — 조용히 켜두면 원하지 않는 글에도 붙습니다. */
+  const [askCorrection, setAskCorrection] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(false);
   /* 삭제를 누른 글. 되돌릴 수 없어서 확인을 한 번 거칩니다. */
   const [postPendingDelete, setPostPendingDelete] = useState<Post | null>(null);
@@ -678,7 +739,7 @@ function OperationalApp({
       setCountries(bootstrap.countries || []);
       setSelectedConversationId((current) => current || conversationData[0]?.id || "");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("운영 데이터를 불러오지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setLoading(false);
     }
@@ -696,7 +757,7 @@ function OperationalApp({
       const result = await apiRequest<Message[]>("/api/conversations/" + encodeURIComponent(conversationId) + "/messages");
       setMessages(result);
     } catch (caught) {
-      if (!quiet) setError(caught instanceof Error ? caught.message : t("메시지를 불러오지 못했습니다."));
+      if (!quiet) setError(errorText(caught));
     }
   }, []);
 
@@ -727,9 +788,9 @@ function OperationalApp({
       selectConversation(conversation.id);
       setMessages(conversation.messages || []);
       setTab("chats");
-      showToast(t("{name}님과 실제 대화방을 만들었어요.", { name: partner.name }));
+      showToast(t("{name}님과 대화를 시작했어요.", { name: partner.name }));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("대화를 시작하지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setBusy(false);
     }
@@ -743,7 +804,7 @@ function OperationalApp({
       });
       showToast(result.mutual ? t("서로 마음을 보냈어요. 대화를 시작해 보세요!") : t("{name}님에게 마음을 보냈어요.", { name: partner.name }));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("마음을 보내지 못했습니다."));
+      setError(errorText(caught));
     }
   };
 
@@ -774,7 +835,7 @@ function OperationalApp({
       );
       setMessageDraft("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("메시지를 보내지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setBusy(false);
     }
@@ -801,9 +862,9 @@ function OperationalApp({
         }),
       });
       setTranslatedMessages((current) => ({ ...current, [message.id]: result.translatedText }));
-      showToast(t("번역 완료 · 오늘 {n}회 남음", { n: result.entitlement.usage.remaining }));
+      showToast(t("번역했어요 · 오늘 {n}번 더 쓸 수 있어요", { n: result.entitlement.usage.remaining }));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("메시지를 번역하지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setTranslatingMessageId("");
     }
@@ -826,7 +887,7 @@ function OperationalApp({
       });
       setAiSupport(result);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("AI 대화 도움을 불러오지 못했습니다."));
+      setError(errorText(caught));
       setAiPanelOpen(false);
     } finally {
       setAiBusy(false);
@@ -844,17 +905,16 @@ function OperationalApp({
           text: postDraft.trim(),
           language: user.learningLanguages[0]?.code || "en",
           targetLanguage: user.nativeLanguages[0] || "ko",
-          tags: [t("오늘의연습")],
           visibility: "public",
-          requestCorrection: true,
+          requestCorrection: askCorrection,
         }),
       });
       setPosts((current) => [post, ...current]);
       setPostDraft("");
       setComposeOpen(false);
-      showToast(t("게시물이 Firestore에 저장됐어요."));
+      showToast(t("글을 올렸어요."));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("게시물을 저장하지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setBusy(false);
     }
@@ -868,7 +928,7 @@ function OperationalApp({
       });
       setPosts((current) => current.map((item) => item.id === post.id ? { ...item, likes: result.likes } : item));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("좋아요를 저장하지 못했습니다."));
+      setError(errorText(caught));
     }
   };
 
@@ -885,9 +945,9 @@ function OperationalApp({
       const nextMatches = await apiRequest<{ recommendations: MatchRecommendation[] }>("/api/matching/daily");
       setMatches(nextMatches.recommendations || []);
       setFiltersOpen(false);
-      showToast(t("매칭 조건을 계정에 저장했어요."));
+      showToast(t("조건을 저장했어요."));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("매칭 설정을 저장하지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setBusy(false);
     }
@@ -903,9 +963,9 @@ function OperationalApp({
         method: "POST",
         body: JSON.stringify({ targetType, targetId, reason }),
       });
-      showToast(t("신고를 접수했어요. 운영팀이 확인합니다."));
+      showToast(t("신고를 접수했어요. 운영팀이 확인할게요."));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("신고를 접수하지 못했습니다."));
+      setError(errorText(caught));
     }
   };
 
@@ -917,7 +977,7 @@ function OperationalApp({
       await loadData();
       await loadBlocks();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("차단하지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setPartnerPendingBlock(null);
       setBusy(false);
@@ -932,7 +992,7 @@ function OperationalApp({
       await loadData();
       await loadBlocks();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("차단을 풀지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setBusy(false);
     }
@@ -945,7 +1005,7 @@ function OperationalApp({
       showToast(t("메시지 요청을 수락했어요."));
       await loadData();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("요청을 수락하지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setBusy(false);
     }
@@ -958,7 +1018,7 @@ function OperationalApp({
       setPosts((items) => items.filter((item) => item.id !== post.id));
       showToast(t("글을 삭제했어요."));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("글을 삭제하지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setPostPendingDelete(null);
       setBusy(false);
@@ -1005,9 +1065,9 @@ function OperationalApp({
         const refreshed = await apiRequest<{ recommendations: MatchRecommendation[] }>("/api/matching/daily");
         setMatches(refreshed.recommendations || []);
       }
-      showToast(t("프로필을 계정에 저장했어요."));
+      showToast(t("프로필을 저장했어요."));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("프로필을 저장하지 못했습니다."));
+      setError(errorText(caught));
     } finally {
       setBusy(false);
     }
@@ -1021,9 +1081,9 @@ function OperationalApp({
         body: JSON.stringify({ ...privacy, ...patch }),
       });
       setPrivacy(result.settings);
-      showToast(t("DM 설정을 계정에 저장했어요."));
+      showToast(t("설정을 저장했어요."));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("DM 설정을 저장하지 못했습니다."));
+      setError(errorText(caught));
     }
   };
 
@@ -1061,9 +1121,9 @@ function OperationalApp({
       </header>
       <p className={styles.partnerBio}>{recommendation.partner.bio}</p>
       <div className={styles.languagePair}>
-        <span><small>{t("가르쳐줘요")}</small><strong>{recommendation.partner.nativeLanguages.map(languageLabel).join(" · ")}</strong></span>
+        <span><small>{t("가르쳐줄 수 있어요")}</small><strong>{recommendation.partner.nativeLanguages.map(languageLabel).join(" · ")}</strong></span>
         <span>↔</span>
-        <span><small>{t("배우고 있어요")}</small><strong>{recommendation.partner.learningLanguages.map((item) => languageLabel(item.code)).join(" · ")}</strong></span>
+        <span><small>{t("배우는 중이에요")}</small><strong>{recommendation.partner.learningLanguages.map((item) => languageLabel(item.code)).join(" · ")}</strong></span>
       </div>
       <div className={styles.reasonList}>
         {(recommendation.matchReasonCodes ?? []).length
@@ -1097,7 +1157,7 @@ function OperationalApp({
           })}
         </nav>
         <div className={styles.sidebarSpacer} />
-        <div className={styles.liveStatus}><span /> {t("운영 API · Firestore")}</div>
+        <div className={styles.liveStatus}><span /> {t("연결됨")}</div>
         <button type="button" className={styles.userButton} onClick={() => setTab("profile")}>
           <Avatar profile={user} size="small" />
           <span><strong>{user.name}</strong><small>{user.handle}</small></span>
@@ -1110,7 +1170,7 @@ function OperationalApp({
             <span className={styles.brandMark}><Languages size={20} /></span>
             <span>Lingo<strong>Loop</strong></span>
           </button>
-          <span className={styles.liveDot} title={t("운영 API 연결")} />
+          <span className={styles.liveDot} title={t("서버에 연결되어 있어요")} />
         </header>
 
         <main className={styles.main}>
@@ -1122,13 +1182,13 @@ function OperationalApp({
           ) : null}
 
           {loading ? (
-            <div className={styles.sectionLoading}><RefreshCw size={22} /> {t("실제 데이터를 불러오는 중…")}</div>
+            <div className={styles.sectionLoading}><RefreshCw size={22} /> {t("불러오는 중…")}</div>
           ) : null}
 
           {!loading && tab === "partners" ? (
             <section className={styles.pageSection}>
               <header className={styles.pageHeader}>
-                <div><p className={styles.eyebrow}>DAILY MATCH</p><h1>{t("오늘의 파트너")}</h1><p>{t("실제 가입 사용자 중 내 설정과 가까운 파트너를 보여드립니다.")}</p></div>
+                <div><p className={styles.eyebrow}>DAILY MATCH</p><h1>{t("오늘의 파트너")}</h1><p>{t("내 설정과 잘 맞는 사람들을 골라왔어요.")}</p></div>
                 <button type="button" className={styles.secondaryButton} onClick={() => setFiltersOpen((value) => !value)}><SlidersHorizontal size={17} /> {t("조건 설정")}</button>
               </header>
               {filtersOpen && preferences ? (
@@ -1136,21 +1196,21 @@ function OperationalApp({
                   <SelectField
                     label={t("배울 언어")}
                     value={preferences.targetLanguages[0] || "en"}
-                    options={Object.entries(LANGUAGE_LABELS).filter(([code]) => code !== "ko").map(([code, label]) => ({ value: code, label }))}
+                    options={Object.keys(LANGUAGE_LABELS).filter((code) => code !== "ko").map((code) => ({ value: code, label: languageLabel(code) }))}
                     onChange={(next) => setPreferences({ ...preferences, targetLanguages: [next] })}
                   />
                   <label>{t("최소 나이")}<input type="number" min={18} max={100} value={preferences.ageMin} onChange={(event) => setPreferences({ ...preferences, ageMin: Number(event.target.value) })} /></label>
                   <label>{t("최대 나이")}<input type="number" min={18} max={100} value={preferences.ageMax} onChange={(event) => setPreferences({ ...preferences, ageMax: Number(event.target.value) })} /></label>
                   <label className={styles.checkLabel}><input type="checkbox" checked={preferences.onlineOnly} onChange={(event) => setPreferences({ ...preferences, onlineOnly: event.target.checked })} /> {t("접속 중인 사용자 우선")}</label>
-                  <button type="submit" className={styles.primaryButton} disabled={busy}>{t("계정에 저장")}</button>
+                  <button type="submit" className={styles.primaryButton} disabled={busy}>{t("저장하기")}</button>
                 </form>
               ) : null}
               <div className={styles.partnerGrid}>
                 {partnerCards.length ? partnerCards : (
                   <EmptyState
                     icon={UsersRound}
-                    title={t("아직 조건에 맞는 실제 파트너가 없어요")}
-                    description={t("두 번째 사용자가 가입해 프로필을 설정하면 이곳에 바로 추천됩니다. 가상 프로필은 표시하지 않습니다.")}
+                    title={t("조건에 맞는 사람이 아직 없어요")}
+                    description={t("조건을 넓히거나, 새로운 사람이 들어오면 여기에 나타나요. 없는 사람을 지어내지는 않아요.")}
                     action={<button type="button" className={styles.secondaryButton} onClick={() => setFiltersOpen(true)}>{t("조건 넓히기")}</button>}
                   />
                 )}
@@ -1161,14 +1221,21 @@ function OperationalApp({
           {!loading && tab === "community" ? (
             <section className={styles.pageSection}>
               <header className={styles.pageHeader}>
-                <div><p className={styles.eyebrow}>COMMUNITY</p><h1>{t("커뮤니티")}</h1><p>{t("실제 회원이 작성한 글만 최신순으로 표시합니다.")}</p></div>
+                <div><p className={styles.eyebrow}>COMMUNITY</p><h1>{t("커뮤니티")}</h1><p>{t("사람들이 올린 글을 최신순으로 보여드려요.")}</p></div>
                 <button type="button" className={styles.primaryButton} onClick={() => setComposeOpen(true)}><PenLine size={17} /> {t("글쓰기")}</button>
               </header>
               {composeOpen ? (
                 <form className={styles.composeCard} onSubmit={publishPost}>
                   <header><strong>{t("새 게시물")}</strong><button type="button" onClick={() => setComposeOpen(false)} aria-label={t("닫기")}><X size={18} /></button></header>
                   <textarea value={postDraft} onChange={(event) => setPostDraft(event.target.value)} maxLength={3000} placeholder={t("오늘 연습한 문장이나 궁금한 표현을 적어보세요.")} required />
-                  <footer><small>{t("{n} / 3000 · 서버에 영구 저장", { n: postDraft.length })}</small><button className={styles.primaryButton} type="submit" disabled={busy || !postDraft.trim()}>{t("게시하기")}</button></footer>
+                  <label className={styles.checkLabel}>
+                    <input type="checkbox" aria-label={t("원어민 교정 요청하기")} checked={askCorrection} onChange={(event) => setAskCorrection(event.target.checked)} />
+                    <span aria-hidden="true">
+                      <strong>{t("원어민 교정 요청하기")}</strong>
+                      <small>{t("이 글을 보는 원어민이 고쳐줄 수 있게 표시해요.")}</small>
+                    </span>
+                  </label>
+                  <footer><small>{t("{n} / 3000", { n: postDraft.length })}</small><button className={styles.primaryButton} type="submit" disabled={busy || !postDraft.trim()}>{t("게시하기")}</button></footer>
                 </form>
               ) : null}
               <div className={styles.feed}>
@@ -1196,7 +1263,7 @@ function OperationalApp({
                       {post.requestCorrection ? <span><PenLine size={16} /> {t("교정 요청")}</span> : null}
                     </footer>
                   </article>
-                )) : <EmptyState icon={PenLine} title={t("첫 게시물을 기다리고 있어요")} description={t("작성한 글은 Firestore에 저장되고 다른 계정에서도 바로 볼 수 있습니다.")} />}
+                )) : <EmptyState icon={PenLine} title={t("아직 올라온 글이 없어요")} description={t("첫 글을 남겨보세요. 다른 사람들에게 바로 보여요.")} />}
               </div>
             </section>
           ) : null}
@@ -1204,12 +1271,12 @@ function OperationalApp({
           {!loading && tab === "chats" ? (
             <section className={styles.pageSection}>
               <header className={styles.pageHeader}>
-                <div><p className={styles.eyebrow}>MESSAGES</p><h1>{t("대화")}</h1><p>{t("메시지는 서버에 저장되어 다시 로그인해도 복원됩니다.")}</p></div>
+                <div><p className={styles.eyebrow}>MESSAGES</p><h1>{t("대화")}</h1><p>{t("주고받은 메시지는 계정에 남아요.")}</p></div>
               </header>
               {requests.length ? (
                 <section className={styles.requestBox} aria-label={t("메시지 요청")}>
                   <header><Mail size={18} /><strong>{t("메시지 요청 {n}건", { n: requests.length })}</strong></header>
-                  <p>{t("수신 범위 밖에서 온 대화입니다. 수락해야 답장할 수 있어요.")}</p>
+                  <p>{t("내가 정한 범위 밖에서 온 대화예요. 수락해야 답장할 수 있어요.")}</p>
                   {requests.map((request) => (
                     <div key={request.id} className={styles.requestRow}>
                       {request.partner ? <Avatar profile={request.partner} size="small" /> : null}
@@ -1248,7 +1315,7 @@ function OperationalApp({
                                 else void requestConversationSupport();
                               }}
                               disabled={!aiConfigured || aiBusy}
-                              title={aiConfigured ? t("대화 주제와 문장을 추천받기") : t("AI 기능이 아직 연결되지 않았습니다")}
+                              title={aiConfigured ? t("무슨 말을 할지 추천받기") : t("AI 기능은 아직 준비 중이에요")}
                             >
                               <Sparkles size={15} /> {t("AI 도움")}
                             </button>
@@ -1293,7 +1360,7 @@ function OperationalApp({
                                       <button type="button" onClick={() => setMessageDraft(aiSupport.improvedDraft)}>{t("다듬은 문장: {draft}", { draft: aiSupport.improvedDraft })}</button>
                                     ) : null}
                                   </div>
-                                  <small>{t("추천 문장을 누르면 입력창에 넣습니다 · 오늘 {n}회 남음", { n: aiSupport.entitlement.usage.remaining })}</small>
+                                  <small>{t("누르면 입력창에 들어가요 · 오늘 {n}번 더 쓸 수 있어요", { n: aiSupport.entitlement.usage.remaining })}</small>
                                 </div>
                               ) : null}
                             </section>
@@ -1307,7 +1374,7 @@ function OperationalApp({
                     ) : null}
                   </article>
                 </div>
-              ) : <EmptyState icon={MessageCircle} title={t("아직 대화가 없어요")} description={t("오늘의 파트너에서 실제 사용자에게 대화를 시작하면 이곳에 영구 저장됩니다.")} action={<button type="button" className={styles.primaryButton} onClick={() => setTab("partners")}>{t("파트너 찾기")}</button>} />}
+              ) : <EmptyState icon={MessageCircle} title={t("아직 대화가 없어요")} description={t("파트너 탭에서 대화를 시작하면 여기에 쌓여요.")} action={<button type="button" className={styles.primaryButton} onClick={() => setTab("partners")}>{t("파트너 찾기")}</button>} />}
             </section>
           ) : null}
 
@@ -1315,13 +1382,13 @@ function OperationalApp({
           {!loading && tab === "profile" ? (
             <section className={styles.pageSection}>
               <header className={styles.pageHeader}>
-                <div><p className={styles.eyebrow}>ACCOUNT</p><h1>{t("내 프로필")}</h1><p>{t("프로필과 개인정보 설정은 계정 단위로 동기화됩니다.")}</p></div>
+                <div><p className={styles.eyebrow}>ACCOUNT</p><h1>{t("내 프로필")}</h1><p>{t("여기서 바꾼 내용은 로그인한 모든 기기에 반영돼요.")}</p></div>
               </header>
               <div className={styles.profileGrid}>
                 <article className={styles.profileSummary}>
                   <Avatar profile={user} size="large" />
                   <div><span className={styles.nameLine}><h2>{user.name}</h2>{user.emailVerified ? <BadgeCheck size={18} /> : null}</span><p>{user.handle}</p><small>{user.email}</small></div>
-                  <div className={styles.syncBadge}><Database size={16} /> {t("Firestore 동기화")}</div>
+                  <div className={styles.syncBadge}><Database size={16} /> {t("계정에 저장됨")}</div>
                 </article>
                 <form className={styles.profileForm} onSubmit={saveProfile}>
                   <header><Settings size={19} /><strong>{t("프로필 설정")}</strong></header>
@@ -1338,13 +1405,13 @@ function OperationalApp({
                   <SelectField
                     label={t("내가 쓰는 말")}
                     value={profileDraft.nativeLanguage}
-                    options={Object.entries(LANGUAGE_LABELS).map(([code, label]) => ({ value: code, label }))}
+                    options={Object.keys(LANGUAGE_LABELS).map((code) => ({ value: code, label: languageLabel(code) }))}
                     onChange={(next) => setProfileDraft({ ...profileDraft, nativeLanguage: next })}
                   />
                   <SelectField
                     label={t("배우려는 말")}
                     value={profileDraft.learningLanguage}
-                    options={Object.entries(LANGUAGE_LABELS).map(([code, label]) => ({ value: code, label }))}
+                    options={Object.keys(LANGUAGE_LABELS).map((code) => ({ value: code, label: languageLabel(code) }))}
                     onChange={(next) => setProfileDraft({ ...profileDraft, learningLanguage: next })}
                   />
                   <SelectField
@@ -1358,7 +1425,7 @@ function OperationalApp({
                 </form>
                 <article className={styles.privacyCard}>
                   <header><ShieldCheck size={19} /><strong>{t("DM 수신 범위")}</strong></header>
-                  <p>{t("서버가 메시지 요청 권한을 판단할 때 사용하는 실제 설정입니다.")}</p>
+                  <p>{t("누가 나에게 먼저 말을 걸 수 있는지 정해요.")}</p>
                   <div className={styles.scopeButtons}>
                     {[
                       ["matches", msg("추천·매칭된 사용자")],
@@ -1377,13 +1444,13 @@ function OperationalApp({
                     />
                     <span aria-hidden="true">
                       <strong>{t("범위 밖 대화는 요청함으로")}</strong>
-                      <small>{t("끄면 범위 밖에서 온 대화는 아예 만들어지지 않아요.")}</small>
+                      <small>{t("끄면 범위 밖에서 오는 대화를 아예 받지 않아요.")}</small>
                     </span>
                   </label>
                 </article>
                 <article className={styles.blockCard}>
                   <header><Ban size={19} /><strong>{t("차단한 사용자")}</strong></header>
-                  <p>{t("차단하면 서로의 글·프로필·대화가 보이지 않고 메시지도 오가지 않아요.")}</p>
+                  <p>{t("차단하면 서로의 글과 프로필이 보이지 않고, 메시지도 오가지 않아요.")}</p>
                   {blockedPartners.length ? (
                     <div className={styles.blockList}>
                       {blockedPartners.map((row) => (
@@ -1399,7 +1466,7 @@ function OperationalApp({
                 <LanguagePicker />
                 <article className={styles.accountCard}>
                   <header><LockKeyhole size={19} /><strong>{t("계정 및 세션")}</strong></header>
-                  <p>{user.emailVerified ? t("이메일 인증 완료") : t("이메일 인증 대기 중")} · {t("세션은 보안 쿠키로 관리됩니다.")}</p>
+                  <p>{user.emailVerified ? t("이메일 인증 완료") : t("이메일 인증 대기 중")} · {t("로그인 정보는 안전하게 보관돼요.")}</p>
                   <button type="button" className={styles.dangerButton} onClick={() => void signOut()}><LogOut size={17} /> {t("로그아웃")}</button>
                 </article>
               </div>
@@ -1424,7 +1491,7 @@ function OperationalApp({
       {partnerPendingBlock ? (
         <ConfirmDialog
           title={t("{name}님을 차단할까요?", { name: partnerPendingBlock.name })}
-          body={t("서로의 글·프로필·대화가 보이지 않게 되고 메시지도 오가지 않아요. 나중에 차단을 풀면 다시 이어집니다.")}
+          body={t("서로의 글과 프로필이 보이지 않고, 메시지도 오가지 않아요. 차단을 풀면 다시 이어져요.")}
           confirmLabel={t("차단하기")}
           onCancel={() => setPartnerPendingBlock(null)}
           onConfirm={() => void blockPartner(partnerPendingBlock)}
@@ -1433,7 +1500,7 @@ function OperationalApp({
       {postPendingDelete ? (
         <ConfirmDialog
           title={t("이 글을 삭제할까요?")}
-          body={t("삭제한 글과 거기 달린 좋아요는 되돌릴 수 없어요.")}
+          body={t("지운 글은 되돌릴 수 없어요.")}
           confirmLabel={t("삭제하기")}
           onCancel={() => setPostPendingDelete(null)}
           onConfirm={() => void deletePost(postPendingDelete)}

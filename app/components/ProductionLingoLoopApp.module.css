@@ -1002,6 +1002,18 @@
   font-weight: 700;
 }
 
+.composeCard .checkLabel {
+  display: grid;
+  align-items: start;
+  gap: 11px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 13px 0 0;
+}
+
+.composeCard .checkLabel span { display: grid; gap: 3px; }
+.composeCard .checkLabel strong { font-size: 14px; }
+.composeCard .checkLabel small { color: var(--subtle); font-size: 12px; }
+
 /* 설정 안의 체크 항목 — 라벨과 설명을 함께 보여줍니다. */
 .privacyCard .checkLabel {
   display: grid;

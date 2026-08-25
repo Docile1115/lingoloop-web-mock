@@ -22,11 +22,13 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
 import type { MessageKey } from "./keys";
+import { LOCALES, type Locale } from "./keys-locale";
+import { SITE_METADATA } from "./metadata";
 import { en } from "./en";
 import { ja } from "./ja";
 
-export const LOCALES = ["ko", "en", "ja"] as const;
-export type Locale = (typeof LOCALES)[number];
+export { LOCALES } from "./keys-locale";
+export type { Locale } from "./keys-locale";
 
 /** 언어 선택 UI용 이름 — 각 언어를 그 언어로 적습니다(자기 언어를 찾을 수 있도록). */
 export const LOCALE_LABEL: Record<Locale, string> = {
@@ -159,6 +161,9 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     document.documentElement.lang = locale;
+    // 탭 제목은 서버가 요청 언어로 그려둡니다. 앱에서 언어를 바꾸면
+    // 그대로 두면 어긋나므로 여기서 다시 맞춥니다.
+    document.title = SITE_METADATA[locale].title;
   }, [locale]);
 
   const value = useMemo<LocaleContextValue>(

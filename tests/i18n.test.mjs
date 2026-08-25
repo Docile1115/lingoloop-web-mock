@@ -61,18 +61,41 @@ test("번역 키와 사전에 중복 리터럴이 없다", async () => {
 });
 
 test("지원 언어와 서버 기본값·브라우저 저장 계약이 유지된다", async () => {
-  const [runtime, app] = await Promise.all([
+  const [runtime, locales, app, production] = await Promise.all([
     read(join(I18N, "index.tsx")),
+    // 서버 컴포넌트(layout.tsx 의 generateMetadata)도 써야 해서 "use client" 밖에 둡니다.
+    read(join(I18N, "keys-locale.ts")),
     read(join(ROOT, "app/components/LingoLoopApp.tsx")),
+    read(join(ROOT, "app/components/ProductionLingoLoopApp.tsx")),
   ]);
 
-  assert.match(runtime, /export const LOCALES = \["ko", "en", "ja"\] as const;/);
+  assert.match(locales, /export const LOCALES = \["ko", "en", "ja"\] as const;/);
   assert.match(runtime, /const serverLocale = \(\): Locale => "ko";/);
   assert.match(runtime, /const raw = DICTIONARIES\[locale\]\[key\] \?\? key;/);
   assert.match(runtime, /const STORAGE_KEY = "lingoloop\.locale";/);
   assert.match(runtime, /document\.documentElement\.lang = locale;/);
   assert.match(runtime, /window\.localStorage\.setItem\(STORAGE_KEY, next\);/);
+  assert.match(runtime, /document\.title = SITE_METADATA\[locale\]\.title;/);
   assert.match(app, /<I18nProvider>[\s\S]*<LingoLoopScreens \/>[\s\S]*<\/I18nProvider>/);
+  assert.match(production, /<I18nProvider>[\s\S]*<ProductionLingoLoopScreens \/>[\s\S]*<\/I18nProvider>/);
+});
+
+test("서버 렌더 메타데이터도 요청 언어를 따른다", async () => {
+  // 탭 제목·검색 결과 문구는 서버에서 만들어져 t() 를 쓸 수 없습니다.
+  const [layout, metadata] = await Promise.all([
+    read(join(ROOT, "app/layout.tsx")),
+    read(join(I18N, "metadata.ts")),
+  ]);
+  assert.match(layout, /localeFromAcceptLanguage\(requestHeaders\.get\("accept-language"\)\)/);
+  // 주석은 설명이라 남겨둡니다 — 화면에 나가는 문자열만 봅니다.
+  const layoutStrings = layout
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+  assert.doesNotMatch(layoutStrings, /[가-힣]/, "탭 제목·설명은 SITE_METADATA 에서 가져와야 합니다");
+  for (const locale of ["ko", "en", "ja"]) {
+    assert.ok(metadata.includes(`${locale}: {`), `${locale} 메타데이터가 필요합니다`);
+  }
 });
 
 for (const locale of ["en", "ja"]) {
