@@ -514,6 +514,17 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [corrections, setCorrections] = useState<ApiCorrection[]>([]);
   const [likesReceived, setLikesReceived] = useState<ApiReceivedLike[]>([]);
   const [sentLikes, setSentLikes] = useState<ApiReceivedLike[]>([]);
+  /** 팔로잉·팔로워 수. 보는 사람마다 달라서 id 별로 담아둡니다. */
+  const [followCounts, setFollowCounts] = useState<Record<string, { following: number; followers: number; posts: number }>>({});
+
+  const loadFollowCounts = useCallback(async (id: string) => {
+    try {
+      const counts = await api<{ following: number; followers: number; posts: number }>(`/api/partners/${encodeURIComponent(id)}/follow-counts`);
+      setFollowCounts((current) => ({ ...current, [id]: counts }));
+    } catch {
+      /* 못 받아오면 숫자를 감춥니다 — 0 으로 보여주면 없는 것처럼 보입니다. */
+    }
+  }, []);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [safetyReports, setSafetyReports] = useState<SafetyReportInfo[]>([]);
   /* 숨긴 사람은 서버에 보관하지 않습니다(차단과 달리 상대에게 아무 영향이 없는,
@@ -599,6 +610,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         api<ApiReceivedLike[]>("/api/likes/sent"),
       ]);
       setSentLikes(sentLikeList || []);
+      void loadFollowCounts(me.id);
       setSignaledPartners((sentLikeList || []).map((item) => item.partner.id));
       setDirectory((peopleList || []).map((person) => toPartner(person)));
       setSavedItems((phraseList || []).map(toSavedPhrase));
@@ -619,7 +631,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     } catch {
       /* 실패해도 빈 화면을 유지합니다. 오류는 아래 개별 동작에서 알립니다. */
     }
-  }, [me.id]);
+  }, [me.id, loadFollowCounts]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload(), 0);
@@ -1007,22 +1019,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   };
 
   /**
-   * 이 사람과 지금 어떤 사이인가.
-   *  chatting  이미 대화방이 있다
-   *  matched   서로 마음을 보냈다 → 대화를 열 수 있다
-   *  signaled  내가 보냈고 상대는 아직
-   *  none      아직 아무것도
-   */
-  const connectionWith = (partner: Partner): "chatting" | "matched" | "signaled" | "none" => {
-    if (conversations.some((item) => item.partnerId === partner.id)) return "chatting";
-    const iSignaled = signaledPartners.includes(partner.id);
-    const theyLiked = likesReceived.some((like) => like.partner.id === partner.id);
-    if (iSignaled && theyLiked) return "matched";
-    if (iSignaled) return "signaled";
-    return "none";
-  };
-
-  /**
    * 팔로우.
    *
    * 커뮤니티에 "팔로잉" 탭이 있고 DM 설정에도 "서로 팔로우" 가 있는데, 정작
@@ -1038,6 +1034,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         return result.following ? [...without, partner.id] : without;
       });
       showToast(result.following ? t("{name}님을 팔로우했어요", { name: partner.name }) : t("{name}님 팔로우를 해제했어요", { name: partner.name }));
+      void loadFollowCounts(me.id);
+      void loadFollowCounts(partner.id);
     } catch (caught) {
       setFollowingIds((current) => (wasFollowing ? [...current.filter((id) => id !== partner.id), partner.id] : current.filter((id) => id !== partner.id)));
       showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."));
@@ -1100,6 +1098,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     setDetail({ kind: "profile", partner });
     window.history.pushState(null, "", `#${section}/user/${partner.id}`);
     resetViewScroll();
+    void loadFollowCounts(partner.id);
   };
 
   const closeDetail = () => {
@@ -1606,8 +1605,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onToggleFollow={(partner) => void toggleFollow(partner)}
                 posts={posts.filter((post) => post.authorId === detail.partner.id)}
                 onOpenPost={openPost}
-                connection={connectionWith(detail.partner)}
-                onSignal={(partner) => { signalPartner(partner); closeDetail(); }}
+                onBlock={() => blockAuthor(detail.partner.id, detail.partner.name)}
+                counts={followCounts[detail.partner.id]}
               />
             ) : null}
 
@@ -1624,7 +1623,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onOpenList={() => setModal({ type: "partner-list" })}
                 onOpenLikes={() => setModal({ type: "likes" })}
                 receivedCount={likesReceived.length}
-                onProfile={openProfile}
                 onFilters={() => setModal({ type: "filters" })}
               />
             ) : null}
@@ -1714,6 +1712,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
             ) : null}
             {!detail && section === "learn" ? (
               <LearnView
+                counts={followCounts[me.id]}
                 onOpenSettings={() => setSettingsOpen(true)}
                 onStartReview={() => setModal({ type: "review", items: savedItems })}
                 onOpenPost={openPost}
@@ -1846,12 +1845,10 @@ function PartnerCard({
   match,
   depth,
   exit,
-  onProfile,
 }: {
   match: DailyMatchRecommendation;
   depth: number;
   exit: "" | "left" | "right";
-  onProfile: (id: string) => void;
 }) {
   const partner = match.partner;
   const top = depth === 0;
@@ -1863,14 +1860,11 @@ function PartnerCard({
       style={{ zIndex: 10 - depth }}
     >
 
-        {/* ① 누구인가 — 이 영역을 누르면 프로필로 갑니다 */}
-        <button
-          type="button"
-          className="single-match-person"
-          onClick={() => onProfile(partner.id)}
-          disabled={!top}
-          aria-label={t("{name} 프로필 보기", { name: partner.name })}
-        >
+        {/* ① 누구인가.
+            여기서는 프로필로 넘어가지 않습니다 — 오늘의 파트너는 소개받는 자리라
+            카드에 담긴 것만 보고 고르는 게 맞습니다. 프로필은 마음이 통해 대화가
+            열린 뒤(또는 커뮤니티에서 글을 보고) 들어갑니다. */}
+        <div className="single-match-person">
           <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
           <div>
             <span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={17} className="verified" aria-label={t("인증됨")} /> : null}</span>
@@ -1880,7 +1874,7 @@ function PartnerCard({
             </small>
           </div>
           <span className="match-score"><strong>{match.score}%</strong><small>{t("잘 맞아요")}</small></span>
-        </button>
+        </div>
 
         {/* ② 언어 교환 — 무엇을 주고받는지 */}
         <div className="match-langs">
@@ -2100,13 +2094,23 @@ function MenuPopover({
 
 
 /** 상세 화면 공통 헤더. 뒤로가기 + 제목. */
-function DetailHeader({ title, onBack }: { title: string; onBack: () => void }) {
+function DetailHeader({
+  title,
+  onBack,
+  menu,
+}: {
+  title: string;
+  onBack: () => void;
+  /** 헤더 오른쪽 ··· 메뉴. 신고·차단처럼 자주 쓰지 않는 것을 여기 담습니다. */
+  menu?: Array<{ id: string; label: string; icon: LucideIcon; danger?: boolean; onSelect: () => void }>;
+}) {
   return (
     <header className="detail-header">
       <button type="button" className="detail-back" onClick={onBack} aria-label={t("뒤로")}>
         <ArrowLeft size={20} />
       </button>
       <span className="detail-title">{title}</span>
+      {menu?.length ? <MenuPopover label={t("더 보기")} items={menu} /> : null}
     </header>
   );
 }
@@ -2428,10 +2432,10 @@ function ProfileDetailView({
   onReport,
   following,
   onToggleFollow,
-  connection,
-  onSignal,
   posts,
   onOpenPost,
+  onBlock,
+  counts,
 }: {
   partner: Partner;
   onBack: () => void;
@@ -2444,13 +2448,19 @@ function ProfileDetailView({
   /** 이 사람이 쓴 글. 프로필에서 바로 볼 수 있어야 어떤 사람인지 알 수 있습니다. */
   posts: FeedPost[];
   onOpenPost: (post: FeedPost) => void;
-  /** 이 사람과 지금 어떤 사이인지. 대화를 열 수 있는지가 여기서 갈립니다. */
-  connection: "chatting" | "matched" | "signaled" | "none";
-  onSignal: (partner: Partner) => void;
+  onBlock: () => void;
+  counts?: { following: number; followers: number; posts: number };
 }) {
   return (
     <div className="view detail-view">
-      <DetailHeader title={partner.name} onBack={onBack} />
+      <DetailHeader
+        title={partner.name}
+        onBack={onBack}
+        menu={[
+          { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: onReport },
+          { id: "block", label: t("차단하기"), icon: Ban, danger: true, onSelect: onBlock },
+        ]}
+      />
 
       <header className="profile-head">
         <div className="profile-head-id">
@@ -2466,35 +2476,21 @@ function ProfileDetailView({
       <p className="profile-head-bio">{partner.bio}</p>
 
       <div className="profile-head-stats">
-        <span><strong>{partner.compatibility}%</strong> {t("교환 궁합")}</span>
+        <span><strong>{counts ? counts.posts : posts.length}</strong> {t("게시물")}</span>
+        {counts ? <span><strong>{counts.following}</strong> {t("팔로잉")}</span> : null}
+        {counts ? <span><strong>{counts.followers}</strong> {t("팔로워")}</span> : null}
         <span><strong>{tx(partner.native)}</strong> {t("원어민")}</span>
         <span><strong>{tx(partner.learning)}</strong> {partner.level}</span>
       </div>
 
-      {/* 아직 연결되지 않은 사람과 곧바로 대화가 열리면 안 됩니다.
-          대화는 이미 방이 있거나 서로 마음을 보낸 뒤에만 열립니다. */}
-      {connection === "none" || connection === "signaled" ? (
-        <p className="profile-connect-note">
-          <Sparkles size={15} />
-          {connection === "signaled" ? t("마음을 보냈어요 · 상대도 보내면 대화가 열려요") : t("서로 마음을 보내면 대화가 열려요")}
-        </p>
-      ) : null}
-
+      {/* 버튼은 둘입니다 — 팔로우와 메시지. 신고·차단은 헤더의 ··· 메뉴로 뺐습니다.
+          자주 쓰는 것과 드물게 쓰는 것이 같은 줄에 나란히 있을 이유가 없습니다. */}
       <div className="profile-head-actions">
-        {connection === "chatting" || connection === "matched" ? (
-          <button className="primary-button" type="button" onClick={() => onStartChat(partner)}>
-            <MessageCircle size={16} /> {connection === "chatting" ? t("대화 열기") : t("대화 시작")}
-          </button>
-        ) : (
-          <button className="primary-button" type="button" disabled={connection === "signaled"} onClick={() => onSignal(partner)}>
-            <Heart size={16} /> {connection === "signaled" ? t("마음 보냄") : t("대화하고 싶어요")}
-          </button>
-        )}
-        <button className={following ? "primary-button" : "secondary-button"} type="button" aria-pressed={following} onClick={() => onToggleFollow(partner)}>
+        <button className={following ? "secondary-button" : "primary-button"} type="button" aria-pressed={following} onClick={() => onToggleFollow(partner)}>
           <UserPlus size={16} /> {following ? t("팔로잉") : t("팔로우")}
         </button>
-        <button className="secondary-button" type="button" onClick={onReport}>
-          <Flag size={16} /> {t("신고")}
+        <button className="secondary-button" type="button" onClick={() => onStartChat(partner)}>
+          <MessageCircle size={16} /> {t("메시지")}
         </button>
       </div>
 
@@ -2702,7 +2698,6 @@ function DiscoverView({
   dailyRecommendations,
   index,
   signaledCount,
-  onProfile,
   onFilters,
   onSkip,
   onSignal,
@@ -2716,7 +2711,6 @@ function DiscoverView({
   dailyRecommendations: DailyMatchRecommendation[];
   index: number;
   signaledCount: number;
-  onProfile: (partner: Partner) => void;
   onFilters: () => void;
   onSkip: () => void;
   onSignal: (partner: Partner) => void;
@@ -2846,7 +2840,6 @@ function DiscoverView({
             match={item}
             depth={depth}
             exit={depth === 0 ? exiting : ""}
-            onProfile={(id) => { const p = queue.find((q) => q.partner.id === id)?.partner; if (p) onProfile(p); }}
           />
         ))}
         </div>
@@ -3774,6 +3767,7 @@ function SettingsModal({
 }
 
 function LearnView({
+  counts,
   onToast,
   onEditProfile,
   savedItems,
@@ -3791,6 +3785,8 @@ function LearnView({
   onDeletePost,
   corrections,
 }: {
+  /** 팔로잉·팔로워 수. 못 받아왔으면 숫자를 감춥니다. */
+  counts?: { following: number; followers: number; posts: number };
   onEditProfile: () => void;
   savedItems: SavedPhrase[];
   onSavePhrase: (item: SavedPhrase) => void;
@@ -3826,9 +3822,11 @@ function LearnView({
       <p className="profile-head-bio">{profileBio}</p>
 
       <div className="profile-head-stats">
-        {/* 파트너 수·연속 일수는 서버가 아직 세지 않습니다. 지어낸 숫자를 보여주면
+        {/* 연속 일수 같은 것은 서버가 아직 세지 않습니다. 지어낸 숫자를 보여주면
             사용자가 자기 기록으로 믿게 되므로, 셀 수 있는 것만 둡니다. */}
-        <span><strong>{myPostList.length}</strong> {t("게시물")}</span>
+        <span><strong>{counts ? counts.posts : myPostList.length}</strong> {t("게시물")}</span>
+        {counts ? <span><strong>{counts.following}</strong> {t("팔로잉")}</span> : null}
+        {counts ? <span><strong>{counts.followers}</strong> {t("팔로워")}</span> : null}
       </div>
 
       <div className="profile-head-actions">

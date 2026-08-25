@@ -4864,6 +4864,7 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 }
 
 .detail-back:hover { background: var(--hover-bg); }
+.detail-header > .menu-wrap { margin-left: auto; }
 .detail-title { font-size: 15px; line-height: 21px; font-weight: 600; }
 
 .post-detail-author {

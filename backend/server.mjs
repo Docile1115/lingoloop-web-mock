@@ -1155,6 +1155,29 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
   return success(res, req, { following, mutual: following && reverse.exists, partner: profileForOthers(partnerSnapshot.data()) });
 });
 
+/**
+ * 팔로우 수. 내 프로필과 상대 프로필 양쪽에서 씁니다.
+ * 차단한 사이는 서로 세지 않습니다 — 화면에서 지워진 사람이 숫자로 남으면 어색합니다.
+ */
+app.get("/api/partners/:partnerId/follow-counts", requireUser, async (req, res) => {
+  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const [followingSnapshot, followerSnapshot, postSnapshot, blocked, partnerIds] = await Promise.all([
+    db.collection("follows").where("fromUserId", "==", partnerId).limit(500).get(),
+    db.collection("follows").where("toUserId", "==", partnerId).limit(500).get(),
+    db.collection("posts").where("authorId", "==", partnerId).limit(500).get(),
+    blockedBothWays(req.auth.uid),
+    acceptedPartnerIds(req.auth.uid),
+  ]);
+  const following = followingSnapshot.docs.map((d) => d.data().toUserId).filter((id) => !blocked.has(id));
+  const followers = followerSnapshot.docs.map((d) => d.data().fromUserId).filter((id) => !blocked.has(id));
+  // 글 수는 "내가 볼 수 있는 글"만 셉니다. 파트너 공개 글까지 세면 열 수 없는
+  // 글이 숫자에만 남아 목록과 어긋납니다.
+  const posts = postSnapshot.docs
+    .map((document) => document.data())
+    .filter((post) => post.visibility === "public" || post.authorId === req.auth.uid || partnerIds.has(post.authorId));
+  return success(res, req, { following: following.length, followers: followers.length, posts: posts.length });
+});
+
 app.get("/api/posts", requireUser, async (req, res) => {
   const [snapshot, partnerIds, blocked] = await Promise.all([
     db.collection("posts").orderBy("createdAt", "desc").limit(100).get(),
