@@ -1000,7 +1000,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
 
   const skipPartner = () => {
     setPartnerIndex((current) => current + 1);
-    showToast(t("다음 사람을 보여드릴게요"));
   };
 
   /**
@@ -1086,7 +1085,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
 
   const restartPartners = () => {
     setPartnerIndex(0);
-    showToast(t("처음부터 다시 볼게요"));
   };
 
   const resetViewScroll = () => {
@@ -1598,7 +1596,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 blocked={[...blockedAuthorIds]}
                 directory={[...directory, ...blockedPartners]}
                 onBack={closeDetail}
-                onUnhide={(id) => { setHiddenAuthorIds((c) => { const n = new Set(c); n.delete(id); return n; }); showToast(t("다시 보기로 바꿨어요")); }}
+                onUnhide={(id) => { setHiddenAuthorIds((c) => { const n = new Set(c); n.delete(id); return n; }); }}
                 onUnblock={(id) => { void unblockAuthor(id); showToast(t("차단을 해제했어요")); }}
               />
             ) : null}
@@ -2363,7 +2361,7 @@ function PostDetailView({
             <button type="button" onClick={() => document.getElementById("reply-input")?.focus()}>
               <MessageCircle size={18} /> {replies.filter((reply) => reply.kind !== "correction").length}
             </button>
-            <button type="button" className="correct" onClick={() => { enterCorrectionMode(); onToast(t("교정 모드를 열었어요")); }}>
+            <button type="button" className="correct" onClick={() => enterCorrectionMode()}>
               <PenLine size={18} /> {t("교정 {n}", { n: post.corrections })}
             </button>
             <button type="button" aria-label={t("링크 복사")} onClick={() => onCopyLink(`${window.location.origin}/#community/post/${post.id}`)}><Send size={18} /></button>
@@ -3322,12 +3320,9 @@ function ChatsView({
         }),
       });
       setSupportResult({ conversationId: selected.id, data });
-      if (polishDraft && data.improvedDraft) {
-        setDraft(data.improvedDraft);
-        onToast(t("대화 코치가 문장을 자연스럽게 다듬었어요"));
-      } else {
-        onToast(t("지금 대화에 맞는 주제를 새로 추천했어요"));
-      }
+      // 다듬기를 눌렀으면 입력창에 바로 넣어줍니다. 그 외에는 코치 패널이 채워지는
+      // 것으로 충분해서 따로 알리지 않습니다.
+      if (polishDraft && data.improvedDraft) setDraft(data.improvedDraft);
     } catch (caught) {
       onToast(caught instanceof Error ? caught.message : t("대화 코치를 부르지 못했어요."));
     } finally {
@@ -3481,7 +3476,7 @@ function ChatsView({
                 {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} /> : null}
                 <div className="message-stack">
                   <div className={message.kind ? "message-bubble message-bubble-media" : "message-bubble"}>
-                    {message.voice ? <button className="voice-message" type="button" onClick={() => { if (message.text) speakText(message.text); onToast(t("음성 메시지를 재생 중이에요")); }}><span className="play-dot"><Play size={13} fill="currentColor" /></span><span className="waveform"><i /><i /><i /><i /><i /><i /><i /><i /><i /></span><small>{message.voice}</small></button> : null}
+                    {message.voice ? <button className="voice-message" type="button" onClick={() => { if (message.text && !speakText(message.text)) onToast(t("이 브라우저에서는 음성 재생을 지원하지 않아요")); }}><span className="play-dot"><Play size={13} fill="currentColor" /></span><span className="waveform"><i /><i /><i /><i /><i /><i /><i /><i /><i /></span><small>{message.voice}</small></button> : null}
                     {message.kind === "image" && message.media ? (
                       <button type="button" className="message-media-open" onClick={() => onOpenPhoto(message.media!)} aria-label={t("사진 크게 보기")}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -3495,12 +3490,16 @@ function ChatsView({
                     {message.text && !message.kind ? <p>{message.text}</p> : null}
                   </div>
                   {translatedMessages.has(message.id) && (messageTranslations[message.id] ?? message.translated) ? <div className="message-translation"><Languages size={13} /> {messageTranslations[message.id] ?? message.translated}</div> : null}
+                  {/* 번역·교정·듣기·저장은 모두 글에 하는 일입니다.
+                      사진과 음성 말풍선에는 붙이지 않습니다. */}
+                  {message.kind ? null : (
                   <div className="message-tools">
                     {message.text ? <button type="button" onClick={() => void translateMessage(message)}><Languages size={13} /> {t("번역")}</button> : null}
                     <button type="button" onClick={() => { setDraft(message.text ?? ""); onToast(t("문장을 입력창에 가져왔어요 · 고쳐서 보내주세요")); }}><PenLine size={13} /> {t("교정")}</button>
                     <button type="button" className={savedItems.some((saved) => saved.id === message.id) ? "active" : ""} aria-pressed={savedItems.some((saved) => saved.id === message.id)} aria-label={t("저장")} onClick={() => onSavePhrase(savedFromMessage(message, selected.name))}><Bookmark size={16} /></button>
-                    <button type="button" onClick={() => onToast(speakText(message.text ?? "") ? t("문장을 원어민 발음으로 재생했어요") : t("이 브라우저에서는 음성 재생을 지원하지 않아요"))}><Volume2 size={13} /> {t("듣기")}</button>
+                    <button type="button" onClick={() => { if (!speakText(message.text ?? "")) onToast(t("이 브라우저에서는 음성 재생을 지원하지 않아요")); }}><Volume2 size={13} /> {t("듣기")}</button>
                   </div>
+                  )}
                 </div>
                 <time>{localizeClock(message.time)}{message.mine && message.readByPartner ? t(" · 읽음") : ""}</time>
               </div>
@@ -3989,7 +3988,7 @@ function LearnView({
             <p className="phrase-empty">{t("아직 저장한 표현이 없어요. 교정이나 게시물에서 저장해 보세요.")}</p>
           ) : (
           <div className="phrase-list">
-            {(showAllSaved ? savedItems : savedItems.slice(0, 3)).map((item, index) => <article key={item.id}><button type="button" className="phrase-play" aria-label={t("표현을 재생했어요")} onClick={() => onToast(speakText(item.phrase) ? t("표현을 재생했어요") : t("이 브라우저에서는 음성 재생을 지원하지 않아요"))}><Volume2 size={16} /></button><span><strong>{item.phrase}</strong>{item.meaning ? <small>{item.meaning}</small> : null}<em>{item.source}</em></span><span className={index === 0 ? "due-now" : ""}>{item.due}</span></article>)}
+            {(showAllSaved ? savedItems : savedItems.slice(0, 3)).map((item, index) => <article key={item.id}><button type="button" className="phrase-play" aria-label={t("듣기")} onClick={() => { if (!speakText(item.phrase)) onToast(t("이 브라우저에서는 음성 재생을 지원하지 않아요")); }}><Volume2 size={16} /></button><span><strong>{item.phrase}</strong>{item.meaning ? <small>{item.meaning}</small> : null}<em>{item.source}</em></span><span className={index === 0 ? "due-now" : ""}>{item.due}</span></article>)}
           </div>
           )}
           <button className="review-button" type="button" disabled={savedItems.length === 0} onClick={onStartReview}><BookOpenCheck size={17} /> {t("4분 복습 시작")}</button>
@@ -4207,7 +4206,7 @@ function ModalLayer({
       <div className={`modal modal-${modal.type}`} role="dialog" aria-modal="true" aria-label={modalLabel(modal.type)}>
         <button className="modal-close" type="button" onClick={requestClose} aria-label={t("닫기")}><X size={20} /></button>
         {modal.type === "profile" ? <ProfileModal partner={modal.partner} following={followingIds.includes(modal.partner.id)} onToggleFollow={onToggleFollow} onStartChat={onStartChat} onReport={() => onReport(modal.partner.name)} /> : null}
-        {modal.type === "filters" ? <MatchingPreferencesModal initial={matchPreferences} onClose={onClose} onSave={onSaveMatchPreferences} onToast={onToast} /> : null}
+        {modal.type === "filters" ? <MatchingPreferencesModal initial={matchPreferences} onClose={onClose} onSave={onSaveMatchPreferences} /> : null}
         {modal.type === "compose" ? <ComposeModal onPublish={onPublish} onToast={onToast} /> : null}
         {modal.type === "search" ? <SearchModal directory={directory} posts={posts} savedItems={savedItems} onOpenProfile={onOpenProfile} onOpenPost={onOpenPost} onToast={onToast} /> : null}
         {modal.type === "create-room" ? <CreateRoomModal onCreate={onCreateRoom} onToast={onToast} /> : null}
@@ -4504,12 +4503,10 @@ function MatchingPreferencesModal({
   initial,
   onClose,
   onSave,
-  onToast,
 }: {
   initial: MatchPreferences;
   onClose: () => void;
   onSave: (preferences: MatchPreferences) => Promise<void>;
-  onToast: (message: string) => void;
 }) {
   const [preferences, setPreferences] = useState<MatchPreferences>(initial);
   const [saving, setSaving] = useState(false);
@@ -4627,7 +4624,7 @@ function MatchingPreferencesModal({
       </label>
       <div className="matching-schedule-note"><CalendarClock size={18} /><span><strong>{tx(msg("다음 추천 · 내일 오전 9시"))}</strong><small>{tx(msg("선호 조건이 부족해도 필수 조건을 벗어난 사람을 임의로 섞지 않아요."))}</small></span><Pill tone="success">{tx(msg("12명"))}</Pill></div>
       <div className="modal-footer">
-        <button className="text-button" type="button" onClick={() => { setPreferences(defaultMatchPreferences); onToast(t("기본 매칭 조건으로 되돌렸어요")); }}><RotateCcw size={15} /> {t("초기화")}</button>
+        <button className="text-button" type="button" onClick={() => setPreferences(defaultMatchPreferences)}><RotateCcw size={15} /> {t("초기화")}</button>
         <button className="primary-button" type="button" disabled={saving || !preferences.targetLanguages.length || !preferences.availability.length || !preferences.intents.length} onClick={() => void save()}>{saving ? t("저장 중…") : tx(msg("설정 저장하고 12명 보기"))}</button>
       </div>
     </div>
