@@ -3087,7 +3087,8 @@ function ChatsView({
   savedItems: SavedPhrase[];
   onSavePhrase: (item: SavedPhrase) => void;
   conversations: Conversation[];
-  selected: Conversation;
+  /** 고른 대화. 대화가 하나도 없으면 없습니다 — 새로 가입한 사람이 그렇습니다. */
+  selected?: Conversation;
   mobileThreadOpen: boolean;
   requestIds: ReadonlySet<string>;
   mutedChatIds: Set<string>;
@@ -3195,7 +3196,7 @@ function ChatsView({
   };
   const [coachLoading, setCoachLoading] = useState(false);
   const [supportResult, setSupportResult] = useState<{ conversationId: string; data: ConversationSupport } | null>(null);
-  const conversationSupport = supportResult?.conversationId === selected.id ? supportResult.data : null;
+  const conversationSupport = selected && supportResult?.conversationId === selected.id ? supportResult.data : null;
   /* 요청함은 일반 받은 대화와 분리한 뒤, 검색어가 있으면 이름·마지막 메시지에서 찾습니다. */
   const byTab = conversations.filter((item) =>
     listTab === "turn"
@@ -3212,12 +3213,12 @@ function ChatsView({
     : byTab;
   const unreadTotal = conversations.reduce((sum, item) => sum + item.unread, 0);
   /* 지금 보이는 목록에 선택한 대화가 있는지. 없으면 오른쪽은 비워둡니다. */
-  const selectedVisible = filtered.some((item) => item.id === selected?.id);
+  const selectedVisible = Boolean(selected) && filtered.some((item) => item.id === selected?.id);
   /* 오른쪽은 대화창입니다 — 목록이 왜 비었는지(검색 실패 등)는 목록 바로 옆에서 설명하고,
      여기서는 "열어볼 대화가 있는가"만 봅니다. 수락 전 요청은 아직 대화가 아니라 빼고 셉니다. */
   const hasAnyChat = conversations.some((item) => !requestIds.has(item.id));
   const myTurnCount = conversations.filter((item) => item.myTurn && !requestIds.has(item.id)).length;
-  const selectedIsRequest = requestIds.has(selected.id);
+  const selectedIsRequest = Boolean(selected && requestIds.has(selected.id));
   const acceptRequest = (id: string, name: string) => {
     onAcceptRequest(id);
     setListTab("all");
@@ -3239,7 +3240,7 @@ function ChatsView({
    * 구분할 수 없게 됩니다.
    */
   const requestConversationSupport = async (polishDraft = false) => {
-    if (!selected.partnerId) {
+    if (!selected?.partnerId) {
       onToast(t("이 대화에서는 코치를 쓸 수 없어요"));
       return;
     }
@@ -3294,7 +3295,7 @@ function ChatsView({
             <div className="conversation-entry" key={conversation.id}>
               <button
                 type="button"
-                className={`conversation-item ${selected.id === conversation.id ? "active" : ""}`}
+                className={`conversation-item ${selected?.id === conversation.id ? "active" : ""}`}
                 onClick={() => onSelect(conversation.id)}
               >
                 <Avatar name={conversation.name} flag={conversation.flag} accent={conversation.accent} size="lg" online={conversation.online} photo={conversation.photo} countryCode={conversation.countryCode} />
@@ -3322,7 +3323,7 @@ function ChatsView({
           <strong>{hasAnyChat ? t("왼쪽에서 대화를 골라주세요") : t("아직 대화가 없어요")}</strong>
           <p>{hasAnyChat ? t("고른 대화가 여기에 열립니다.") : t("왼쪽에서 새 대화를 시작해보세요.")}</p>
         </section>
-      ) : (
+      ) : selected ? (
       <section className="chat-thread" aria-label={t("{name}님과의 대화", { name: selected.name })}>
         <header className="thread-header">
           <button className="mobile-back" type="button" onClick={onBack} aria-label={t("대화 목록으로")}><ArrowLeft size={21} /></button>
@@ -3492,7 +3493,7 @@ function ChatsView({
           </div>
         </form>}
       </section>
-      )}
+      ) : null}
     </div>
   );
 }
