@@ -95,6 +95,10 @@
   --primary-strong: var(--g-600);   /* 호버 — 한 단계만 눌러 글자 대비를 지킵니다 */
   --primary-soft: var(--g-50);
   --primary-border: var(--g-200);
+  /* 내가 보낸 말풍선. 버튼(원색 + 어두운 글자)과 달리 흰 글자를 씁니다 —
+     문장이 길게 이어지는 자리라 흰 글자가 눈이 덜 아픕니다. 대비 4.58. */
+  --bubble-mine: var(--g-700);
+  --bubble-mine-text: #ffffff;
   --brand: var(--g-500);
   --secondary-button: var(--n-0);
 
@@ -2421,7 +2425,7 @@ p {
   background: var(--sunken);          /* 받은 메시지 실측 */
 }
 
-.message-row.mine .message-bubble { border: 0; border-radius: 18px 18px 4px 18px; background: var(--primary); color: var(--primary-text); }
+.message-row.mine .message-bubble { border: 0; border-radius: 18px 18px 4px 18px; background: var(--bubble-mine); color: var(--bubble-mine-text); }
 .message-bubble p { font-size: 15px; line-height: 21px; }
 
 .message-translation {
@@ -4528,6 +4532,8 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
     --primary-strong: var(--g-600);
     --primary-soft: rgba(0, 200, 83, 0.16);
     --primary-border: rgba(0, 200, 83, 0.4);
+    --bubble-mine: var(--g-700);
+    --bubble-mine-text: #ffffff;
     --brand: var(--g-300);
     --secondary-button: #1b1e1d;
 
