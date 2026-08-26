@@ -3115,6 +3115,7 @@ function ChatsView({
   const [coachOpen, setCoachOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const messageAreaRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [recording, setRecording] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -3222,6 +3223,20 @@ function ChatsView({
    * 보낸 메시지가 화면 밖에 생기면 보낸 사람은 갔는지 알 수 없습니다.
    * 사진은 다 그려진 뒤에야 높이가 정해지므로 그림이 실린 뒤 한 번 더 내립니다.
    */
+  /**
+   * 입력창 높이를 내용에 맞춥니다.
+   *
+   * 높이를 24px 로 고정해두는 바람에 줄을 바꿔도 늘어나지 않고 안에서 잘렸습니다.
+   * auto 로 되돌린 뒤 실제 내용 높이를 다시 넣습니다. 상한(--composer-max)을 넘으면
+   * 더 늘리지 않고 안에서 스크롤합니다 — 그러지 않으면 긴 글에 대화가 다 가립니다.
+   */
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft, selected?.id]);
+
   const messageCount = selected?.messages.length ?? 0;
   useEffect(() => {
     const node = messageAreaRef.current;
@@ -3501,7 +3516,7 @@ function ChatsView({
             </div>
             <label className="message-input">
               <span className="sr-only">{t("메시지 입력")}</span>
-              <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t("{name}님에게 메시지 보내기", { name: selected.name })} rows={1} maxLength={LIMITS.message} />
+              <textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t("{name}님에게 메시지 보내기", { name: selected.name })} rows={1} maxLength={LIMITS.message} />
               <button type="button" aria-label={t("이모지")} onClick={() => setDraft(`${draft} 😊`)}><Smile size={18} /></button>
             </label>
             <button

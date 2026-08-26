@@ -2432,6 +2432,8 @@ p {
 .writing-language { display: flex; align-items: center; gap: var(--sp-1); margin: 0 0 6px 88px; color: var(--muted); font-size: 12px; }
 .writing-language span { padding: 2px var(--sp-1); border-radius: 4px; background: var(--sunken); color: var(--ink); font-size: 12px; font-weight: 700; }
 .composer-row { display: flex; align-items: flex-end; gap: var(--sp-1); }
+/* 입력이 여러 줄이 되면 칸이 아래로 자랍니다 — 버튼은 아래에 붙어 있습니다. */
+.message-input { align-items: flex-end; }
 .composer-row > .icon-button { width: 35px; height: 35px; }
 
 .message-input {
@@ -2447,7 +2449,7 @@ p {
 }
 
 .message-input:focus-within { border-color: var(--line-structure); box-shadow: 0 0 0 3px rgba(161, 161, 161, .08); }
-.message-input textarea { display: block; width: 100%; height: 24px; min-height: 24px; max-height: 74px; padding: 0; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 24px; }
+.message-input textarea { display: block; width: 100%; min-height: 24px; max-height: 132px; padding: 0; overflow-y: auto; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 24px; }
 .message-input button { display: inline-flex; width: 26px; height: 26px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--muted); }
 /* 첨부(+) — 보내기 버튼과 같은 크기로 한 줄에 섭니다. */
 .composer-attach {
