@@ -2354,6 +2354,20 @@ p {
 .message-stack { display: flex; max-width: min(68%, 560px); flex-direction: column; }
 .message-row.mine .message-stack { align-items: flex-end; }
 
+/* 도구는 말풍선 옆에 둡니다. 아래에 두면 말풍선이 뜰 때마다 줄 높이가 바뀌어
+   대화가 아래위로 흔들립니다. 내 말풍선은 왼쪽, 받은 말풍선은 오른쪽입니다.
+   기준은 줄 전체가 아니라 말풍선 묶음입니다 — 줄 기준으로 잡으면 화면 반대편
+   끝에 가서 붙습니다. */
+.message-stack { position: relative; }
+.message-stack > .message-tools {
+  position: absolute;
+  bottom: 0;
+  margin-top: 0;
+  white-space: nowrap;
+}
+.message-row.mine .message-stack > .message-tools { right: calc(100% + var(--sp-2)); left: auto; }
+.message-row.theirs .message-stack > .message-tools { left: calc(100% + var(--sp-2)); right: auto; }
+
 .message-bubble {
   padding: var(--sp-2) var(--sp-3);   /* 실측 8/12 */
   border: 0;

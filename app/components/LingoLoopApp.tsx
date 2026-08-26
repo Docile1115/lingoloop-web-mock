@@ -1236,6 +1236,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         partnerId: partner.id,
         name: partner.name,
         flag: partner.flag,
+        /* 프로필 사진과 국적도 함께 옮깁니다 — 빠뜨리면 커뮤니티에서는 보이던
+           사람이 대화에 들어오는 순간 얼굴 없는 회색 아바타가 됩니다. */
+        photo: partner.photo,
+        countryCode: partner.countryCode,
         accent: partner.accent,
         preview: t("새로운 연습 제안을 보내보세요"),
         time: t("지금"),
