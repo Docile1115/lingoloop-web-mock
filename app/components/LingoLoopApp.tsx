@@ -3131,7 +3131,7 @@ function ChatsView({
       if (media.length > MAX_ATTACHMENT) return onToast(t("사진을 줄여도 너무 커요. 다른 사진을 골라주세요."));
       await onSendAttachment("image", media, t("사진"));
     } catch {
-      onToast(t("사진을 읽지 못했어요."));
+      onToast(t("이 형식은 브라우저가 열지 못해요. JPG·PNG 로 저장해서 올려주세요."));
     }
   };
 
@@ -3446,7 +3446,7 @@ function ChatsView({
               ref={photoInputRef}
               className="sr-only"
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
+              accept="image/*"
               aria-label={t("사진 고르기")}
               onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void pickPhoto(file); }}
             />
@@ -4636,7 +4636,7 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
       if (media.length > MAX_ATTACHMENT) return onToast(t("사진을 줄여도 너무 커요. 다른 사진을 골라주세요."));
       setImage(media);
     } catch {
-      onToast(t("사진을 읽지 못했어요."));
+      onToast(t("이 형식은 브라우저가 열지 못해요. JPG·PNG 로 저장해서 올려주세요."));
     }
   };
 
@@ -4690,7 +4690,7 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
         ref={photoInputRef}
         className="sr-only"
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
+        accept="image/*"
         aria-label={t("사진 고르기")}
         onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void pickPhoto(file); }}
       />
