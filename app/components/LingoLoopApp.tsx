@@ -3114,6 +3114,7 @@ function ChatsView({
   const [messageTranslations, setMessageTranslations] = useState<Record<string, string>>({});
   const [coachOpen, setCoachOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const messageAreaRef = useRef<HTMLDivElement | null>(null);
   const [recording, setRecording] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -3214,6 +3215,29 @@ function ChatsView({
   const unreadTotal = conversations.reduce((sum, item) => sum + item.unread, 0);
   /* 지금 보이는 목록에 선택한 대화가 있는지. 없으면 오른쪽은 비워둡니다. */
   const selectedVisible = Boolean(selected) && filtered.some((item) => item.id === selected?.id);
+
+  /**
+   * 새 말풍선이 생기거나 대화를 바꾸면 맨 아래로 내립니다.
+   *
+   * 보낸 메시지가 화면 밖에 생기면 보낸 사람은 갔는지 알 수 없습니다.
+   * 사진은 다 그려진 뒤에야 높이가 정해지므로 그림이 실린 뒤 한 번 더 내립니다.
+   */
+  const messageCount = selected?.messages.length ?? 0;
+  useEffect(() => {
+    const node = messageAreaRef.current;
+    if (!node) return;
+    const toBottom = () => { node.scrollTop = node.scrollHeight; };
+    toBottom();
+    const media = [...node.querySelectorAll("img, audio")];
+    media.forEach((element) => {
+      element.addEventListener("load", toBottom, { once: true });
+      element.addEventListener("loadedmetadata", toBottom, { once: true });
+    });
+    return () => media.forEach((element) => {
+      element.removeEventListener("load", toBottom);
+      element.removeEventListener("loadedmetadata", toBottom);
+    });
+  }, [messageCount, selected?.id]);
   /* 오른쪽은 대화창입니다 — 목록이 왜 비었는지(검색 실패 등)는 목록 바로 옆에서 설명하고,
      여기서는 "열어볼 대화가 있는가"만 봅니다. 수락 전 요청은 아직 대화가 아니라 빼고 셉니다. */
   const hasAnyChat = conversations.some((item) => !requestIds.has(item.id));
@@ -3390,7 +3414,7 @@ function ChatsView({
           </section>
         ) : null}
 
-        <div className="message-area">
+        <div className="message-area" ref={messageAreaRef}>
           <div className="day-divider"><span>{t("오늘")}</span></div>
           {selected.messages.map((message) => {
             if (message.system) return <div className="system-message" key={message.id}><ShieldCheck size={14} />{message.text}</div>;
