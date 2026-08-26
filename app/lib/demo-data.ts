@@ -113,6 +113,8 @@ export type Conversation = {
   photo?: string;
   /** 상대 국가 코드. */
   countryCode?: string;
+  /** 상대와 나의 시차(시간). 서버가 시간대를 주지 않으면 0 이고, 그러면 감춥니다. */
+  timeOffset?: number;
   accent: Accent;
   preview: string;
   time: string;

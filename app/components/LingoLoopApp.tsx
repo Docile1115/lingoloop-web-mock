@@ -32,7 +32,6 @@ import {
   Languages,
   Link as LinkIcon,
   LogOut,
-  Lightbulb,
   LockKeyhole,
   Maximize2,
   MessageCircle,
@@ -1275,6 +1274,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
            사람이 대화에 들어오는 순간 얼굴 없는 회색 아바타가 됩니다. */
         photo: partner.photo,
         countryCode: partner.countryCode,
+        timeOffset: partner.timeOffset,
         accent: partner.accent,
         preview: t("새로운 연습 제안을 보내보세요"),
         time: t("지금"),
@@ -1584,10 +1584,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
 
       <div className="workspace">
         <header className="topbar">
-          <button className="mobile-brand" type="button" onClick={() => goToSection("discover")} aria-label={t("LingoLoop 홈")}>
-            <span className="brand-mark"><Languages size={20} /></span>
-            <span className="brand-wordmark">Lingo<span>Loop</span></span>
-          </button>
+          {/* 로고는 뺐습니다. 지금 어느 탭인지는 아래 내비가 알려주고, 로고는 매 화면
+              같은 자리를 먹기만 합니다. */}
           <div className="topbar-actions">
             <IconButton label={t("검색")} icon={Search} onClick={() => setModal({ type: "search" })} />
             {section === "community" ? <IconButton label={t("글쓰기")} icon={PenLine} className="top-compose-button" onClick={() => setModal({ type: "compose" })} /> : null}
@@ -3358,6 +3356,10 @@ function ChatsView({
     el.style.height = `${el.scrollHeight}px`;
   }, [draft, selected?.id]);
 
+  /* 상대 지역의 시각. 나라를 모르면(시차 0) 감춥니다 — 내 시각을 상대 시각인 척
+     보여주면 새벽에 말을 걸게 됩니다. 마운트 뒤에 계산합니다(하이드레이션). */
+  const partnerClock = useLocalTime(selected?.timeOffset ?? 0);
+
   const messageCount = selected?.messages.length ?? 0;
   useEffect(() => {
     const node = messageAreaRef.current;
@@ -3485,14 +3487,16 @@ function ChatsView({
           <button className="mobile-back" type="button" onClick={onBack} aria-label={t("대화 목록으로")}><ArrowLeft size={21} /></button>
           <button className="thread-person" type="button" onClick={onProfile}>
             <Avatar name={selected.name} flag={selected.flag} accent={selected.accent} size="sm" online={selected.online} photo={selected.photo} countryCode={selected.countryCode} />
-            <span><strong>{selected.name}</strong><small>{selected.online ? t("온라인 · 영어 ⇄ 한국어") : t("최근 활동 어제")}</small></span>
+            {/* 교환 언어는 프로필에 있습니다. 여기서는 지금 말을 걸어도 되는 시간인지가
+                더 궁금하므로 상대 지역의 시각을 적습니다. */}
+            <span><strong>{selected.name}</strong>{partnerClock ? <small>{t("현지 {clock}", { clock: partnerClock })}</small> : null}</span>
           </button>
           <div className="thread-actions">
-            <button className={`coach-cta ${coachOpen ? "active" : ""}`} type="button" onClick={() => setCoachOpen(!coachOpen)}><WandSparkles size={16} /><span>{t("대화 코치")}</span></button>
-            <button className="exchange-cta" type="button" onClick={onExchange}><Timer size={16} /><span>{t("교환 세션")}</span></button>
+            <IconButton label={t("전화하기")} icon={Phone} onClick={() => onToast(t("음성 통화는 아직 준비 중이에요"))} />
             <MenuPopover
               label={t("대화 메뉴")}
               items={[
+                { id: "exchange", label: t("교환 세션"), icon: Timer, onSelect: onExchange },
                 { id: "mute", label: mutedChatIds.has(selected.id) ? t("알림 켜기") : t("알림 끄기"), icon: BellOff, onSelect: () => onToggleMute(selected.id, selected.name) },
                 { id: "leave", label: t("대화방 나가기"), icon: LogOut, onSelect: () => onLeaveChat(selected.id, selected.name) },
                 { id: "block", label: t("차단하기"), icon: Ban, danger: true, onSelect: () => onBlockPartner(selected.id, selected.name) },
@@ -3511,39 +3515,34 @@ function ChatsView({
           <button type="button" onClick={onExchange}>{t("15분 이어하기")} <ChevronRight size={15} /></button>
         </div>
 
+        {/* 예전에는 메시지와 입력창 사이에 큰 배너로 끼어 있었습니다. 대화를 가리고
+            읽을 것도 많아서, 눌러 쓸 수 있는 한 줄 제안으로 바꿨습니다.
+            입력창 바로 위에 두어 고르면 그대로 입력창에 들어갑니다. */}
         {coachOpen ? (
-          <section className="conversation-coach" aria-label={t("대화 코치")}>
-            <header>
-              <span className="coach-title-icon"><WandSparkles size={18} /></span>
-              <span><strong>{t("대화 코치")}</strong><small>{t("{name}님과의 공통점과 지금까지의 흐름을 바탕으로 준비했어요.", { name: selected.name })}</small></span>
-              <button type="button" onClick={() => void requestConversationSupport(false)} disabled={coachLoading}><RefreshCw size={14} className={coachLoading ? "spinning" : ""} /> {t("새로 추천")}</button>
-              <button type="button" className="coach-close" aria-label={t("대화 코치 닫기")} onClick={() => setCoachOpen(false)}><X size={15} /></button>
-            </header>
-            {!conversationSupport ? (
-              <p className="coach-empty">{t("“새로 추천”을 누르면 지금 대화에 맞는 주제를 찾아드려요.")}</p>
-            ) : (
-            <><div className="coach-grid">
-              <div className="coach-topic-list">
-                <span className="coach-label"><Lightbulb size={13} /> {t("대화 주제")}</span>
-                {conversationSupport.topics.slice(0, 3).map((topic, index) => (
-                  <button type="button" key={topic} onClick={() => setDraft(index === 0 ? conversationSupport.suggestedOpeners[0] ?? `Hi ${selected.name}! What was the highlight of your week?` : `Hi ${selected.name}! Can we talk about “${topic}” today?`)}>
-                    <span>{index + 1}</span>{topic}<ChevronRight size={13} />
-                  </button>
-                ))}
-              </div>
-              <div className="coach-response-card">
-                <span className="coach-label"><MessageCircle size={13} /> {t("추천 오프너")}</span>
-                <p>{conversationSupport.suggestedOpeners[0]}</p>
-                <div className="coach-followups">{conversationSupport.followUpQuestions.slice(0, 2).map((question) => <button type="button" key={question} onClick={() => setDraft(question)}>{question}</button>)}</div>
-                <div className="coach-actions">
-                  <button type="button" onClick={() => setDraft(conversationSupport.suggestedOpeners[0] ?? "")}>{t("입력창에 넣기")}</button>
-                  <button type="button" onClick={() => void requestConversationSupport(true)} disabled={!draft.trim() || coachLoading}><WandSparkles size={13} /> {t("작성 문장 다듬기")}</button>
-                </div>
-              </div>
+          <div className="coach-strip" aria-label={t("대화 코치")}>
+            <button
+              type="button"
+              className="coach-strip-refresh"
+              onClick={() => void requestConversationSupport(false)}
+              disabled={coachLoading}
+              aria-label={t("새로 추천")}
+            >
+              <RefreshCw size={14} className={coachLoading ? "spinning" : ""} />
+            </button>
+            <div className="coach-strip-items">
+              {!conversationSupport ? (
+                <span className="coach-strip-empty">{coachLoading ? t("찾는 중…") : t("“새로 추천”을 누르면 지금 대화에 맞는 주제를 찾아드려요.")}</span>
+              ) : (
+                [
+                  ...conversationSupport.suggestedOpeners.slice(0, 1),
+                  ...conversationSupport.followUpQuestions.slice(0, 3),
+                ].map((line) => (
+                  <button type="button" key={line} onClick={() => setDraft(line)}>{line}</button>
+                ))
+              )}
             </div>
-            <footer><Sparkles size={12} /><span>{conversationSupport.tip}</span></footer></>
-            )}
-          </section>
+            <button type="button" className="coach-strip-close" aria-label={t("대화 코치 닫기")} onClick={() => setCoachOpen(false)}><X size={15} /></button>
+          </div>
         ) : null}
 
         <div className="message-area" ref={messageAreaRef}>
@@ -5634,10 +5633,59 @@ function LanguagePicker() {
   );
 }
 
+/**
+ * 앱 스토어 주소.
+ *
+ * 아직 심사 전이라 비어 있습니다. 주소가 나오면 여기만 채우면 버튼이 살아납니다.
+ * 지어낸 주소를 넣어두면 눌러본 사람이 엉뚱한 곳으로 갑니다.
+ */
+const STORE_LINKS = {
+  ios: "",
+  android: "",
+};
+
+/**
+ * 앱 설치 안내.
+ *
+ * 폰·태블릿에서만 보입니다. 어느 쪽을 보여줄지는 자바스크립트가 아니라 CSS 가
+ * 정합니다(globals.css 의 미디어쿼리) — 자바스크립트로 갈랐더니 서버가 아무것도
+ * 그리지 못했고, 폰에서는 앱 화면이 잠깐 보였다가 바뀌었습니다.
+ */
+function InstallAppScreen() {
+  return (
+    <main className="install-page">
+      <div className="install-card">
+        <span className="brand-mark install-mark"><Languages size={26} /></span>
+        <h1>Lingo<strong>Loop</strong></h1>
+        <p className="install-lead">{t("휴대폰과 태블릿에서는 앱으로 만나요.")}</p>
+        <p className="install-body">{t("앱을 설치하면 대화 알림을 받고, 오프라인에서도 저장한 표현을 볼 수 있어요.")}</p>
+
+        <div className="install-stores">
+          {STORE_LINKS.ios ? (
+            <a className="primary-button" href={STORE_LINKS.ios}>{t("App Store 에서 받기")}</a>
+          ) : (
+            <span className="install-soon">{t("App Store · 준비 중")}</span>
+          )}
+          {STORE_LINKS.android ? (
+            <a className="primary-button" href={STORE_LINKS.android}>{t("Play 스토어에서 받기")}</a>
+          ) : (
+            <span className="install-soon">{t("Play 스토어 · 준비 중")}</span>
+          )}
+        </div>
+
+        <p className="install-note">{t("컴퓨터에서는 브라우저로 바로 쓸 수 있어요.")}</p>
+      </div>
+    </main>
+  );
+}
+
 export default function LingoLoopApp() {
   return (
     <I18nProvider>
-      <AuthGate />
+      <InstallAppScreen />
+      <div className="desktop-surface">
+        <AuthGate />
+      </div>
     </I18nProvider>
   );
 }

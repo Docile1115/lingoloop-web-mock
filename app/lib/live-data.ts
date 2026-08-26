@@ -209,6 +209,42 @@ export function clockTime(value: string): string {
   return `${meridiem} ${hour12}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+/**
+ * 나라별 대표 시간대.
+ *
+ * 서버는 사람마다 시간대를 저장하지 않습니다. 나라를 알면 대부분은 맞고, 여러
+ * 시간대를 쓰는 나라(미국·캐나다·호주·브라질)는 가장 사람이 많은 곳으로 잡습니다.
+ * 정확한 값이 필요해지면 프로필에 시간대를 받아 여기를 대신하면 됩니다.
+ */
+const COUNTRY_ZONES: Record<string, string> = {
+  KR: "Asia/Seoul",
+  JP: "Asia/Tokyo",
+  CN: "Asia/Shanghai",
+  VN: "Asia/Ho_Chi_Minh",
+  GB: "Europe/London",
+  FR: "Europe/Paris",
+  DE: "Europe/Berlin",
+  ES: "Europe/Madrid",
+  US: "America/New_York",
+  CA: "America/Toronto",
+  AU: "Australia/Sydney",
+  BR: "America/Sao_Paulo",
+};
+
+/** 상대 지역이 나보다 몇 시간 앞/뒤인지. 모르면 0 이고, 화면은 0 이면 감춥니다. */
+export function offsetHoursFor(countryCode?: string): number {
+  const zone = COUNTRY_ZONES[(countryCode || "").toLocaleUpperCase()];
+  if (!zone) return 0;
+  try {
+    const now = new Date();
+    const there = new Date(now.toLocaleString("en-US", { timeZone: zone }));
+    const here = new Date(now.toLocaleString("en-US"));
+    return Math.round((there.getTime() - here.getTime()) / 3600000);
+  } catch {
+    return 0;
+  }
+}
+
 export function toPartner(profile: ApiProfile, score = 0): Partner {
   const learning = profile.learningLanguages?.[0];
   return {
@@ -218,9 +254,7 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
     flag: profile.country?.flag || "🌐",
     city: profile.city || "",
     country: profile.country?.name || "",
-    // 서버는 상대의 시간대를 주지 않습니다. 시차를 지어내면 틀린 시각을 보여주게
-    // 되므로 0 으로 두고, 화면은 시차가 0 이면 현지 시각을 감춥니다.
-    timeOffset: 0,
+    timeOffset: offsetHoursFor(profile.country?.code),
     native: (profile.nativeLanguages?.length ? profile.nativeLanguages : ["ko"])
       .map((code) => tx(languageName(code)))
       .join(" · "),
@@ -304,6 +338,7 @@ export function toConversation(conversation: ApiConversation, messages: ChatMess
     flag: partner?.country?.flag || "🌐",
     photo: partner?.avatarUrl || "",
     countryCode: partner?.country?.code || "",
+    timeOffset: offsetHoursFor(partner?.country?.code),
     accent: accentFor(partner?.id || conversation.id),
     preview: conversation.preview,
     time: relativeTime(conversation.updatedAt),

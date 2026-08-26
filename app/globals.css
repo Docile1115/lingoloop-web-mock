@@ -2129,16 +2129,16 @@ p {
 
 .chat-list-tabs button {
   display: inline-flex;
-  height: 33px;
+  min-height: 28px;
   align-items: center;
   gap: var(--sp-1);
-  padding: 0 12px;
-  border: var(--bw-hair) solid var(--line-strong);
-  border-radius: var(--r-xl);
-  background: transparent;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
+  padding: 0 10px;
+  border: var(--bw-hair) solid var(--primary-border);
+  border-radius: var(--r-pill);
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .chat-list-tabs button:hover { background: var(--hover-bg); }
@@ -3853,11 +3853,11 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 /* Mobile */
 
 @media (max-width: 720px) {
-  body { overflow: auto; background: var(--surface-soft); }
-  .app-root { min-height: 100dvh; padding-bottom: 70px; background: var(--surface-soft); }
+  body { overflow: auto; background: var(--surface); }
+  .app-root { min-height: 100dvh; padding-bottom: 70px; background: var(--surface); }
   .desktop-sidebar { display: none; }
   .workspace { min-height: 100dvh; margin-left: 0; }
-  .topbar { display: flex; position: sticky; top: 0; height: 59px; padding: 0 15px; border-bottom-color: var(--line); background: var(--surface-soft); }
+  .topbar { display: flex; position: sticky; top: 0; height: 59px; padding: 0 15px; border-bottom-color: var(--line); background: var(--surface); }
   .mobile-brand { display: inline-flex; padding: 0; }
   .mobile-brand .brand-mark { width: 31px; height: 31px; border-radius: 10px 10px 10px 3px; }
   .mobile-brand .brand-wordmark { font-size: 15px; }
@@ -3868,7 +3868,7 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   .workspace-grid { display: block; height: auto; }
   .main-content { overflow: visible; }
   .view { --view-pad-x: var(--sp-4); width: 100%; padding: var(--sp-4) var(--view-pad-x) var(--sp-6); }
-  .mobile-nav { position: fixed; z-index: 100; right: 0; bottom: 0; left: 0; display: grid; height: 68px; grid-template-columns: repeat(5,1fr); padding: 6px max(5px,env(safe-area-inset-right)) max(5px,env(safe-area-inset-bottom)) max(5px,env(safe-area-inset-left)); border-top: var(--bw-thin) solid var(--line); background: var(--surface-soft); backdrop-filter: blur(18px); }
+  .mobile-nav { position: fixed; z-index: 100; right: 0; bottom: 0; left: 0; display: grid; height: 68px; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 6px max(5px,env(safe-area-inset-right)) max(5px,env(safe-area-inset-bottom)) max(5px,env(safe-area-inset-left)); border-top: var(--bw-thin) solid var(--line); background: var(--surface); backdrop-filter: blur(18px); }
   .mobile-nav button { display: flex; align-items: center; justify-content: center; gap: var(--sp-1); flex-direction: column; border: 0; background: transparent; color: var(--subtle); }
   .mobile-nav button.active { color: var(--ink); }
   .mobile-nav-icon { position: relative; display: inline-flex; width: 34px; height: 26px; align-items: center; justify-content: center; border-radius: var(--r-pill); }
@@ -4026,7 +4026,10 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   .message-area { padding: var(--sp-1) var(--sp-3) var(--sp-3); }
   .message-stack { max-width: 79%; }
   .message-bubble p { font-size: 13px; }
-  .message-tools { opacity: 1; pointer-events: auto; }   /* 터치에는 hover 가 없습니다 */
+  /* 터치에는 hover 가 없다고 늘 띄워뒀더니 말풍선마다 번역·교정·듣기가 붙어
+     화면이 글자로 뒤덮였습니다. 모바일에서는 감춥니다 — 말풍선을 눌러 여는
+     상세 화면에 같은 기능이 있습니다. */
+  .message-tools { display: none; }
   .message-tools button:nth-child(n+3) { display: none; }
   .voice-message { min-width: 170px; }
   .message-composer { padding: var(--sp-2) var(--sp-2) calc(var(--sp-2) + env(safe-area-inset-bottom)); }
@@ -6940,3 +6943,121 @@ label > svg { flex: none; }
 .level-dots { display: inline-flex; flex: 0 0 auto; gap: 4px; }
 .level-dots b { display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--line-structure); }
 .level-dots b.on { background: var(--link); }
+
+
+/* ─────────────────────────────────────────────
+   대화 코치 — 입력창 위 한 줄 제안
+   ───────────────────────────────────────────── */
+
+.coach-strip {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 var(--sp-4) var(--sp-2);
+  padding: var(--sp-2);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-btn);
+  background: var(--surface-soft);
+}
+
+.coach-strip-items {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: var(--sp-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.coach-strip-items::-webkit-scrollbar { display: none; }
+
+.coach-strip-items button {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  max-width: 320px;
+  padding: 0 var(--sp-2);
+  overflow: hidden;
+  border: var(--bw-hair) solid var(--primary-border);
+  border-radius: var(--r-pill);
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.coach-strip-items button:hover { border-color: var(--primary); }
+
+.coach-strip-empty { color: var(--subtle); font-size: 12px; line-height: 30px; }
+
+.coach-strip-refresh,
+.coach-strip-close {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
+}
+.coach-strip-refresh:hover,
+.coach-strip-close:hover { background: var(--hover-bg); color: var(--ink); }
+
+
+/* ─────────────────────────────────────────────
+   앱 설치 안내 — 폰·태블릿에서만 보이는 화면
+   ───────────────────────────────────────────── */
+
+/* 어느 쪽을 보여줄지는 여기서 정합니다. 손가락으로 쓰는 기기이거나 창이 좁으면
+   설치 안내만 남깁니다 — 아이패드 가로처럼 넓지만 손가락으로 쓰는 기기도 있어
+   두 조건을 함께 봅니다. */
+.install-page { display: none; }
+
+@media (pointer: coarse), (max-width: 1023px) {
+  .install-page { display: flex; }
+  .desktop-surface { display: none; }
+}
+
+.install-page {
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: var(--surface);
+}
+
+.install-card {
+  display: flex;
+  width: min(420px, 100%);
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  text-align: center;
+}
+
+.install-mark { width: 52px; height: 52px; border-radius: var(--r-lg); }
+.install-card h1 { font-size: 26px; font-weight: 400; letter-spacing: -.01em; }
+.install-card h1 strong { font-weight: 700; }
+.install-lead { margin-top: var(--sp-3); color: var(--ink); font-size: 16px; font-weight: 600; }
+.install-body { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+.install-stores { display: flex; width: 100%; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-4); }
+.install-stores .primary-button { justify-content: center; width: 100%; min-height: 48px; }
+
+.install-soon {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-btn);
+  background: var(--sunken);
+  color: var(--subtle);
+  font-size: 14px;
+}
+
+.install-note { margin-top: var(--sp-4); color: var(--subtle); font-size: 13px; }
