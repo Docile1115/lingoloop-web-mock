@@ -59,7 +59,10 @@
   --media-orange: #e8590c;
   --media-amber: #f59f00;
   --text-loading: rgba(131, 139, 138, 0.25);
-  --on-primary: #ffffff;
+  /* 브랜드 초록 위에 얹는 글자.
+     흰 글자를 쓰려면 초록을 어둡게 눌러야 해서(#00883a 가 한계) 늘 칙칙했습니다.
+     글자를 어둡게 바꾸면 초록을 원색까지 밝힐 수 있고 대비도 오히려 좋아집니다. */
+  --on-primary: #08160e;
 
   /* 선 — 용도별 4단계 */
   --line: var(--n-200);
@@ -83,10 +86,13 @@
   --backdrop: rgba(13, 15, 14, 0.7);
 
   /* 브랜드 액션 */
-  --primary: var(--g-700);          /* 주요 버튼 바탕 — 흰 글자 대비 4.58 (AA) */
-  --primary-text: var(--on-primary);/* 그 위 글자 — 항상 흰색 */
+  --primary: var(--g-500);          /* 브랜드 원색 — 어두운 글자 대비 8.03 (AA) */
+  /* 단색 대신 살짝 기울인 그라데이션. 양 끝 모두 어두운 글자 기준 4.5 를 넘습니다
+     (밝은 끝 8.03 · 진한 끝 5.72). */
+  --primary-gradient: linear-gradient(135deg, var(--g-500) 0%, var(--g-600) 100%);
+  --primary-text: var(--on-primary);/* 그 위 글자 — 어두운 초록빛 검정 */
   --primary-ink: var(--g-800);      /* 밝은 바탕 위 브랜드 글자·아이콘 — 대비 6.71 */
-  --primary-strong: var(--g-800);   /* 호버 — 흰 글자를 유지하려면 더 진하게 */
+  --primary-strong: var(--g-600);   /* 호버 — 한 단계만 눌러 글자 대비를 지킵니다 */
   --primary-soft: var(--g-50);
   --primary-border: var(--g-200);
   --brand: var(--g-500);
@@ -203,7 +209,7 @@ button:disabled {
 button,
 input,
 textarea {
-  outline-color: var(--primary);
+  outline-color: var(--primary-ink);
   outline-offset: 2px;
 }
 
@@ -686,13 +692,13 @@ p {
 }
 
 .primary-button {
-  border: var(--bw-thin) solid var(--primary);
-  background: var(--primary);
+  border: var(--bw-thin) solid transparent;
+  background: var(--primary-gradient);
   box-shadow: none;
   color: var(--primary-text);
 }
 
-.primary-button:hover { background: var(--primary-strong); border-color: var(--primary-strong); }
+.primary-button:hover { background: var(--primary-strong); }
 .primary-button:disabled { border-color: var(--line-structure); background: var(--line-structure); color: var(--muted); box-shadow: none; }
 
 .secondary-button {
@@ -2927,7 +2933,7 @@ p {
   resize: vertical;
   border: var(--bw-thin) solid var(--line-strong);
   border-radius: var(--r-btn);
-  outline-color: var(--primary);
+  outline-color: var(--primary-ink);
   background: var(--surface);
   color: var(--ink);
   font: inherit;
@@ -4491,7 +4497,7 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
     --muted: #c2c8c7;
     --subtle: #838b8a;   /* 어두운 표면 대비 4.82 (AA) */
     --text-loading: rgba(131, 139, 138, 0.25);
-    --on-primary: #ffffff;
+    --on-primary: #08160e;
 
     /* 선 */
     --line: #313635;
@@ -4515,10 +4521,11 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
     --backdrop: rgba(0, 0, 0, 0.72);
 
     /* 브랜드 — 원색을 그대로. 어두운 글자를 올립니다 (대비 7.92) */
-    --primary: var(--g-700);
+    --primary: var(--g-500);
+    --primary-gradient: linear-gradient(135deg, var(--g-500) 0%, var(--g-600) 100%);
     --primary-text: var(--on-primary);
     --primary-ink: var(--g-300);    /* 어두운 바탕 위 브랜드 글자 — 대비 9.6 */
-    --primary-strong: var(--g-800);
+    --primary-strong: var(--g-600);
     --primary-soft: rgba(0, 200, 83, 0.16);
     --primary-border: rgba(0, 200, 83, 0.4);
     --brand: var(--g-300);
