@@ -3099,6 +3099,7 @@ function CommunityView({
                   </span>
                 </button>
                 <div className="post-meta">
+                  <div className="post-meta-row">
                   {post.requestCorrection ? <Pill tone="soft"><WandSparkles size={12} /> {t("교정 부탁해요")}</Pill> : null}
                   {post.visibility === "partners" ? <Pill tone="neutral">{t("파트너 공개")}</Pill> : null}
                   <MenuPopover
@@ -3113,6 +3114,7 @@ function CommunityView({
                       onReport: () => onReport(post.author, post.authorId),
                     })}
                   />
+                  </div>
                   {/* 시각은 메뉴 아래에. 이름 옆에 두면 언어 교환 줄과 자리를 다툽니다. */}
                   <time className="post-time">{tx(post.time)}</time>
                 </div>
