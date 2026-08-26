@@ -1824,13 +1824,13 @@ p {
   min-height: 26px;
   align-items: center;
   padding: 0 10px;
-  border: var(--bw-hair) solid var(--primary-border);
+  border: var(--bw-hair) solid var(--line);
   border-radius: var(--r-pill);
-  background: var(--primary-soft);
-  color: var(--primary-ink);
+  background: var(--sunken);
+  color: var(--muted);
   font-size: 12px;
 }
-.post-tags button:hover { border-color: var(--primary); }
+.post-tags button:hover { border-color: var(--line-structure); color: var(--ink); }
 .post-tags button:active { background: var(--primary-border); }
 .post-tags button.active:active { background: var(--primary-strong); }
 .post-tags button.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); font-weight: 600; }
@@ -2133,13 +2133,14 @@ p {
   align-items: center;
   gap: var(--sp-1);
   padding: 0 10px;
-  border: var(--bw-hair) solid var(--primary-border);
+  border: var(--bw-hair) solid var(--line);
   border-radius: var(--r-pill);
-  background: var(--primary-soft);
-  color: var(--primary-ink);
+  background: var(--sunken);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 500;
 }
+.chat-list-tabs button:hover { border-color: var(--line-structure); color: var(--ink); }
 
 .chat-list-tabs button:hover { background: var(--hover-bg); }
 .chat-list-tabs button.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); font-weight: 600; }
@@ -6707,6 +6708,22 @@ label > svg { flex: none; }
   font-family: inherit;
   text-align: left;
 }
+/* 카드 전체가 상세로 가는 링크라(::after) 눌러야 할 것들은 그 위로 올립니다. */
+.my-post-stats { position: relative; z-index: 1; }
+.my-post-stats button {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+.my-post-stats button:hover { color: var(--ink); }
+.my-post-stats button.like.active { color: var(--like, #e5484d); }
+
 .my-post-text::after {
   position: absolute;
   z-index: 0;
@@ -6913,13 +6930,13 @@ label > svg { flex: none; }
   min-height: 34px;
   align-items: center;
   padding: 0 var(--sp-3);
-  border: var(--bw-hair) solid var(--primary-border);
+  border: var(--bw-hair) solid var(--line);
   border-radius: var(--r-pill);
-  background: var(--primary-soft);
-  color: var(--primary-ink);
+  background: var(--sunken);
+  color: var(--muted);
   font-size: 13px;
 }
-.chip:hover { border-color: var(--primary); }
+.chip:hover { border-color: var(--line-structure); color: var(--ink); }
 .chip:active { background: var(--primary-border); }
 .chip.active:active { background: var(--primary-strong); }
 .chip.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); font-weight: 600; }

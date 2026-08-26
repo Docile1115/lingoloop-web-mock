@@ -1772,6 +1772,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 me={me}
                 corrections={corrections}
                 onOpenTag={(tag) => { setActiveTag(tag); goToSection("community"); }}
+                onToggleLike={(id) => togglePost(id, "liked")}
                 myPostList={myPostList}
                 onCopyLink={copyLink}
                 onDeletePost={deletePost}
@@ -3970,6 +3971,7 @@ function LearnView({
   profileBio,
   me,
   onOpenTag,
+  onToggleLike,
   myPostList,
   onCopyLink,
   onDeletePost,
@@ -3988,6 +3990,7 @@ function LearnView({
   profileBio: string;
   onToast: (message: string) => void;
   onOpenTag: (tag: string) => void;
+  onToggleLike: (id: string) => void;
   myPostList: FeedPost[];
   onCopyLink: (url: string) => void;
   onDeletePost: (post: FeedPost) => void;
@@ -4072,10 +4075,24 @@ function LearnView({
               <div className="post-tags">
                 {post.tags.map((tag) => <button type="button" key={tag} onClick={() => onOpenTag(tag)}>{tag}</button>)}
               </div>
+              {/* 예전에는 그냥 글자였습니다. 카드 전체가 상세로 가는 자리라 눌러도
+                  상세만 열렸고, 좋아요는 누를 수가 없었습니다. */}
               <div className="my-post-stats">
-                <span><Heart size={15} /> {post.likes}</span>
-                <span><MessageCircle size={15} /> {post.comments}</span>
-                <span><PenLine size={15} /> {t("교정 {n}", { n: post.corrections })}</span>
+                <button
+                  type="button"
+                  className={post.liked ? "active like" : ""}
+                  aria-pressed={post.liked}
+                  aria-label={t("좋아요")}
+                  onClick={() => onToggleLike(post.id)}
+                >
+                  <Heart size={15} fill={post.liked ? "currentColor" : "none"} /> {post.likes}
+                </button>
+                <button type="button" aria-label={t("댓글")} onClick={() => onOpenPost(post)}>
+                  <MessageCircle size={15} /> {post.comments}
+                </button>
+                <button type="button" aria-label={t("교정")} onClick={() => onOpenPost(post)}>
+                  <PenLine size={15} /> {t("교정 {n}", { n: post.corrections })}
+                </button>
               </div>
             </article>
           ))}
