@@ -4653,19 +4653,30 @@ const WEEKDAYS: MessageKey[] = [msg("일"), msg("월"), msg("화"), msg("수"), 
 /**
  * 말풍선 위에 얹는 시각.
  *
- * 오늘이면 시각만, 이번 주면 요일을 붙이고, 그보다 오래됐으면 날짜까지 적습니다.
+ *   오늘        오후 2:32
+ *   일주일 안   (목) 오후 12:57
+ *   그 이전     2026. 8. 11. 오후 10:23
+ *
  * 말풍선마다 붙이지 않고 묶음의 머리에 한 번만 답니다 — 1분 사이에 세 줄을 보내면
  * 같은 시각이 세 번 찍혀 읽는 데 방해가 됩니다.
+ *
+ * "일주일 안" 은 지난 시간이 아니라 날짜로 셉니다. 어제 밤 11시는 20시간 전이지만
+ * 어제이므로 요일을 붙여야 합니다.
  */
 function groupTime(iso: string): string {
   const at = new Date(iso);
   const now = new Date();
   const clock = localizeClock(clockTime(iso));
-  const sameDay = at.toDateString() === now.toDateString();
-  if (sameDay) return clock;
-  const days = Math.floor((now.getTime() - at.getTime()) / 86400000);
-  if (days < 7) return t("({weekday}) {clock}", { weekday: t(WEEKDAYS[at.getDay()]), clock });
-  return t("{month}월 {day}일 {clock}", { month: at.getMonth() + 1, day: at.getDate(), clock });
+  const midnight = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const daysApart = Math.round((midnight(now) - midnight(at)) / 86400000);
+  if (daysApart === 0) return clock;
+  if (daysApart < 7) return t("({weekday}) {clock}", { weekday: t(WEEKDAYS[at.getDay()]), clock });
+  return t("{year}. {month}. {day}. {clock}", {
+    year: at.getFullYear(),
+    month: at.getMonth() + 1,
+    day: at.getDate(),
+    clock,
+  });
 }
 
 /** 앞 메시지와 30분 넘게 벌어지거나 날이 바뀌면 시각을 새로 적습니다. */
