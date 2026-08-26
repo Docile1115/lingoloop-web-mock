@@ -516,6 +516,14 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [sentLikes, setSentLikes] = useState<ApiReceivedLike[]>([]);
   /** 팔로잉·팔로워 수. 보는 사람마다 달라서 id 별로 담아둡니다. */
   const [followCounts, setFollowCounts] = useState<Record<string, { following: number; followers: number; posts: number }>>({});
+  /** 크게 보고 있는 사진. 비어 있으면 안 띄웁니다. */
+  const [photoViewer, setPhotoViewer] = useState("");
+  useEffect(() => {
+    if (!photoViewer) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setPhotoViewer(""); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [photoViewer]);
 
   const loadFollowCounts = useCallback(async (id: string) => {
     try {
@@ -1657,6 +1665,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onDeletePost={deletePost}
                 myLearningLanguage={languageName(me.learningLanguages?.[0]?.code ?? "en")}
                 followingIds={followingIds}
+                onOpenPhoto={setPhotoViewer}
               />
             ) : null}
             {!detail && section === "chats" ? (
@@ -1678,6 +1687,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 setDraft={setDraft}
                 onSend={sendMessage}
                 onSendAttachment={sendAttachment}
+                onOpenPhoto={setPhotoViewer}
                 onExchange={() => setModal({ type: "exchange" })}
                 onProfile={() => {
                   const partner = findPartner(selectedConversation?.partnerId);
@@ -1819,6 +1829,18 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         />
       ) : null}
 
+
+      {photoViewer ? (
+        /* 사진 크게 보기. 사진 바깥을 누르거나 ESC 로 닫습니다. */
+        <div className="photo-viewer" role="dialog" aria-modal="true" aria-label={t("사진 크게 보기")}>
+          <button type="button" className="photo-viewer-backdrop" aria-label={t("닫기")} onClick={() => setPhotoViewer("")} />
+          <button type="button" className="photo-viewer-close" aria-label={t("닫기")} onClick={() => setPhotoViewer("")}>
+            <X size={22} />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={photoViewer} alt={t("사진")} />
+        </div>
+      ) : null}
 
       {minimizedRoom && !modal ? (
         <MiniRoom
@@ -2887,6 +2909,7 @@ function CommunityView({
   onDeletePost,
   myLearningLanguage,
   followingIds,
+  onOpenPhoto,
 }: {
   posts: FeedPost[];
   tab: "recommended" | "learning" | "following";
@@ -2905,6 +2928,7 @@ function CommunityView({
   myLearningLanguage: string;
   /** "팔로잉" 탭은 내가 팔로우하는 사람의 글만 봅니다. */
   followingIds: string[];
+  onOpenPhoto: (src: string) => void;
   translated: Set<string>;
   translations: Record<string, string>;
   corrections: Set<string>;
@@ -3000,8 +3024,10 @@ function CommunityView({
               </button>
               {translated.has(post.id) ? <div className="translation-box"><Languages size={16} /><p><span>{t("번역")}</span>{translations[post.id] ?? post.translation}</p></div> : null}
               {post.image ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img className="post-image" src={post.image} alt="" loading="lazy" />
+                <button type="button" className="post-image-open" onClick={() => onOpenPhoto(post.image!)} aria-label={t("사진 크게 보기")}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="post-image" src={post.image} alt="" loading="lazy" />
+                </button>
               ) : null}
               {post.audio ? (
                 // eslint-disable-next-line jsx-a11y/media-has-caption
@@ -3071,6 +3097,7 @@ function ChatsView({
   setDraft,
   onSend,
   onSendAttachment,
+  onOpenPhoto,
   onExchange,
   onProfile,
   onReport,
@@ -3103,6 +3130,7 @@ function ChatsView({
   setDraft: (text: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onSendAttachment: (kind: "image" | "voice", media: string, label: string) => Promise<void>;
+  onOpenPhoto: (src: string) => void;
   onExchange: () => void;
   onProfile: () => void;
   onReport: () => void;
@@ -3452,11 +3480,13 @@ function ChatsView({
               <div className={`message-row ${message.mine ? "mine" : "theirs"}`} key={message.id}>
                 {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} /> : null}
                 <div className="message-stack">
-                  <div className="message-bubble">
+                  <div className={message.kind ? "message-bubble message-bubble-media" : "message-bubble"}>
                     {message.voice ? <button className="voice-message" type="button" onClick={() => { if (message.text) speakText(message.text); onToast(t("음성 메시지를 재생 중이에요")); }}><span className="play-dot"><Play size={13} fill="currentColor" /></span><span className="waveform"><i /><i /><i /><i /><i /><i /><i /><i /><i /></span><small>{message.voice}</small></button> : null}
                     {message.kind === "image" && message.media ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img className="message-media" src={message.media} alt={t("사진")} loading="lazy" />
+                      <button type="button" className="message-media-open" onClick={() => onOpenPhoto(message.media!)} aria-label={t("사진 크게 보기")}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img className="message-media" src={message.media} alt={t("사진")} loading="lazy" />
+                      </button>
                     ) : null}
                     {message.kind === "voice" && message.media ? (
                       // eslint-disable-next-line jsx-a11y/media-has-caption
@@ -3516,7 +3546,22 @@ function ChatsView({
             </div>
             <label className="message-input">
               <span className="sr-only">{t("메시지 입력")}</span>
-              <textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t("{name}님에게 메시지 보내기", { name: selected.name })} rows={1} maxLength={LIMITS.message} />
+              <textarea
+                ref={composerRef}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" || event.shiftKey) return;
+                  /* 한글·일본어는 글자를 조합하는 중에도 엔터가 옵니다. 그때 보내면
+                     "안녕하세" 같은 조각이 나갑니다 — 조합 중에는 넘깁니다. */
+                  if (event.nativeEvent.isComposing) return;
+                  event.preventDefault();
+                  if (draft.trim()) event.currentTarget.form?.requestSubmit();
+                }}
+                placeholder={t("{name}님에게 메시지 보내기", { name: selected.name })}
+                rows={1}
+                maxLength={LIMITS.message}
+              />
               <button type="button" aria-label={t("이모지")} onClick={() => setDraft(`${draft} 😊`)}><Smile size={18} /></button>
             </label>
             <button

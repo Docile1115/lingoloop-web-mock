@@ -392,6 +392,7 @@ export const en: Record<MessageKey, string> = {
   "사진": "Photo",
   "사진 고르기": "Choose a photo",
   "사진 빼기": "Remove photo",
+  "사진 크게 보기": "View photo",
   "사진 파일만 보낼 수 있어요": "Only image files can be sent",
   "사진을 줄여도 너무 커요. 다른 사진을 골라주세요.": "Even shrunk, this photo is too large. Please pick another.",
   "사칭": "Impersonation",
