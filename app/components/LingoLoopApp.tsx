@@ -1597,6 +1597,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
             {detail?.kind === "post" ? (
               <PostDetailView
                 post={detail.post}
+                me={me}
                 onBack={closeDetail}
                 onProfile={(authorId) => {
                   if (authorId === me.id) { closeDetail(); goToSection("learn"); return; }
@@ -2179,6 +2180,7 @@ function DetailHeader({
 /** 게시물 상세 화면 — 원글(48px 그리드) → 액션 → 구분선 → 답글 → 답글 입력. */
 function PostDetailView({
   post,
+  me,
   onBack,
   onProfile,
   onReport,
@@ -2195,6 +2197,7 @@ function PostDetailView({
   onSortChange,
 }: {
   post: FeedPost;
+  me: ApiProfile;
   onBack: () => void;
   onProfile: (authorId: string) => void;
   onReport: () => void;
@@ -2417,7 +2420,7 @@ function PostDetailView({
             <button type="button" onClick={() => setReplyTo(null)} aria-label={t("대댓글 취소")}><X size={13} /></button>
           </span>
         ) : (
-          <Avatar name={currentUser.name} flag={currentUser.flag} accent={currentUser.accent} size="sm" />
+          <Avatar name={me.name} accent="violet" size="sm" photo={me.avatarUrl} countryCode={me.country?.code} />
         )}
         <textarea
           id="reply-input"

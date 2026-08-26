@@ -36,7 +36,9 @@
   --green-500: var(--g-800);   /* 성공·교정 — 브랜드 그린과 하나로 */
   --green-100: var(--g-50);
   --green-dot: var(--g-500);   /* 접속 중 */
-  --red-500:   #c92a2a;        /* 위험·신고 — 그린과 가장 멀리 */
+  /* 위험·신고 — 그린과 가장 멀리. #c92a2a 는 벽돌빛이라 칙칙해서 한 단계 올렸습니다.
+     흰 글자 대비 4.83 (AA 4.5 위) 이라 위험 버튼에 그대로 쓸 수 있습니다. */
+  --red-500:   #dc2626;
   --red-100:   #fff0f0;
   --amber-500: #f59f00;   /* 주의 */
   --amber-100: #fff9db;
@@ -93,7 +95,7 @@
   /* 기능색 */
   --danger: var(--red-500);
   --danger-soft: var(--red-100);
-  --danger-border: rgba(201, 42, 42, 0.22);
+  --danger-border: rgba(220, 38, 38, 0.24);
   --coral: var(--red-500);
   --success: var(--green-500);
   --success-soft: var(--green-100);
@@ -6722,7 +6724,7 @@ label > svg { flex: none; }
   font-size: 13px;
 }
 .my-post-stats button:hover { color: var(--ink); }
-.my-post-stats button.like.active { color: var(--like, #e5484d); }
+.my-post-stats button.like.active { color: var(--danger); }
 
 .my-post-text::after {
   position: absolute;
