@@ -2435,16 +2435,17 @@ p {
 .writing-language span { padding: 2px var(--sp-1); border-radius: 4px; background: var(--sunken); color: var(--ink); font-size: 12px; font-weight: 700; }
 .composer-row { display: flex; align-items: flex-end; gap: var(--sp-1); }
 /* 입력이 여러 줄이 되면 칸이 아래로 자랍니다 — 버튼은 아래에 붙어 있습니다. */
-.message-input { align-items: flex-end; }
 .composer-row > .icon-button { width: 35px; height: 35px; }
 
 .message-input {
   display: flex;
   min-height: 44px;
   flex: 1;
-  align-items: center;
+  /* 여러 줄이 되면 칸이 아래로 자랍니다. 안쪽 버튼은 마지막 줄 옆(바닥)에 섭니다 —
+     가운데 두면 긴 글에서 글자 한가운데에 떠 있습니다. */
+  align-items: flex-end;
   gap: var(--sp-1);
-  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-1) var(--sp-2) var(--sp-2);
   border: var(--bw-thin) solid var(--line-strong);
   border-radius: var(--r-btn);
   background: var(--surface);
@@ -2452,21 +2453,13 @@ p {
 
 .message-input:focus-within { border-color: var(--line-structure); box-shadow: 0 0 0 3px rgba(161, 161, 161, .08); }
 .message-input textarea { display: block; width: 100%; min-height: 24px; max-height: 132px; padding: 0; overflow-y: auto; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 24px; }
-.message-input button { display: inline-flex; width: 26px; height: 26px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--muted); }
-/* 첨부(+) — 보내기 버튼과 같은 크기로 한 줄에 섭니다. */
-.composer-attach {
-  display: inline-flex;
-  width: 44px;
-  height: 44px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border: var(--bw-thin) solid var(--line-strong);
-  border-radius: var(--r-btn);
-  background: var(--surface);
-  color: var(--muted);
-}
-.composer-attach.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); }
+/* 칸 안쪽 버튼들 — 이모지는 왼쪽, 첨부·코치는 오른쪽. 글자와 같은 줄 바닥에 섭니다. */
+.message-input button { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--muted); }
+.message-input button:hover { background: var(--hover-bg); color: var(--ink); }
+.composer-emoji { margin-right: 2px; }
+.composer-inline-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; }
+.composer-attach.active,
+.composer-coach.active { color: var(--primary); }
 
 /* + 를 누르면 위로 펼쳐지는 메뉴. */
 .composer-attach-wrap { position: relative; display: inline-flex; }
@@ -2474,8 +2467,8 @@ p {
 .composer-attach-menu {
   position: absolute;
   z-index: 41;
-  bottom: calc(100% + 6px);
-  left: 0;
+  bottom: calc(100% + 10px);
+  right: 0;
   display: flex;
   min-width: 148px;
   flex-direction: column;
@@ -2501,20 +2494,7 @@ p {
 .composer-attach-menu button:hover { background: var(--hover-bg); }
 .composer-attach-menu button.recording { color: var(--danger, #e5484d); }
 
-/* 대화 코치 — 첨부와 별개 버튼입니다. */
-.composer-coach {
-  display: inline-flex;
-  width: 44px;
-  height: 44px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border: var(--bw-thin) solid var(--line-strong);
-  border-radius: var(--r-btn);
-  background: var(--surface);
-  color: var(--muted);
-}
-.composer-coach.active { border-color: var(--primary); color: var(--primary); }
+
 
 /* 글쓰기에 붙인 사진·음성 미리보기 */
 .compose-preview { position: relative; margin-top: var(--sp-3); }

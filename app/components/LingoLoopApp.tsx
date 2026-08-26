@@ -3518,33 +3518,11 @@ function ChatsView({
               aria-label={t("사진 고르기")}
               onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void pickPhoto(file); }}
             />
-            <div className="composer-attach-wrap">
-              <button
-                type="button"
-                className={attachOpen ? "composer-attach active" : "composer-attach"}
-                aria-label={t("첨부")}
-                aria-haspopup="menu"
-                aria-expanded={attachOpen}
-                onClick={() => setAttachOpen(!attachOpen)}
-              >
-                <Plus size={19} />
-              </button>
-              {attachOpen ? (
-                <>
-                  <button type="button" className="menu-scrim" aria-label={t("닫기")} onClick={() => setAttachOpen(false)} />
-                  <div className="composer-attach-menu" role="menu">
-                    <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); photoInputRef.current?.click(); }}>
-                      <ImageIcon size={17} /> {t("사진")}
-                    </button>
-                    <button type="button" role="menuitem" className={recording ? "recording" : ""} onClick={() => { setAttachOpen(false); void toggleRecording(); }}>
-                      <Mic size={17} /> {recording ? t("녹음 멈추기") : t("음성")}
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </div>
+            {/* 첨부·코치는 입력 칸 안에 둡니다. 칸 밖에 늘어놓으면 글 쓸 자리가 좁아지고
+                줄이 버튼으로 꽉 찹니다. 보내기만 칸 밖에 남깁니다. */}
             <label className="message-input">
               <span className="sr-only">{t("메시지 입력")}</span>
+              <button type="button" className="composer-emoji" aria-label={t("이모지")} onClick={() => setDraft(`${draft} 😊`)}><Smile size={19} /></button>
               <textarea
                 ref={composerRef}
                 value={draft}
@@ -3561,17 +3539,43 @@ function ChatsView({
                 rows={1}
                 maxLength={LIMITS.message}
               />
-              <button type="button" aria-label={t("이모지")} onClick={() => setDraft(`${draft} 😊`)}><Smile size={18} /></button>
+              <span className="composer-inline-actions">
+                <span className="composer-attach-wrap">
+                  <button
+                    type="button"
+                    className={attachOpen ? "composer-attach active" : "composer-attach"}
+                    aria-label={t("첨부")}
+                    aria-haspopup="menu"
+                    aria-expanded={attachOpen}
+                    onClick={() => setAttachOpen(!attachOpen)}
+                  >
+                    <Plus size={19} />
+                  </button>
+                  {attachOpen ? (
+                    <>
+                      <button type="button" className="menu-scrim" aria-label={t("닫기")} onClick={() => setAttachOpen(false)} />
+                      <span className="composer-attach-menu" role="menu">
+                        <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); photoInputRef.current?.click(); }}>
+                          <ImageIcon size={17} /> {t("사진")}
+                        </button>
+                        <button type="button" role="menuitem" className={recording ? "recording" : ""} onClick={() => { setAttachOpen(false); void toggleRecording(); }}>
+                          <Mic size={17} /> {recording ? t("녹음 멈추기") : t("음성")}
+                        </button>
+                      </span>
+                    </>
+                  ) : null}
+                </span>
+                <button
+                  type="button"
+                  className={coachOpen ? "composer-coach active" : "composer-coach"}
+                  aria-label={t("대화 코치")}
+                  aria-pressed={coachOpen}
+                  onClick={() => { const next = !coachOpen; setCoachOpen(next); if (next && !supportResult) void requestConversationSupport(false); }}
+                >
+                  <WandSparkles size={19} />
+                </button>
+              </span>
             </label>
-            <button
-              type="button"
-              className={coachOpen ? "composer-coach active" : "composer-coach"}
-              aria-label={t("대화 코치")}
-              aria-pressed={coachOpen}
-              onClick={() => { const next = !coachOpen; setCoachOpen(next); if (next && !supportResult) void requestConversationSupport(false); }}
-            >
-              <WandSparkles size={18} />
-            </button>
             <button className="send-button" type="submit" disabled={!draft.trim()} aria-label={t("메시지 보내기")}><Send size={18} /></button>
           </div>
         </form>}
