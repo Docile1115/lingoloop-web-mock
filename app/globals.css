@@ -1778,12 +1778,17 @@ p {
 .post-image {
   display: block;
   width: 100%;
+  /* 자리를 미리 잡아둡니다. 비워두면 사진이 실리는 순간 아래 글이 밀려 내려가고,
+     읽던 자리가 튑니다. */
+  aspect-ratio: 4 / 3;
   max-height: 340px;
-  margin-top: var(--sp-4);
   border: var(--bw-hair) solid var(--line);
   border-radius: var(--r-lg);
+  background: var(--sunken);
   object-fit: cover;
 }
+
+.post-image-open { margin-top: var(--sp-4); }
 
 .post-audio { display: block; width: 100%; margin-top: var(--sp-3); }
 
@@ -2524,7 +2529,7 @@ p {
 .message-row.mine .message-bubble-media { background: transparent; }
 
 .message-media-open { display: block; padding: 0; border: 0; border-radius: var(--r-btn); background: transparent; cursor: zoom-in; }
-.message-media { display: block; max-width: 260px; border-radius: var(--r-btn); }
+.message-media { display: block; width: 260px; max-width: 100%; aspect-ratio: 4 / 3; border-radius: var(--r-btn); background: var(--sunken); object-fit: cover; }
 .message-audio { width: 240px; margin-top: var(--sp-1); }
 
 .send-button { display: inline-flex; width: 44px; height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: var(--r-btn); background: var(--primary); color: var(--primary-text); }
