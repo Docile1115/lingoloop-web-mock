@@ -271,6 +271,7 @@ export function toChatMessage(message: ApiMessage, myId: string): ChatMessage {
     mine: message.senderId === myId,
     text: message.text,
     time: clockTime(message.sentAt),
+    sentAt: message.sentAt,
     readByPartner: message.readByPartner,
     media: message.media || "",
     kind: message.type === "text" ? undefined : message.type,

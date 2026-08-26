@@ -79,6 +79,8 @@ export type ChatMessage = {
   time: string;
   /** 내 메시지를 상대가 읽었는가. 내 메시지에만 뜻이 있습니다. */
   readByPartner?: boolean;
+  /** 보낸 시각(ISO). 시각을 묶어 보여주려면 원본 값이 필요합니다. */
+  sentAt?: string;
   /** 붙인 사진·음성(데이터 URI 또는 주소). */
   media?: string;
   /** 첨부 종류. */

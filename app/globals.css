@@ -2334,6 +2334,14 @@ p {
 .day-divider { display: flex; align-items: center; justify-content: center; margin: var(--sp-3) 0; }
 .day-divider span { padding: var(--sp-1) var(--sp-2); border-radius: var(--r-pill); background: var(--line); color: var(--muted); font-size: 12px; }
 
+/* 말풍선 묶음 위에 한 번만 놓이는 시각. */
+.time-divider { display: flex; justify-content: center; margin: var(--sp-4) 0 var(--sp-2); }
+.time-divider span { color: var(--subtle); font-size: 12px; }
+.message-area > .time-divider:first-child { margin-top: 0; }
+
+/* 마지막으로 보낸 것에만 붙는 읽음 표시. */
+.read-mark { align-self: flex-end; color: var(--subtle); font-size: 11px; }
+
 .message-row {
   display: flex;
   align-items: flex-end;

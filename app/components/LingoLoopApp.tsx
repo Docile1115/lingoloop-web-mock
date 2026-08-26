@@ -82,10 +82,10 @@ import {
 } from "@/app/lib/demo-data";
 import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
 import { SignIn } from "./SignIn";
-import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply } from "../lib/live-data";
+import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 type Section = "discover" | "community" | "chats" | "practice" | "learn";
 
@@ -1271,7 +1271,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     const text = checked.value;
     if (!selectedConversation) return;
 
-    const newMessage = { id: `local-${Date.now()}`, mine: true, text, time: t("지금") };
+    const newMessage = { id: `local-${Date.now()}`, mine: true, text, time: t("지금"), sentAt: new Date().toISOString() };
     setConversations((items) =>
       items.map((conversation) =>
         conversation.id === selectedConversation.id
@@ -1311,7 +1311,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
    */
   const sendAttachment = async (kind: "image" | "voice", media: string, label: string) => {
     if (!selectedConversation) return;
-    const newMessage = { id: `local-${Date.now()}`, mine: true, text: label, time: t("지금"), media, kind };
+    const newMessage = { id: `local-${Date.now()}`, mine: true, text: label, time: t("지금"), sentAt: new Date().toISOString(), media, kind };
     setConversations((items) =>
       items.map((conversation) =>
         conversation.id === selectedConversation.id
@@ -3453,12 +3453,16 @@ function ChatsView({
         ) : null}
 
         <div className="message-area" ref={messageAreaRef}>
-          <div className="day-divider"><span>{t("오늘")}</span></div>
-          {selected.messages.map((message) => {
-            if (message.system) return <div className="system-message" key={message.id}><ShieldCheck size={14} />{message.text}</div>;
+          {selected.messages.map((message, index) => {
+            const mark = needsTimeMark(message.sentAt, selected.messages[index - 1]?.sentAt)
+              ? <div className="time-divider" key={`${message.id}-time`}><span>{groupTime(message.sentAt!)}</span></div>
+              : null;
+            if (message.system) return <Fragment key={message.id}>{mark}<div className="system-message"><ShieldCheck size={14} />{message.text}</div></Fragment>;
             if (message.correction) {
               return (
-                <div className="message-row correction-message" key={message.id}>
+                <Fragment key={message.id}>
+                {mark}
+                <div className="message-row correction-message">
                   <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} />
                   <div className="chat-correction-card">
                     <span className="correction-label"><PenLine size={14} /> {t("{name}님이 문장을 고쳤어요", { name: selected.name })}</span>
@@ -3467,12 +3471,15 @@ function ChatsView({
                     <small>{message.correction.note}</small>
                     <button type="button" className={savedItems.some((saved) => saved.id === message.id) ? "active" : ""} aria-pressed={savedItems.some((saved) => saved.id === message.id)} aria-label={t("표현 저장")} onClick={() => onSavePhrase(savedFromMessage(message, selected.name))}><Bookmark size={16} /></button>
                   </div>
-                  <time>{localizeClock(message.time)}</time>
                 </div>
+                </Fragment>
               );
             }
+            const lastMine = message.mine && !selected.messages.slice(index + 1).some((later) => later.mine);
             return (
-              <div className={`message-row ${message.mine ? "mine" : "theirs"}`} key={message.id}>
+              <Fragment key={message.id}>
+              {mark}
+              <div className={`message-row ${message.mine ? "mine" : "theirs"}`}>
                 {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} /> : null}
                 <div className="message-stack">
                   <div className={message.kind ? "message-bubble message-bubble-media" : "message-bubble"}>
@@ -3501,8 +3508,10 @@ function ChatsView({
                   </div>
                   )}
                 </div>
-                <time>{localizeClock(message.time)}{message.mine && message.readByPartner ? t(" · 읽음") : ""}</time>
+                {/* 읽음은 마지막으로 보낸 것에만 답니다 — 줄마다 붙으면 시끄럽습니다. */}
+                {lastMine && message.readByPartner ? <span className="read-mark">{t("읽음")}</span> : null}
               </div>
+              </Fragment>
             );
           })}
           {selected.typing ? <div className="typing-indicator"><Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} /><span><i /><i /><i /></span><small>{t("{name}님이 입력 중", { name: selected.name })}</small></div> : null}
@@ -4633,6 +4642,35 @@ function MatchingPreferencesModal({
       </div>
     </div>
   );
+}
+
+const WEEKDAYS: MessageKey[] = [msg("일"), msg("월"), msg("화"), msg("수"), msg("목"), msg("금"), msg("토")];
+
+/**
+ * 말풍선 위에 얹는 시각.
+ *
+ * 오늘이면 시각만, 이번 주면 요일을 붙이고, 그보다 오래됐으면 날짜까지 적습니다.
+ * 말풍선마다 붙이지 않고 묶음의 머리에 한 번만 답니다 — 1분 사이에 세 줄을 보내면
+ * 같은 시각이 세 번 찍혀 읽는 데 방해가 됩니다.
+ */
+function groupTime(iso: string): string {
+  const at = new Date(iso);
+  const now = new Date();
+  const clock = localizeClock(clockTime(iso));
+  const sameDay = at.toDateString() === now.toDateString();
+  if (sameDay) return clock;
+  const days = Math.floor((now.getTime() - at.getTime()) / 86400000);
+  if (days < 7) return t("({weekday}) {clock}", { weekday: t(WEEKDAYS[at.getDay()]), clock });
+  return t("{month}월 {day}일 {clock}", { month: at.getMonth() + 1, day: at.getDate(), clock });
+}
+
+/** 앞 메시지와 30분 넘게 벌어지거나 날이 바뀌면 시각을 새로 적습니다. */
+function needsTimeMark(current?: string, previous?: string): boolean {
+  if (!current) return false;
+  if (!previous) return true;
+  const a = new Date(previous);
+  const b = new Date(current);
+  return a.toDateString() !== b.toDateString() || b.getTime() - a.getTime() > 30 * 60 * 1000;
 }
 
 /** 붙일 수 있는 파일 크기 상한. 문서 한도(1MB)에 여유를 둡니다. */
