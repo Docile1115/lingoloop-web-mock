@@ -82,6 +82,16 @@ const COUNTRIES = [
   { code: "VN", name: "베트남", flag: "🇻🇳" },
 ];
 
+/**
+ * 배우는 단계 다섯.
+ *
+ * 예전에는 아무 글자나 받았습니다(safeString). 그러면 화면이 점을 몇 개 칠할지
+ * 정할 수 없고, 사람마다 다른 말이 들어옵니다.
+ * 예전 값(beginner·intermediate·advanced)은 이 목록 안에 그대로 있어서
+ * 이미 저장된 프로필도 그대로 읽힙니다.
+ */
+const LEARNING_LEVELS = ["beginner", "elementary", "intermediate", "upper", "advanced"];
+
 const LANGUAGES = [
   { code: "ko", name: "Korean", nativeName: "한국어", flag: "🇰🇷" },
   { code: "en", name: "English", nativeName: "English", flag: "🇺🇸" },
@@ -957,7 +967,7 @@ app.patch("/api/profile", requireUser, async (req, res) => {
     learningLanguages: Array.isArray(req.body?.learningLanguages)
       ? req.body.learningLanguages.slice(0, 3).map((item) => ({
           code: safeString(item?.code, "learningLanguages.code", { min: 2, max: 10 }),
-          level: safeString(item?.level || "beginner", "learningLanguages.level", { min: 2, max: 20 }),
+          level: LEARNING_LEVELS.includes(item?.level) ? item.level : "beginner",
           goal: safeString(item?.goal || "일상 대화", "learningLanguages.goal", { min: 2, max: 120 }),
         }))
       : current.learningLanguages,
@@ -1204,8 +1214,16 @@ app.get("/api/posts", requireUser, async (req, res) => {
     liked: reactions[index].exists,
     author: {
       ...post.author,
+      // 글마다 굳히지 않고 지금 프로필을 씁니다 — 언어를 바꾸면 옛 글에도 반영됩니다.
       avatarUrl: authors.get(post.authorId)?.avatarUrl || "",
       countryCode: authors.get(post.authorId)?.country?.code || "",
+      native: authors.get(post.authorId)?.nativeLanguages?.[0] || "",
+      learning: authors.get(post.authorId)?.learningLanguages?.[0]
+        ? {
+            code: authors.get(post.authorId).learningLanguages[0].code,
+            level: authors.get(post.authorId).learningLanguages[0].level,
+          }
+        : null,
     },
   }));
   return success(res, req, withReactions, 200, { pagination: { total: posts.length, nextCursor: null } });
@@ -1229,6 +1247,10 @@ app.post("/api/posts", requireUser, async (req, res) => {
       flag: req.auth.profile.country?.flag || "🌐",
       avatarUrl: req.auth.profile.avatarUrl || "",
       countryCode: req.auth.profile.country?.code || "",
+      native: req.auth.profile.nativeLanguages?.[0] || "",
+      learning: req.auth.profile.learningLanguages?.[0]
+        ? { code: req.auth.profile.learningLanguages[0].code, level: req.auth.profile.learningLanguages[0].level }
+        : null,
     },
     text,
     language: optionalString(req.body?.language, "language", 10) || req.auth.profile.learningLanguages?.[0]?.code || "en",

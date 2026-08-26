@@ -25,6 +25,10 @@ export type Partner = {
   photo?: string;
   /** 국가 코드(KR·JP…). 국기 아이콘을 고르는 값입니다. */
   countryCode?: string;
+  /** 가르칠 수 있는 말·배우는 말과 단계(언어 코드). */
+  nativeCode?: string;
+  learningCode?: string;
+  learningLevel?: string;
   balance: string;
   verified?: boolean;
 };
@@ -55,6 +59,11 @@ export type FeedPost = {
   photo?: string;
   /** 글쓴이 국가 코드. */
   countryCode?: string;
+  /** 글쓴이가 가르칠 수 있는 말(언어 코드). */
+  nativeCode?: string;
+  /** 글쓴이가 배우는 말과 단계. */
+  learningCode?: string;
+  learningLevel?: string;
   /** 글에 붙인 사진. */
   image?: string;
   /** 글에 붙인 음성. */

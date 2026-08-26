@@ -75,7 +75,18 @@ export interface ApiProfile {
 export interface ApiPost {
   id: string;
   authorId: string;
-  author: { id: string; name: string; handle: string; flag: string; avatarUrl?: string; countryCode?: string };
+  author: {
+    id: string;
+    name: string;
+    handle: string;
+    flag: string;
+    avatarUrl?: string;
+    countryCode?: string;
+    /** 글쓴이가 가르칠 수 있는 말. */
+    native?: string;
+    /** 글쓴이가 배우는 말과 그 단계. */
+    learning?: { code: string; level: string } | null;
+  };
   text: string;
   language: string;
   targetLanguage: string;
@@ -222,6 +233,9 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
     accent: accentFor(profile.id),
     photo: profile.avatarUrl || "",
     countryCode: profile.country?.code || "",
+    nativeCode: profile.nativeLanguages?.[0] || "",
+    learningCode: learning?.code || "",
+    learningLevel: learning?.level || "",
     goal: learning?.goal || "",
     activeTime: (profile.availability || [])
       .map((code) => AVAILABILITY_NAMES[code])
@@ -245,6 +259,9 @@ export function toFeedPost(post: ApiPost): FeedPost {
     accent: accentFor(post.authorId),
     photo: post.author.avatarUrl || "",
     countryCode: post.author.countryCode || "",
+    nativeCode: post.author.native || "",
+    learningCode: post.author.learning?.code || "",
+    learningLevel: post.author.learning?.level || "",
     image: post.imageUrl || "",
     audio: post.audioUrl || "",
     time: relativeTime(post.createdAt),

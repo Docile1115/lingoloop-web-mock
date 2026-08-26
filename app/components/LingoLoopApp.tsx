@@ -48,6 +48,7 @@ import {
   Search,
   Send,
   Settings,
+  Share2,
   ShieldCheck,
   SlidersHorizontal,
   Smile,
@@ -156,6 +157,10 @@ type ProfileDraft = {
   bio: string;
   goal: string;
   visibility: "public" | "partners";
+  /** 가르칠 수 있는 말·배우는 말과 단계. 예전에는 고칠 자리가 아예 없었습니다. */
+  nativeCode: string;
+  learningCode: string;
+  learningLevel: string;
 };
 
 type ModalState =
@@ -548,8 +553,11 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [profile, setProfile] = useState<ProfileDraft>({
     name: me.name,
     bio: me.bio,
-    goal: t("부담 없는 일상 대화"),
+    goal: me.learningLanguages?.[0]?.goal || t("부담 없는 일상 대화"),
     visibility: "public",
+    nativeCode: me.nativeLanguages?.[0] ?? "ko",
+    learningCode: me.learningLanguages?.[0]?.code ?? "en",
+    learningLevel: me.learningLanguages?.[0]?.level ?? "beginner",
   });
   const [replySort, setReplySort] = useState<"popular" | "recent">("popular");
   const toastTimer = useRef<number | null>(null);
@@ -588,12 +596,18 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     const previous = profile;
     setProfile(next);
     try {
-      const learning = me.learningLanguages?.length
-        ? me.learningLanguages.map((item, index) => (index === 0 ? { ...item, goal: next.goal || item.goal } : item))
-        : undefined;
+      const rest = (me.learningLanguages || []).slice(1);
       await api("/api/profile", {
         method: "PATCH",
-        body: JSON.stringify({ name: next.name, bio: next.bio, ...(learning ? { learningLanguages: learning } : {}) }),
+        body: JSON.stringify({
+          name: next.name,
+          bio: next.bio,
+          nativeLanguages: [next.nativeCode],
+          learningLanguages: [
+            { code: next.learningCode, level: next.learningLevel, goal: next.goal || t("부담 없는 일상 대화") },
+            ...rest,
+          ],
+        }),
       });
       showToast(t("프로필을 저장했어요"));
       void reload();
@@ -710,6 +724,27 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   };
 
   /** 링크 복사 — 클립보드가 막힌 환경에서도 조용히 실패하지 않게 결과를 알려줍니다. */
+  /**
+   * 글을 밖으로 공유합니다.
+   *
+   * 기기에 공유창이 있으면(폰 대부분) 그걸 띄우고, 없으면(데스크톱 브라우저 다수)
+   * 주소를 복사합니다. 없는 기능을 있는 척하지 않으려면 갈래가 필요합니다.
+   */
+  const sharePost = async (post: FeedPost) => {
+    const url = `${window.location.origin}/#community/post/${post.id}`;
+    const text = post.text.length > 80 ? `${post.text.slice(0, 80)}…` : post.text;
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({ title: t("{author}님의 게시물", { author: post.author }), text, url });
+        return;
+      } catch (caught) {
+        // 사용자가 공유창을 닫은 것은 실패가 아닙니다 — 조용히 끝냅니다.
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+      }
+    }
+    void copyLink(url);
+  };
+
   const copyLink = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url);
@@ -1668,6 +1703,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 myLearningLanguage={languageName(me.learningLanguages?.[0]?.code ?? "en")}
                 followingIds={followingIds}
                 onOpenPhoto={setPhotoViewer}
+                onShare={sharePost}
               />
             ) : null}
             {!detail && section === "chats" ? (
@@ -2492,7 +2528,8 @@ function ProfileDetailView({
             {partner.name}
             {partner.verified ? <BadgeCheck size={18} className="verified" /> : null}
           </span>
-          <p className="profile-head-handle">{partner.handle} · {partner.city}</p>
+          <p className="profile-head-handle">{partner.handle}{partner.city ? ` · ${partner.city}` : ""}</p>
+          <LanguageExchange native={partner.nativeCode} learning={partner.learningCode} level={partner.learningLevel} />
         </div>
         <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
       </header>
@@ -2603,6 +2640,60 @@ function ProfileEditView({
         />
         <small className="field-hint">{t("{n}/{max}자", { n: draft.bio.length, max: LIMITS.profileBio })}</small>
       </div>
+      <div className="form-section">
+        <span className="field-label">{t("가르칠 수 있는 말")}</span>
+        <div className="chip-row" role="group" aria-label={t("가르칠 수 있는 말")}>
+          {languageOptions.map((option) => (
+            <button
+              type="button"
+              key={option.code}
+              className={draft.nativeCode === option.code ? "chip active" : "chip"}
+              aria-pressed={draft.nativeCode === option.code}
+              onClick={() => setDraft({ ...draft, nativeCode: option.code })}
+            >
+              {tx(option.label)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="form-section">
+        <span className="field-label">{t("배우는 말")}</span>
+        <div className="chip-row" role="group" aria-label={t("배우는 말")}>
+          {languageOptions.filter((option) => option.code !== draft.nativeCode).map((option) => (
+            <button
+              type="button"
+              key={option.code}
+              className={draft.learningCode === option.code ? "chip active" : "chip"}
+              aria-pressed={draft.learningCode === option.code}
+              onClick={() => setDraft({ ...draft, learningCode: option.code })}
+            >
+              {tx(option.label)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="form-section">
+        <span className="field-label">{t("지금 어느 정도인가요?")}</span>
+        <div className="level-picker" role="group" aria-label={t("배우는 단계")}>
+          {LEARNING_LEVELS.map((level, index) => (
+            <button
+              type="button"
+              key={level}
+              className={draft.learningLevel === level ? "level-option active" : "level-option"}
+              aria-pressed={draft.learningLevel === level}
+              onClick={() => setDraft({ ...draft, learningLevel: level })}
+            >
+              <span className="level-dots">
+                {[1, 2, 3, 4, 5].map((step) => <b key={step} className={step <= index + 1 ? "on" : ""} />)}
+              </span>
+              <small>{t(LEVEL_LABELS[level])}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="form-section">
         <label className="field-label" htmlFor="profile-goal">{t("학습 목표")}</label>
         <input
@@ -2912,6 +3003,7 @@ function CommunityView({
   myLearningLanguage,
   followingIds,
   onOpenPhoto,
+  onShare,
 }: {
   posts: FeedPost[];
   tab: "recommended" | "learning" | "following";
@@ -2931,6 +3023,7 @@ function CommunityView({
   /** "팔로잉" 탭은 내가 팔로우하는 사람의 글만 봅니다. */
   followingIds: string[];
   onOpenPhoto: (src: string) => void;
+  onShare: (post: FeedPost) => Promise<void>;
   translated: Set<string>;
   translations: Record<string, string>;
   corrections: Set<string>;
@@ -2978,7 +3071,6 @@ function CommunityView({
 
   return (
     <div className="view community-view">
-      <div className="translation-access-note"><Languages size={17} /><span><strong>{tx(msg("기본 번역은 무료예요"))}</strong><small>{tx(msg("언어 장벽 없이 피드를 읽을 수 있도록 베타 기간 이후에도 기본 번역은 열어둘 계획이에요."))}</small></span></div>
       <div className="community-toolbar">
         <div className="segmented-tabs" role="tablist" aria-label={t("커뮤니티 피드")}>
           <button type="button" role="tab" aria-selected={tab === "recommended"} className={tab === "recommended" ? "active" : ""} onClick={() => setTab("recommended")}>{t("추천")}</button>
@@ -3000,13 +3092,15 @@ function CommunityView({
             <article className="feed-post" key={post.id}>
               <header className="post-header">
                 <button className="post-author" type="button" onClick={() => onProfile(post.authorId)}>
-                  <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" online={post.authorId === "maya"} photo={post.photo} countryCode={post.countryCode} />
-                  <span><strong>{post.author}{post.authorId === "maya" ? <BadgeCheck size={14} className="verified" /> : null}</strong><small>{post.handle} · {tx(post.time)}</small></span>
+                  <Avatar name={post.author} accent={post.accent} size="md" photo={post.photo} countryCode={post.countryCode} />
+                  <span>
+                    <strong>{post.author}</strong>
+                    <LanguageExchange native={post.nativeCode} learning={post.learningCode} level={post.learningLevel} />
+                  </span>
                 </button>
                 <div className="post-meta">
                   {post.requestCorrection ? <Pill tone="soft"><WandSparkles size={12} /> {t("교정 부탁해요")}</Pill> : null}
                   {post.visibility === "partners" ? <Pill tone="neutral">{t("파트너 공개")}</Pill> : null}
-                  <Pill tone="language">{tx(post.language)} · {post.level}</Pill>
                   <MenuPopover
                     label={t("게시물 메뉴")}
                     items={postMenuItems(post, {
@@ -3019,6 +3113,8 @@ function CommunityView({
                       onReport: () => onReport(post.author, post.authorId),
                     })}
                   />
+                  {/* 시각은 메뉴 아래에. 이름 옆에 두면 언어 교환 줄과 자리를 다툽니다. */}
+                  <time className="post-time">{tx(post.time)}</time>
                 </div>
               </header>
               <button className="post-copy-open" type="button" onClick={() => onOpen(post)} aria-label={t("{author}님의 게시물 열기", { author: post.author })}>
@@ -3057,6 +3153,7 @@ function CommunityView({
                 <button type="button" onClick={() => onOpen(post)}><MessageCircle size={18} /> {post.comments}</button>
                 <button className={corrections.has(post.id) ? "active correct" : ""} type="button" onClick={() => (post.correction ? onCorrection(post.id) : onOpen(post))}><PenLine size={18} /> {t("교정 {n}", { n: post.corrections })}</button>
                 <button className={translated.has(post.id) ? "active" : ""} type="button" onClick={() => onTranslate(post)}><Languages size={18} /> {t("번역")}</button>
+                <button type="button" aria-label={t("공유")} onClick={() => void onShare(post)}><Share2 size={18} /></button>
                 <button className={post.saved ? "active save" : "post-save"} type="button" aria-label={t("저장")} onClick={() => onToggle(post.id, "saved")}><Bookmark size={18} fill={post.saved ? "currentColor" : "none"} /></button>
               </footer>
           </article>
@@ -3916,6 +4013,11 @@ function LearnView({
         <div className="profile-head-id">
           <span className="profile-head-name">{profileName}<BadgeCheck size={18} className="verified" /></span>
           <p className="profile-head-handle">{me.handle}</p>
+          <LanguageExchange
+            native={me.nativeLanguages?.[0]}
+            learning={me.learningLanguages?.[0]?.code}
+            level={me.learningLanguages?.[0]?.level}
+          />
         </div>
         <Avatar name={profileName} flag={me.country?.flag ?? "🌐"} accent="violet" size="xl" online photo={me.avatarUrl} countryCode={me.country?.code} />
       </header>
@@ -4645,6 +4747,54 @@ function MatchingPreferencesModal({
         <button className="primary-button" type="button" disabled={saving || !preferences.targetLanguages.length || !preferences.availability.length || !preferences.intents.length} onClick={() => void save()}>{saving ? t("저장 중…") : tx(msg("설정 저장하고 12명 보기"))}</button>
       </div>
     </div>
+  );
+}
+
+/** 배우는 단계 다섯. 서버의 LEARNING_LEVELS 와 같은 순서입니다. */
+const LEARNING_LEVELS = ["beginner", "elementary", "intermediate", "upper", "advanced"] as const;
+type LearningLevel = (typeof LEARNING_LEVELS)[number];
+
+const LEVEL_LABELS: Record<LearningLevel, MessageKey> = {
+  beginner: msg("이제 시작했어요"),
+  elementary: msg("짧은 문장은 말해요"),
+  intermediate: msg("일상 대화는 해요"),
+  upper: msg("어려운 얘기도 해요"),
+  advanced: msg("거의 불편함이 없어요"),
+};
+
+/** 몇 번째 단계인가. 점을 몇 개 칠할지 정합니다. */
+const levelStep = (level?: string) => Math.max(0, LEARNING_LEVELS.indexOf((level || "") as LearningLevel) + 1);
+
+/**
+ * 이 사람이 무엇을 가르치고 무엇을 배우는지.
+ *
+ *   JA ⇄ KO
+ *   ▔▔    ●●○
+ *
+ * 이름 옆에 이것만 있으면 말을 걸어도 되는 상대인지 바로 압니다 —
+ * 프로필까지 들어가야 알 수 있으면 잘 안 봅니다.
+ */
+function LanguageExchange({ native, learning, level }: { native?: string; learning?: string; level?: string }) {
+  if (!native && !learning) return null;
+  const steps = levelStep(level);
+  return (
+    <span className="lang-exchange">
+      {native ? (
+        <span className="lang-exchange-side">
+          <em>{native.toLocaleUpperCase()}</em>
+          <i className="lang-native" aria-label={t("원어민")} />
+        </span>
+      ) : null}
+      {native && learning ? <ArrowLeftRight size={12} className="lang-exchange-arrow" aria-hidden="true" /> : null}
+      {learning ? (
+        <span className="lang-exchange-side">
+          <em>{learning.toLocaleUpperCase()}</em>
+          <i className="lang-level" aria-label={t("배우는 단계")}>
+            {[1, 2, 3, 4, 5].map((step) => <b key={step} className={step <= steps ? "on" : ""} />)}
+          </i>
+        </span>
+      ) : null}
+    </span>
   );
 }
 

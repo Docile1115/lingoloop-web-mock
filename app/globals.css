@@ -1282,7 +1282,6 @@ p {
 }
 
 .beta-access-note,
-.translation-access-note,
 .chat-sync-note {
   display: flex;
   min-width: 0;
@@ -1329,7 +1328,6 @@ p {
 }
 
 .beta-access-note > span:not(.pill),
-.translation-access-note > span:not(.pill),
 .chat-sync-note > span:not(.pill) {
   display: flex;
   min-width: 0;
@@ -1338,14 +1336,12 @@ p {
 }
 
 .beta-access-note strong,
-.translation-access-note strong,
 .chat-sync-note strong {
   color: var(--ink);
   font-size: 13px;
 }
 
 .beta-access-note small,
-.translation-access-note small,
 .chat-sync-note small {
   margin-top: 3px;
   color: var(--muted);
@@ -1739,11 +1735,25 @@ p {
   text-align: left;
 }
 
-.post-author > span:last-child { display: flex; min-width: 0; flex-direction: column; }
+.post-author > span:last-child { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .post-author strong { display: flex; align-items: center; gap: var(--sp-1); font-size: 15px; }
 .post-author small { margin-top: var(--sp-1); color: var(--muted); font-size: 13px; }
 
-.post-meta { display: flex; align-items: center; gap: var(--sp-1); }
+/* 무엇을 가르치고 무엇을 배우는지 — 이름 바로 밑에 한 줄. */
+.lang-exchange { display: inline-flex; align-items: flex-start; gap: var(--sp-2); }
+.lang-exchange-side { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+.lang-exchange em { color: var(--muted); font-size: 12px; font-style: normal; font-weight: 700; letter-spacing: .02em; }
+.lang-exchange-arrow { margin-top: 2px; color: var(--subtle); }
+/* 가르치는 말과 배우는 말은 색을 달리합니다 — 같은 색이면 어느 쪽이 어느 쪽인지
+   매번 글자를 읽어야 압니다. 가르치는 쪽은 초록(다 채워진 상태),
+   배우는 쪽은 파랑(아직 채우는 중)입니다. */
+.lang-native { display: block; width: 22px; height: 3px; border-radius: var(--r-pill); background: var(--primary); }
+.lang-level { display: inline-flex; gap: 3px; }
+.lang-level b { display: block; width: 5px; height: 5px; border-radius: 50%; background: var(--line-structure); }
+.lang-level b.on { background: var(--link); }
+
+.post-meta { display: flex; flex-direction: column; align-items: flex-end; gap: var(--sp-1); }
+.post-time { color: var(--subtle); font-size: 12px; white-space: nowrap; }
 .post-meta > button { display: inline-flex; padding: var(--sp-1); border: 0; background: transparent; color: var(--muted); }
 
 .post-copy {
@@ -1799,7 +1809,20 @@ p {
   margin-top: var(--sp-2);
 }
 
-.post-tags button { display: inline-flex; min-height: 24px; align-items: center; padding: 0; border: 0; background: transparent; color: var(--subtle); font-size: 13px; }
+/* 태그는 글자만 있으면 본문과 구분이 안 됩니다 — 테두리 있는 알약으로. */
+.post-tags button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  padding: 0 10px;
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: 12px;
+}
+.post-tags button:hover { border-color: var(--line-structure); color: var(--ink); }
+.post-tags button.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); font-weight: 600; }
 
 .post-visual {
   position: relative;
@@ -3905,11 +3928,8 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   .single-match-card > footer button { min-height: 34px; font-size: 13px; }
   .next-match-note { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-2); }
   .beta-access-note,
-  .translation-access-note { margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
   .beta-access-note strong,
-  .translation-access-note strong { font-size: 13px; }
   .beta-access-note small,
-  .translation-access-note small { font-size: 12px; }
   .next-match-note > svg { width: 14px; }
   .next-match-note small { display: none; }
   .next-match-note button { padding-right: 0; }
@@ -3932,7 +3952,6 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 
   .topbar-actions .top-compose-button { border: var(--bw-thin) solid var(--primary); background: var(--primary); color: var(--primary-text); }
   .community-view { padding-top: var(--sp-2); }
-  .translation-access-note { margin-top: 2px; }
   .community-toolbar { top: 59px; margin-right: -15px; margin-bottom: var(--sp-2); margin-left: -15px; padding: var(--sp-2) var(--sp-4) var(--sp-2); }
   .feed-grid { grid-template-columns: minmax(0,1fr); gap: var(--sp-2); }
   .feed-grid .feed-post { padding: var(--sp-3) var(--sp-3) 0; border-radius: var(--r-lg); }
@@ -4528,7 +4547,6 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 
   /* 안내 배너는 다크에서도 중성 톤을 씁니다 — 라이트와 같은 토큰이면 별도 규칙이 필요 없습니다. */
   .beta-access-note,
-  .translation-access-note,
   .chat-sync-note {
     border-color: var(--line);
     background: var(--surface-soft);
@@ -6865,3 +6883,43 @@ label > svg { flex: none; }
   color: #fff;
 }
 .photo-viewer-close:hover { background: rgba(255, 255, 255, .24); }
+
+
+/* ─────────────────────────────────────────────
+   프로필 편집 — 언어와 단계 고르기
+   ───────────────────────────────────────────── */
+
+.chip-row { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2); }
+.chip {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  padding: 0 var(--sp-3);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+}
+.chip:hover { border-color: var(--line-structure); color: var(--ink); }
+.chip.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); font-weight: 600; }
+
+.level-picker { display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-2); }
+.level-option {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: left;
+}
+.level-option:hover { border-color: var(--line-structure); }
+.level-option.active { border-color: var(--link); color: var(--ink); }
+.level-dots { display: inline-flex; flex: 0 0 auto; gap: 4px; }
+.level-dots b { display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--line-structure); }
+.level-dots b.on { background: var(--link); }
