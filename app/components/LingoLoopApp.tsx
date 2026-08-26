@@ -1840,6 +1840,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
             setModal(null);
           }}
           posts={posts}
+          me={me}
+          exchangePartner={selectedConversation}
           directory={directory}
           savedItems={savedItems}
           likesReceived={likesReceived}
@@ -2540,8 +2542,6 @@ function ProfileDetailView({
         <span><strong>{counts ? counts.posts : posts.length}</strong> {t("게시물")}</span>
         {counts ? <span><strong>{counts.following}</strong> {t("팔로잉")}</span> : null}
         {counts ? <span><strong>{counts.followers}</strong> {t("팔로워")}</span> : null}
-        <span><strong>{tx(partner.native)}</strong> {t("원어민")}</span>
-        <span><strong>{tx(partner.learning)}</strong> {partner.level}</span>
       </div>
 
       {/* 버튼은 둘입니다 — 팔로우와 메시지. 신고·차단은 헤더의 ··· 메뉴로 뺐습니다.
@@ -2554,14 +2554,6 @@ function ProfileDetailView({
           <MessageCircle size={16} /> {t("메시지")}
         </button>
       </div>
-
-      <section className="profile-detail-section">
-        <h3>{t("언어 교환")}</h3>
-        <div className="profile-language-grid">
-          <span><small>{t("가르칠 수 있어요")}</small><strong><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.native)}</strong><em>{t("원어민")}</em></span>
-          <span><small>{t("배우고 있어요")}</small><strong>🇰🇷 {tx(partner.learning)}</strong><em>{partner.level}</em></span>
-        </div>
-      </section>
 
       <section className="profile-detail-section">
         <h3>{t("관심사")}</h3>
@@ -3440,7 +3432,6 @@ function ChatsView({
           <div><h1>{t("대화")}</h1>{unreadTotal > 0 ? <Pill tone="soft">{t("안 읽음 {n}", { n: unreadTotal })}</Pill> : null}</div>
           <IconButton label={t("새 대화")} icon={PenLine} onClick={onNewChat} />
         </header>
-        <div className="chat-sync-note"><Cloud size={15} /><span><strong>{tx(msg("실서비스 설계 · 서버 자동 동기화"))}</strong><small>{tx(msg("앱을 지우거나 기기를 바꿔도 로그인하면 그대로 이어져요."))}</small></span></div>
         <label className="chat-search"><Search size={16} /><input type="search" value={listQuery} onChange={(event) => setListQuery(event.target.value)} placeholder={t("이름 또는 대화 검색")} />{listQuery ? <button type="button" className="chat-search-clear" aria-label={t("검색어 지우기")} onClick={() => setListQuery("")}><X size={14} /></button> : null}</label>
         <div className="chat-list-tabs">
           <button type="button" className={listTab === "all" ? "active" : ""} onClick={() => setListTab("all")}>{t("전체")}</button>
@@ -4237,6 +4228,8 @@ function ModalLayer({
   onBlockHost,
   onEndRoom,
   posts,
+  me,
+  exchangePartner,
   directory,
   savedItems,
   likesReceived,
@@ -4278,6 +4271,9 @@ function ModalLayer({
   onBlockHost: (room: PracticeRoom) => void;
   onEndRoom: (room: PracticeRoom) => void;
   posts: FeedPost[];
+  me: ApiProfile;
+  /** 교환 세션을 여는 상대 — 지금 열려 있는 대화입니다. */
+  exchangePartner?: Conversation;
   directory: Partner[];
   savedItems: SavedPhrase[];
   likesReceived: ApiReceivedLike[];
@@ -4332,7 +4328,7 @@ function ModalLayer({
         {modal.type === "search" ? <SearchModal directory={directory} posts={posts} savedItems={savedItems} onOpenProfile={onOpenProfile} onOpenPost={onOpenPost} onToast={onToast} /> : null}
         {modal.type === "create-room" ? <CreateRoomModal onCreate={onCreateRoom} onToast={onToast} /> : null}
         {modal.type === "room" ? <RoomModal room={modal.room} handRaised={roomHandRaised} setHandRaised={setRoomHandRaised} micOn={roomMicOn} setMicOn={setRoomMicOn} messages={roomMessages} onSendMessage={onSendRoomMessage} onMinimize={() => onMinimizeRoom(modal.room)} onLeave={onClose} onReport={() => onReport(modal.room.title, { targetType: "room", targetId: modal.room.id })} onToast={onToast} onBlockHost={() => onBlockHost(modal.room)} onEndRoom={() => onEndRoom(modal.room)} mutedRoom={mutedRoomIds.has(modal.room.id)} onToggleRoomMute={onToggleRoomMute} onCopyLink={onCopyLink} /> : null}
-        {modal.type === "exchange" ? <ExchangeModal length={exchangeLength} setLength={setExchangeLength} onClose={onClose} onToast={onToast} /> : null}
+        {modal.type === "exchange" ? <ExchangeModal length={exchangeLength} setLength={setExchangeLength} onClose={onClose} onToast={onToast} me={me} partner={exchangePartner} /> : null}
         {modal.type === "review" ? <ReviewModal items={modal.items} onClose={onClose} /> : null}
         {modal.type === "new-chat" ? (
           <NewChatModal
@@ -4611,7 +4607,7 @@ function ProfileModal({ partner, following, onToggleFollow, onStartChat, onRepor
       <div className="profile-modal-grid">
         <div className="profile-main">
           <section><h3>{t("자기소개")}</h3><p>{partner.bio}</p></section>
-          <section><h3>{t("언어 교환")}</h3><div className="profile-language-grid"><span><small>{t("가르칠 수 있어요")}</small><strong><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.native)}</strong><em>{t("원어민")}</em></span><span><small>{t("배우고 있어요")}</small><strong>🇰🇷 {tx(partner.learning)}</strong><em>{partner.level}</em></span></div></section>
+          <section><h3>{t("언어 교환")}</h3><div className="profile-language-grid"><span><small>{t("가르칠 수 있어요")}</small><strong><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.native)}</strong><em>{t("원어민")}</em></span><span><small>{t("배우고 있어요")}</small><strong>{tx(partner.learning)}</strong><em>{levelStep(partner.learningLevel) ? t(LEVEL_LABELS[partner.learningLevel as LearningLevel]) : partner.level}</em></span></div></section>
           <section><h3>{t("관심사")}</h3><div className="interest-row large">{partner.interests.map((item) => <span key={item}>{item}</span>)}</div></section>
         </div>
         <aside className="profile-details"><h3>{t("잘 맞는 이유")}</h3><p><Clock3 size={16} /><span><strong>{t("활동 시간")}</strong><small>{partner.activeTime}</small></span></p><p><Trophy size={16} /><span><strong>{t("학습 목표")}</strong><small>{partner.goal}</small></span></p><p><PenLine size={16} /><span><strong>{t("교정 스타일")}</strong><small>{t("중요한 오류를 대화 후에")}</small></span></p></aside>
@@ -4785,6 +4781,8 @@ function LanguageExchange({ native, learning, level }: { native?: string; learni
         <span className="lang-exchange-side">
           <em>{native.toLocaleUpperCase()}</em>
           <i className="lang-native" aria-label={t("원어민")} />
+          {/* 코드만 있으면 무슨 말인지 모르는 사람이 많습니다 — 이름을 흐리게 함께. */}
+          <small>{tx(languageName(native))}</small>
         </span>
       ) : null}
       {native && learning ? <ArrowLeftRight size={12} className="lang-exchange-arrow" aria-hidden="true" /> : null}
@@ -4794,6 +4792,7 @@ function LanguageExchange({ native, learning, level }: { native?: string; learni
           <i className="lang-level" aria-label={t("배우는 단계")}>
             {[1, 2, 3, 4, 5].map((step) => <b key={step} className={step <= steps ? "on" : ""} />)}
           </i>
+          <small>{tx(languageName(learning))}</small>
         </span>
       ) : null}
     </span>
@@ -5041,6 +5040,12 @@ function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, 
   const partnerResults = needle ? directory.filter((partner) => `${partner.name} ${partner.handle} ${partner.native} ${partner.interests.join(" ")}`.toLowerCase().includes(needle)).slice(0, 3) : [];
   const postResults = needle ? posts.filter((post) => `${post.text} ${post.tags.join(" ")} ${post.author}`.toLowerCase().includes(needle)).slice(0, 4) : [];
   const phraseResults = needle ? savedItems.filter((item) => `${item.phrase} ${item.meaning}`.toLowerCase().includes(needle)).slice(0, 3) : [];
+  /** 글에 달린 주제를 세어 많이 쓰인 순으로 넷. */
+  const popularTags = (() => {
+    const counted = new Map<string, number>();
+    for (const post of posts) for (const tag of post.tags) counted.set(tag, (counted.get(tag) ?? 0) + 1);
+    return [...counted.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([tag]) => tag);
+  })();
   const nothingFound = needle && !partnerResults.length && !postResults.length && !phraseResults.length;
 
   const copyPhrase = async (phrase: string) => {
@@ -5055,12 +5060,19 @@ function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, 
   return (
     <div className="search-modal-content">
       <header><Search size={21} /><input aria-label={t("검색")} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("사람, 언어, 주제, 저장한 표현 검색")} /></header>
-      <div className="search-chips"><span>{t("빠른 검색")}</span>{[t("영어 원어민"), t("지금 온라인"), t("#여행"), t("저장한 표현")].map((item) => <button type="button" key={item} onClick={() => setQuery(item.replace("#", ""))}>{item}</button>)}</div>
+      {popularTags.length ? (
+        /* 지금 글에 실제로 많이 달린 주제를 셉니다. 예전에는 "#여행" 같은 것을
+           적어두었는데, 그 주제의 글이 하나도 없으면 눌러도 빈 결과만 나왔습니다. */
+        <div className="search-chips"><span>{t("많이 쓰는 주제")}</span>{popularTags.map((tag) => <button type="button" key={tag} onClick={() => setQuery(tag.replace("#", ""))}>{tag}</button>)}</div>
+      ) : null}
+      {/* 결과가 없는 구역은 아예 그리지 않습니다 — 제목만 남으면 빈 칸으로 보입니다. */}
+      {partnerResults.length || nothingFound || !needle ? (
       <section>
         <h3>{query ? t("“{query}” 검색 결과", { query }) : t("추천 파트너")}</h3>
         {partnerResults.map((partner) => <button className="search-result" type="button" key={partner.id} aria-label={t("{name} 프로필 보기", { name: partner.name })} onClick={() => onOpenProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning} · {partner.interests.join(" · ")}</small></span><Pill tone="success">{partner.compatibility}%</Pill><ChevronRight size={16} /></button>)}
         {nothingFound ? <div className="empty-search"><Search size={28} /><strong>{t("검색 결과가 없어요")}</strong><p>{t("언어나 관심사를 더 짧게 입력해보세요.")}</p></div> : null}
       </section>
+      ) : null}
       {postResults.length ? (
         <section>
           <h3>{t("게시물")}</h3>
@@ -5363,8 +5375,31 @@ function RoomModal({
   );
 }
 
-function ExchangeModal({ length, setLength, onClose, onToast }: { length: number; setLength: (value: number) => void; onClose: () => void; onToast: (message: string) => void }) {
+/**
+ * 언어 교환 세션.
+ *
+ * 예전에는 나도 상대도 fixture 였습니다 — 누구와 대화하든 "서준"과 "Maya 🇨🇦" 가
+ * 떴습니다. 지금 열려 있는 대화의 두 사람을 씁니다.
+ */
+function ExchangeModal({
+  length,
+  setLength,
+  onClose,
+  onToast,
+  me,
+  partner,
+}: {
+  length: number;
+  setLength: (value: number) => void;
+  onClose: () => void;
+  onToast: (message: string) => void;
+  me: ApiProfile;
+  partner?: Conversation;
+}) {
   const half = length / 2;
+  const myLanguage = tx(languageName(me.learningLanguages?.[0]?.code ?? "en"));
+  const theirLanguage = tx(languageName(me.nativeLanguages?.[0] ?? "ko"));
+  const partnerName = partner?.name ?? t("상대");
   return (
     <div className="exchange-modal-content">
       <header>
@@ -5374,9 +5409,17 @@ function ExchangeModal({ length, setLength, onClose, onToast }: { length: number
         <p>{t("한 언어씩 공평하게 연습하고, 끝나면 서로 짧은 피드백을 남겨요.")}</p>
       </header>
       <div className="exchange-partners">
-        <span><Avatar name={currentUser.name} flag={currentUser.flag} accent="violet" size="md" /><strong>{currentUser.name}</strong><small>{t("영어 연습")}</small></span>
+        <span>
+          <Avatar name={me.name} accent="violet" size="md" photo={me.avatarUrl} countryCode={me.country?.code} />
+          <strong>{me.name}</strong>
+          <small>{t("{language} 연습", { language: myLanguage })}</small>
+        </span>
         <i><Languages size={18} /></i>
-        <span><Avatar name="Maya" flag="🇨🇦" accent="coral" size="md" /><strong>Maya</strong><small>{t("한국어 연습")}</small></span>
+        <span>
+          <Avatar name={partnerName} accent={partner?.accent ?? "coral"} size="md" photo={partner?.photo} countryCode={partner?.countryCode} />
+          <strong>{partnerName}</strong>
+          <small>{t("{language} 연습", { language: theirLanguage })}</small>
+        </span>
       </div>
       <section>
         <span className="field-label">{t("세션 길이")}</span>
@@ -5384,7 +5427,18 @@ function ExchangeModal({ length, setLength, onClose, onToast }: { length: number
           {[10, 15, 20, 30].map((value) => <button type="button" className={length === value ? "active" : ""} key={value} onClick={() => setLength(value)}><strong>{value}</strong><small>{t("분")}</small></button>)}
         </div>
       </section>
-      <div className="exchange-timeline"><span style={{ width: "50%" }}><b>EN</b><strong>{t("{n}분", { n: half })}</strong><small>{t("서준의 영어")}</small></span><span><b>KO</b><strong>{t("{n}분", { n: half })}</strong><small>{t("Maya의 한국어")}</small></span></div>
+      <div className="exchange-timeline">
+        <span style={{ width: "50%" }}>
+          <b>{(me.learningLanguages?.[0]?.code ?? "en").toLocaleUpperCase()}</b>
+          <strong>{t("{n}분", { n: half })}</strong>
+          <small>{t("{name}의 {language}", { name: me.name, language: myLanguage })}</small>
+        </span>
+        <span>
+          <b>{(me.nativeLanguages?.[0] ?? "ko").toLocaleUpperCase()}</b>
+          <strong>{t("{n}분", { n: half })}</strong>
+          <small>{t("{name}의 {language}", { name: partnerName, language: theirLanguage })}</small>
+        </span>
+      </div>
       <div className="exchange-features"><span><CheckCircle2 size={15} /> {t("턴 타이머")}</span><span><CheckCircle2 size={15} /> {t("실시간 메모")}</span><span><CheckCircle2 size={15} /> {t("종료 후 피드백")}</span></div>
       <div className="modal-footer">
         <button className="secondary-button" type="button" onClick={() => { onClose(); onToast(t("내일 오후 8시에 세션을 예약했어요")); }}><CalendarDays size={16} /> {t("예약하기")}</button>

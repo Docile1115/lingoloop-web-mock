@@ -1391,12 +1391,16 @@ p {
   background: var(--surface);
 }
 
+/* 오늘의 파트너 카드의 사람 영역은 누르는 자리가 아닙니다(프로필로 가지 않습니다).
+   손가락 커서와 hover 를 남겨두면 눌러도 되는 줄 알고 계속 누르게 됩니다. */
 .single-match-person {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: var(--sp-3);
+  cursor: default;
 }
+.single-match-person:hover { background: transparent; }
 
 .single-match-person > div {
   display: flex;
@@ -1741,9 +1745,10 @@ p {
 
 /* 무엇을 가르치고 무엇을 배우는지 — 이름 바로 밑에 한 줄. */
 .lang-exchange { display: inline-flex; align-items: flex-start; gap: var(--sp-2); }
-.lang-exchange-side { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
-.lang-exchange em { color: var(--muted); font-size: 12px; font-style: normal; font-weight: 700; letter-spacing: .02em; }
-.lang-exchange-arrow { margin-top: 2px; color: var(--subtle); }
+.lang-exchange-side { display: inline-flex; flex-direction: column; align-items: center; gap: 0; }
+.lang-exchange em { color: var(--muted); font-size: 12px; line-height: 1.25; font-style: normal; font-weight: 700; letter-spacing: .02em; }
+.lang-exchange small { color: var(--subtle); font-size: 11px; line-height: 1.2; }
+.lang-exchange-arrow { margin-top: 4px; color: var(--subtle); }
 /* 가르치는 말과 배우는 말은 색을 달리합니다 — 같은 색이면 어느 쪽이 어느 쪽인지
    매번 글자를 읽어야 압니다. 가르치는 쪽은 초록(다 채워진 상태),
    배우는 쪽은 파랑(아직 채우는 중)입니다. */
@@ -1826,6 +1831,8 @@ p {
   font-size: 12px;
 }
 .post-tags button:hover { border-color: var(--primary); }
+.post-tags button:active { background: var(--primary-border); }
+.post-tags button.active:active { background: var(--primary-strong); }
 .post-tags button.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); font-weight: 600; }
 
 .post-visual {
@@ -1949,6 +1956,9 @@ p {
 }
 
 .community-view {
+  /* 커뮤니티는 상하좌우 16px 로 맞춥니다. 글 카드도 구분선도 이 값을 따라가서
+     한 곳만 바꾸면 됩니다(카드는 --view-pad-x 만큼 밖으로 뺐다가 안에서 채웁니다). */
+  --view-pad-x: var(--sp-4);
   padding-top: var(--sp-4);
 }
 
@@ -3490,7 +3500,10 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 .search-chips { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); border-bottom: var(--bw-hair) solid var(--line); }
 .search-chips span { margin-right: var(--sp-1); color: var(--muted); font-size: 12px; }
 .search-chips button { padding: var(--sp-1) var(--sp-2); border: var(--bw-hair) solid var(--line); border-radius: var(--r-pill); background: var(--surface); color: var(--muted); font-size: 12px; }
-.search-modal-content > section { min-height: 260px; padding: var(--sp-4) var(--sp-4); }
+/* 구역마다 최소 높이를 두면, 결과가 없는 구역이 빈 칸으로 남아 중간이 벌어집니다.
+   높이는 상자 전체에만 둡니다. */
+.search-modal-content { min-height: 320px; }
+.search-modal-content > section { padding: var(--sp-4) var(--sp-4); }
 .search-modal-content h3 { margin-bottom: var(--sp-2); font-size: 13px; }
 .search-result { display: flex; width: 100%; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-1); border: 0; border-top: var(--bw-hair) solid var(--line); background: transparent; text-align: left; }
 /* Avatar 도 Pill 도 <span> 이라 둘 다 빼야 궁합 배지가 늘어나지 않습니다. */
@@ -5370,18 +5383,16 @@ label > svg { flex: none; }
 }
 
 /* 사람 영역이 버튼이 되면서 기본 버튼 스타일을 지웁니다 */
+/* 예전에는 눌러서 프로필로 가는 버튼이었습니다. 지금은 누르는 자리가 아니라
+   손가락 커서와 밑줄 hover 를 뺐습니다 — 남겨두면 눌러도 되는 줄 알고 계속 누릅니다. */
 .single-match-card > .single-match-person {
   width: 100%;
   padding: 0;
   border: 0;
-  border-radius: var(--r-btn);
   background: transparent;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
-
-.single-match-card > .single-match-person:disabled { cursor: default; }
-.single-match-card > .single-match-person:not(:disabled):hover h2 { text-decoration: underline; }
 
 /* 진행 표시만 카드 아래 중앙에 (감싸던 note 박스는 제거) */
 .discover-view > .partner-progress {
@@ -6906,6 +6917,8 @@ label > svg { flex: none; }
   font-size: 13px;
 }
 .chip:hover { border-color: var(--primary); }
+.chip:active { background: var(--primary-border); }
+.chip.active:active { background: var(--primary-strong); }
 .chip.active { border-color: var(--primary); background: var(--primary); color: var(--primary-text); font-weight: 600; }
 
 .level-picker { display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-2); }
