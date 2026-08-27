@@ -1988,6 +1988,25 @@ p {
   background: var(--surface);
 }
 
+/* 언어 필터. 켜져 있으면 몇 개가 걸려 있는지 배지로 보입니다 — 안 그러면 왜 글이 적은지 모릅니다. */
+.feed-filter-button { position: relative; flex: 0 0 auto; }
+.feed-filter-button.is-on { border-color: var(--primary); color: var(--primary-strong); }
+.feed-filter-button > b {
+  display: grid;
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: var(--r-pill);
+  background: var(--primary);
+  color: var(--primary-text);
+  font-size: 10px;
+  line-height: 15px;
+  place-items: center;
+}
+
 .community-toolbar > span {
   color: var(--muted);
   font-size: 13px;
@@ -3310,19 +3329,73 @@ p {
   white-space: nowrap;
 }
 
-/* 나이 두 칸. 화면 너비를 다 쓰면 두 자리 숫자 옆이 텅 비어서 필요한 만큼만 씁니다. */
-.age-range-fields {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-top: var(--sp-2);
-}
+/*
+   범위 슬라이더 — 손잡이 두 개.
 
-.age-range-fields label { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3); border: var(--bw-hair) solid var(--line); border-radius: var(--r-btn); background: var(--surface); }
-.age-range-fields input { width: 40px; min-height: 38px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 14px; text-align: right; }
-.age-range-fields label > span { color: var(--subtle); font-size: 12px; white-space: nowrap; }
-.age-range-fields small { color: var(--muted); font-size: 12px; }
-.age-range-dash { color: var(--subtle); }
+   <input type="range"> 두 개를 완전히 겹쳐 둡니다. 그냥 겹치면 위에 있는
+   입력이 아래 입력의 손잡이까지 막아버려서, 트랙 전체는 클릭을 통과시키고
+   손잡이에서만 다시 받습니다.
+*/
+.range-slider { position: relative; height: 34px; margin-top: var(--sp-2); }
+
+.range-track {
+  position: absolute;
+  top: 15px;
+  right: 11px;
+  left: 11px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--line-strong);
+}
+.range-track > span { position: absolute; top: 0; height: 100%; border-radius: var(--r-pill); background: var(--primary-gradient); }
+
+.range-input {
+  position: absolute;
+  z-index: 0;
+  top: 6px;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline-offset: 4px;
+  background: transparent;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.range-input::-webkit-slider-runnable-track { height: 22px; background: transparent; }
+.range-input::-moz-range-track { height: 22px; background: transparent; }
+.range-input::-webkit-slider-thumb {
+  width: 22px;
+  height: 22px;
+  border: var(--bw-thin) solid var(--surface);
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .35);
+  cursor: grab;
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.range-input::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: var(--bw-thin) solid var(--surface);
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .35);
+  cursor: grab;
+  pointer-events: auto;
+}
+.range-input:active::-webkit-slider-thumb { cursor: grabbing; }
+
+.range-ticks { display: flex; position: absolute; top: 30px; right: 11px; left: 11px; justify-content: space-between; }
+.range-ticks > i { width: 3px; height: 3px; border-radius: 50%; background: var(--line-strong); }
+
+/* 값 요약은 라벨 오른쪽 끝에. 슬라이더를 끄는 동안 눈이 움직이지 않습니다. */
+.form-section > .field-label:has(em) { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+.form-section > .field-label > em { color: var(--primary-strong); font-size: 12px; font-style: normal; font-weight: 600; }
 
 .report-receipt-card {
   display: grid;

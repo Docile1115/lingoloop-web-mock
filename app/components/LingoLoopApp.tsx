@@ -89,8 +89,6 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 type Section = "discover" | "community" | "chats" | "practice" | "learn";
 
 type MatchAvailability = "weekday-morning" | "weekday-evening" | "weekend-morning" | "weekend-evening";
-/** 상대의 학습 단계 조건. 프로필의 단계(LEARNING_LEVELS)와 같은 값을 씁니다. */
-type PartnerLevel = "any" | LearningLevel;
 type MatchIntent = "language-exchange" | "friendship" | "voice-practice" | "culture";
 type DmScope = "matches" | "mutuals" | "anyone";
 
@@ -99,7 +97,8 @@ type MatchPreferences = {
   preferredCountries: string[];
   interests: string[];
   availability: MatchAvailability[];
-  partnerLevel: PartnerLevel;
+  levelMin: LearningLevel;
+  levelMax: LearningLevel;
   ageMin: number;
   ageMax: number;
   verifiedOnly: boolean;
@@ -163,11 +162,22 @@ type ProfileDraft = {
   learningLevel: string;
 };
 
+/** 커뮤니티 탭. 헬로톡과 같은 순서 — 최신이 기본입니다. */
+type FeedTab = "latest" | "recommended" | "following";
+
+/**
+ * 커뮤니티 글 거르기. 빈 문자열은 "모든"입니다.
+ * 글쓴이의 모국어와 배우는 말로 거릅니다 — 나에게 도움이 될 사람을 찾는 축입니다.
+ */
+type FeedFilters = { nativeCode: string; learningCode: string };
+const emptyFeedFilters: FeedFilters = { nativeCode: "", learningCode: "" };
+
 type ModalState =
   | { type: "new-chat" }
   | { type: "review"; items: SavedPhrase[] }
   | { type: "profile"; partner: Partner }
   | { type: "filters" }
+  | { type: "community-filters" }
   | { type: "compose" }
   | { type: "search" }
   | { type: "room"; room: PracticeRoom }
@@ -217,7 +227,8 @@ const defaultMatchPreferences: MatchPreferences = {
   preferredCountries: ["CA", "US"],
   interests: ["travel", "movies", "coffee"],
   availability: ["weekday-evening", "weekend-morning"],
-  partnerLevel: "intermediate",
+  levelMin: "beginner",
+  levelMax: "advanced",
   ageMin: 20,
   ageMax: 35,
   verifiedOnly: true,
@@ -253,8 +264,15 @@ function normalizeMatchPreferences(preferences: MatchPreferences): MatchPreferen
   const languageAliases: Record<string, string> = { 영어: "en", 스페인어: "es", 일본어: "ja" };
   const countryAliases: Record<string, string> = { 캐나다: "CA", 미국: "US", 영국: "GB", 호주: "AU", 스페인: "ES", 일본: "JP" };
   const interestAliases: Record<string, string> = { 영화: "movies", 여행: "travel", 카페: "coffee", 음악: "music", 기술: "technology", 요리: "cooking", 독서: "books", 운동: "running" };
+  // 예전 브라우저에 남은 값은 단계가 하나뿐입니다. 그 값 하나짜리 범위로 읽습니다.
+  const legacy = (preferences as MatchPreferences & { partnerLevel?: string }).partnerLevel;
+  const isLevel = (value: unknown): value is LearningLevel => LEARNING_LEVELS.includes(value as LearningLevel);
+  const levelMin = isLevel(preferences.levelMin) ? preferences.levelMin : isLevel(legacy) ? legacy : LEARNING_LEVELS[0];
+  const levelMax = isLevel(preferences.levelMax) ? preferences.levelMax : isLevel(legacy) ? legacy : LEARNING_LEVELS[LEARNING_LEVELS.length - 1];
   return {
     ...preferences,
+    levelMin: LEARNING_LEVELS.indexOf(levelMin) <= LEARNING_LEVELS.indexOf(levelMax) ? levelMin : levelMax,
+    levelMax,
     targetLanguages: preferences.targetLanguages.map((item) => languageAliases[item] ?? item),
     preferredCountries: preferences.preferredCountries.map((item) => countryAliases[item] ?? item),
     interests: preferences.interests.map((item) => interestAliases[item] ?? item),
@@ -482,7 +500,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [conversationDrafts, setConversationDrafts] = useState<Record<string, string>>({});
   const [requestConversationIds, setRequestConversationIds] = useState<Set<string>>(() => new Set());
-  const [feedTab, setFeedTab] = useState<"recommended" | "learning" | "following">("recommended");
+  const [feedTab, setFeedTab] = useState<FeedTab>("latest");
+  const [feedFilters, setFeedFilters] = useState<FeedFilters>(emptyFeedFilters);
   const [translatedPosts, setTranslatedPosts] = useState<Set<string>>(new Set());
   const [postTranslations, setPostTranslations] = useState<Record<string, string>>({});
   const [openCorrections, setOpenCorrections] = useState<Set<string>>(new Set());
@@ -860,7 +879,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       preferredCountries: matchPreferences.preferredCountries.join(","),
       interests: matchPreferences.interests.join(","),
       availability: matchPreferences.availability.join(","),
-      partnerLevel: matchPreferences.partnerLevel,
+      levelMin: matchPreferences.levelMin,
+      levelMax: matchPreferences.levelMax,
       ageMin: String(matchPreferences.ageMin),
       ageMax: String(matchPreferences.ageMax),
       verifiedOnly: String(matchPreferences.verifiedOnly),
@@ -1716,7 +1736,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onSavePhrase={savePhrase}
                 onCopyLink={copyLink}
                 onDeletePost={deletePost}
-                myLearningLanguage={languageName(me.learningLanguages?.[0]?.code ?? "en")}
+                myLearningCode={me.learningLanguages?.[0]?.code ?? ""}
+                myNativeCode={me.nativeLanguages?.[0] ?? ""}
+                filters={feedFilters}
+                onOpenFilters={() => setModal({ type: "community-filters" })}
                 followingIds={followingIds}
                 onOpenPhoto={setPhotoViewer}
                 onShare={sharePost}
@@ -1876,6 +1899,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           setExchangeLength={setExchangeLength}
           matchPreferences={matchPreferences}
           onSaveMatchPreferences={saveMatchPreferences}
+          feedFilters={feedFilters}
+          onApplyFeedFilters={setFeedFilters}
           dailyQueue={dailyRecommendations}
           partnerIndex={partnerIndex}
           signaledPartners={signaledPartners}
@@ -3043,14 +3068,17 @@ function CommunityView({
   onSavePhrase,
   onCopyLink,
   onDeletePost,
-  myLearningLanguage,
+  myLearningCode,
+  myNativeCode,
+  filters,
+  onOpenFilters,
   followingIds,
   onOpenPhoto,
   onShare,
 }: {
   posts: FeedPost[];
-  tab: "recommended" | "learning" | "following";
-  setTab: (value: "recommended" | "learning" | "following") => void;
+  tab: FeedTab;
+  setTab: (value: FeedTab) => void;
   hiddenAuthorIds: Set<string>;
   blockedAuthorIds: Set<string>;
   onHideAuthor: (authorId: string, name: string) => void;
@@ -3061,8 +3089,11 @@ function CommunityView({
   onSavePhrase: (item: SavedPhrase) => void;
   onCopyLink: (url: string) => void;
   onDeletePost: (post: FeedPost) => void;
-  /** "학습" 탭은 내가 배우는 언어로 쓴 글만 봅니다. */
-  myLearningLanguage: string;
+  /** 내가 배우는 말과 모국어. "추천" 순서를 정하는 데 씁니다. */
+  myLearningCode: string;
+  myNativeCode: string;
+  filters: FeedFilters;
+  onOpenFilters: () => void;
   /** "팔로잉" 탭은 내가 팔로우하는 사람의 글만 봅니다. */
   followingIds: string[];
   onOpenPhoto: (src: string) => void;
@@ -3080,15 +3111,33 @@ function CommunityView({
   const PAGE = 12;
   const [count, setCount] = useState(PAGE);
   const sentinel = useRef<HTMLDivElement | null>(null);
-  // 탭이 실제로 피드를 거릅니다.
-  const filteredPosts = posts.filter((post) => {
+
+  // 서버가 최신순으로 주므로 배열 순서가 곧 "최신"입니다.
+  const visiblePosts = posts.filter((post) => {
     // 숨기거나 차단한 사람의 글은 피드에서 빠집니다 — 그래야 눌린 게 보입니다.
     if (hiddenAuthorIds.has(post.authorId) || blockedAuthorIds.has(post.authorId)) return false;
     if (activeTag) return post.tags.includes(activeTag);
-    if (tab === "learning") return post.language === myLearningLanguage;
+    if (filters.nativeCode && post.nativeCode !== filters.nativeCode) return false;
+    if (filters.learningCode && post.learningCode !== filters.learningCode) return false;
     if (tab === "following") return followingIds.includes(post.authorId);
     return true;
   });
+
+  /**
+   * "추천"은 서로 도움이 될 사람을 먼저 보여줍니다.
+   *
+   * 예전에는 최신과 똑같은 목록이었습니다 — 탭 이름만 달랐습니다.
+   * 내가 배우는 말이 모국어인 사람(내 글을 고쳐줄 수 있는 사람)을 가장 위에,
+   * 내 모국어를 배우는 사람(내가 도울 수 있는 사람)을 그다음에 두고,
+   * 같은 무리 안에서는 반응이 많은 글부터 봅니다.
+   */
+  const filteredPosts = tab !== "recommended" ? visiblePosts : [...visiblePosts].sort((a, b) => {
+    const fit = (post: FeedPost) =>
+      (myLearningCode && post.nativeCode === myLearningCode ? 2 : 0) +
+      (myNativeCode && post.learningCode === myNativeCode ? 1 : 0);
+    return fit(b) - fit(a) || (b.likes + b.comments) - (a.likes + a.comments);
+  });
+  const activeFilterCount = (filters.nativeCode ? 1 : 0) + (filters.learningCode ? 1 : 0);
   const visible = filteredPosts.slice(0, count);
   const hasMore = count < filteredPosts.length;
 
@@ -3116,10 +3165,19 @@ function CommunityView({
     <div className="view community-view">
       <div className="community-toolbar">
         <div className="segmented-tabs" role="tablist" aria-label={t("커뮤니티 피드")}>
+          <button type="button" role="tab" aria-selected={tab === "latest"} className={tab === "latest" ? "active" : ""} onClick={() => setTab("latest")}>{t("최신")}</button>
           <button type="button" role="tab" aria-selected={tab === "recommended"} className={tab === "recommended" ? "active" : ""} onClick={() => setTab("recommended")}>{t("추천")}</button>
-          <button type="button" role="tab" aria-selected={tab === "learning"} className={tab === "learning" ? "active" : ""} onClick={() => setTab("learning")}>{t("영어")}</button>
           <button type="button" role="tab" aria-selected={tab === "following"} className={tab === "following" ? "active" : ""} onClick={() => setTab("following")}>{t("팔로잉")}</button>
         </div>
+        <button
+          className={activeFilterCount ? "icon-button feed-filter-button is-on" : "icon-button feed-filter-button"}
+          type="button"
+          onClick={onOpenFilters}
+          aria-label={t("언어로 거르기")}
+        >
+          <SlidersHorizontal size={17} />
+          {activeFilterCount ? <b aria-hidden="true">{activeFilterCount}</b> : null}
+        </button>
       </div>
 
       {activeTag ? (
@@ -3212,14 +3270,21 @@ function CommunityView({
       ) : filteredPosts.length === 0 ? (
         <div className="empty-state">
           <UsersRound size={30} strokeWidth={1.5} />
-          <strong>{tab === "following" ? t("팔로우한 사람의 글이 없어요") : activeTag ? t("이 주제의 글이 없어요") : t("아직 글이 없어요")}</strong>
+          <strong>
+            {activeFilterCount ? t("고른 언어에 맞는 글이 없어요") : tab === "following" ? t("팔로우한 사람의 글이 없어요") : activeTag ? t("이 주제의 글이 없어요") : t("아직 글이 없어요")}
+          </strong>
           <p>
-            {tab === "following"
-              ? t("프로필에서 팔로우하면 그 사람의 글이 여기 모여요.")
-              : activeTag
-                ? t("다른 주제를 골라보거나 직접 글을 올려보세요.")
-                : t("첫 글을 올려보세요. 원어민이 고쳐줄 수 있어요.")}
+            {activeFilterCount
+              ? t("언어 조건을 넓혀보세요.")
+              : tab === "following"
+                ? t("프로필에서 팔로우하면 그 사람의 글이 여기 모여요.")
+                : activeTag
+                  ? t("다른 주제를 골라보거나 직접 글을 올려보세요.")
+                  : t("첫 글을 올려보세요. 원어민이 고쳐줄 수 있어요.")}
           </p>
+          {activeFilterCount ? (
+            <button className="secondary-button" type="button" onClick={onOpenFilters}><SlidersHorizontal size={15} /> {t("언어로 거르기")}</button>
+          ) : null}
         </div>
       ) : (
         <p className="feed-end">{t("모든 글을 확인했어요 · {n}개", { n: filteredPosts.length })}</p>
@@ -4315,6 +4380,8 @@ function ModalLayer({
   setExchangeLength,
   matchPreferences,
   onSaveMatchPreferences,
+  feedFilters,
+  onApplyFeedFilters,
   dailyQueue,
   partnerIndex,
   signaledPartners,
@@ -4359,6 +4426,8 @@ function ModalLayer({
   setExchangeLength: (value: number) => void;
   matchPreferences: MatchPreferences;
   onSaveMatchPreferences: (preferences: MatchPreferences) => Promise<boolean>;
+  feedFilters: FeedFilters;
+  onApplyFeedFilters: (filters: FeedFilters) => void;
   dailyQueue: DailyMatchRecommendation[];
   partnerIndex: number;
   signaledPartners: string[];
@@ -4392,6 +4461,7 @@ function ModalLayer({
         <button className="modal-close" type="button" onClick={requestClose} aria-label={t("닫기")}><X size={20} /></button>
         {modal.type === "profile" ? <ProfileModal partner={modal.partner} following={followingIds.includes(modal.partner.id)} onToggleFollow={onToggleFollow} onStartChat={onStartChat} onReport={() => onReport(modal.partner.name)} /> : null}
         {modal.type === "filters" ? <MatchingPreferencesModal initial={matchPreferences} nativeCodes={me.nativeLanguages ?? []} onClose={onClose} onSave={onSaveMatchPreferences} /> : null}
+        {modal.type === "community-filters" ? <CommunityFiltersModal initial={feedFilters} onClose={onClose} onApply={onApplyFeedFilters} /> : null}
         {modal.type === "compose" ? <ComposeModal onPublish={onPublish} onToast={onToast} /> : null}
         {modal.type === "search" ? <SearchModal directory={directory} posts={posts} savedItems={savedItems} onOpenProfile={onOpenProfile} onOpenPost={onOpenPost} onToast={onToast} /> : null}
         {modal.type === "create-room" ? <CreateRoomModal onCreate={onCreateRoom} onToast={onToast} /> : null}
@@ -4450,7 +4520,7 @@ function ConfirmModal({ title, body, confirmLabel, onCancel, onConfirm }: { titl
 }
 
 function modalLabel(type: Exclude<ModalState, null>["type"]) {
-  const labels: Record<Exclude<ModalState, null>["type"], string> = { review: t("4분 복습 시작"), "new-chat": t("새 대화"), profile: t("파트너 프로필"), filters: t("매칭 설정"), compose: t("새 게시물"), search: t("통합 검색"), "create-room": t("보이스룸 만들기"), room: t("보이스룸"), exchange: t("언어 교환 세션"), "partner-list": t("오늘의 파트너 목록"), likes: t("주고받은 마음"), report: t("신고 및 차단"), onboarding: t("학습 목표 설정"), confirm: t("확인") };
+  const labels: Record<Exclude<ModalState, null>["type"], string> = { review: t("4분 복습 시작"), "new-chat": t("새 대화"), profile: t("파트너 프로필"), filters: t("매칭 설정"), "community-filters": t("커뮤니티 필터"), compose: t("새 게시물"), search: t("통합 검색"), "create-room": t("보이스룸 만들기"), room: t("보이스룸"), exchange: t("언어 교환 세션"), "partner-list": t("오늘의 파트너 목록"), likes: t("주고받은 마음"), report: t("신고 및 차단"), onboarding: t("학습 목표 설정"), confirm: t("확인") };
   return labels[type];
 }
 
@@ -4684,6 +4754,137 @@ function ProfileModal({ partner, following, onToggleFollow, onStartChat, onRepor
   );
 }
 
+/**
+ * 양쪽 끝을 따로 잡는 범위 슬라이더.
+ *
+ * 숫자 두 칸으로 받던 것을 대신합니다 — 나이나 단계처럼 "어디부터 어디까지"를
+ * 정하는 값은 끌어서 정하는 편이 훨씬 빠릅니다.
+ *
+ * <input type="range"> 두 개를 겹쳐 씁니다. 직접 그리면 키보드 조작과
+ * 스크린리더 지원을 처음부터 다시 만들어야 합니다. 겹친 두 입력이 서로를
+ * 가리지 않도록 트랙은 클릭을 통과시키고 손잡이만 받습니다(globals.css).
+ */
+function RangeSlider({
+  min,
+  max,
+  low,
+  high,
+  ticks,
+  lowLabel,
+  highLabel,
+  onChange,
+}: {
+  min: number;
+  max: number;
+  low: number;
+  high: number;
+  /** 눈금 개수. 단계처럼 값이 몇 개 없을 때만 씁니다. */
+  ticks?: number;
+  lowLabel: string;
+  highLabel: string;
+  onChange: (low: number, high: number) => void;
+}) {
+  const percent = (value: number) => ((value - min) / (max - min)) * 100;
+  // 두 손잡이가 같은 값에 겹치면 위에 있는 쪽이 눌림을 다 가져가 빠져나올 수 없습니다.
+  // 겹쳤을 때는 아직 움직일 여지가 있는 쪽을 위로 올립니다 — 오른쪽 끝에 몰렸으면
+  // 왼쪽으로 갈 수 있는 낮은 손잡이를, 왼쪽 끝이면 높은 손잡이를.
+  const lowOnTop = low === high && low > (min + max) / 2;
+  return (
+    <div className="range-slider">
+      <div className="range-track" aria-hidden="true">
+        <span style={{ left: `${percent(low)}%`, right: `${100 - percent(high)}%` }} />
+      </div>
+      <input
+        className="range-input range-input-low"
+        style={lowOnTop ? { zIndex: 1 } : undefined}
+        type="range"
+        min={min}
+        max={max}
+        value={low}
+        aria-label={lowLabel}
+        onChange={(event) => onChange(Math.min(Number(event.target.value), high), high)}
+      />
+      <input
+        className="range-input range-input-high"
+        type="range"
+        min={min}
+        max={max}
+        value={high}
+        aria-label={highLabel}
+        onChange={(event) => onChange(low, Math.max(Number(event.target.value), low))}
+      />
+      {ticks ? (
+        <div className="range-ticks" aria-hidden="true">
+          {Array.from({ length: ticks }, (_, index) => <i key={index} />)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 커뮤니티 언어 필터.
+ *
+ * 글쓴이의 모국어와 배우는 말, 두 축입니다. "모든"을 고르면 그 축은 안 거릅니다.
+ * 두 축을 같이 쓰면 "일본어가 모국어이고 한국어를 배우는 사람" 처럼 좁힐 수 있습니다.
+ */
+function CommunityFiltersModal({
+  initial,
+  onClose,
+  onApply,
+}: {
+  initial: FeedFilters;
+  onClose: () => void;
+  onApply: (filters: FeedFilters) => void;
+}) {
+  const [draft, setDraft] = useState<FeedFilters>(initial);
+  const rows: Array<[keyof FeedFilters, MessageKey]> = [
+    ["nativeCode", msg("글쓴이의 모국어")],
+    ["learningCode", msg("글쓴이가 배우는 말")],
+  ];
+
+  return (
+    <div className="form-modal">
+      <header>
+        <h2>{t("언어로 거르기")}</h2>
+        <p>{t("나에게 도움이 될 사람의 글만 볼 수 있어요.")}</p>
+      </header>
+
+      {rows.map(([field, label]) => (
+        <div className="form-section" key={field}>
+          <span className="field-label">{t(label)}</span>
+          <div className="chip-row" role="group" aria-label={t(label)}>
+            <button
+              type="button"
+              className={draft[field] === "" ? "chip active" : "chip"}
+              aria-pressed={draft[field] === ""}
+              onClick={() => setDraft((current) => ({ ...current, [field]: "" }))}
+            >
+              {t("모든 언어")}
+            </button>
+            {languageOptions.map((option) => (
+              <button
+                type="button"
+                key={option.code}
+                className={draft[field] === option.code ? "chip active" : "chip"}
+                aria-pressed={draft[field] === option.code}
+                onClick={() => setDraft((current) => ({ ...current, [field]: option.code }))}
+              >
+                {tx(option.label)}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <div className="modal-footer">
+        <button className="text-button" type="button" onClick={() => setDraft(emptyFeedFilters)}><RotateCcw size={15} /> {t("초기화")}</button>
+        <button className="primary-button" type="button" onClick={() => { onApply(draft); onClose(); }}>{t("적용")}</button>
+      </div>
+    </div>
+  );
+}
+
 function MatchingPreferencesModal({
   initial,
   nativeCodes,
@@ -4701,6 +4902,9 @@ function MatchingPreferencesModal({
   const [saving, setSaving] = useState(false);
   const availabilityOptions = Object.entries(availabilityLabels) as Array<[MatchAvailability, MessageKey]>;
   const targetLanguageOptions = languageOptions.filter((option) => !nativeCodes.includes(option.code));
+  const levelSummary = preferences.levelMin === preferences.levelMax
+    ? t(LEVEL_LABELS[preferences.levelMin])
+    : `${t(LEVEL_LABELS[preferences.levelMin])} – ${t(LEVEL_LABELS[preferences.levelMax])}`;
 
   const toggleCountry = (country: string) => setPreferences((current) => ({
     ...current,
@@ -4794,29 +4998,36 @@ function MatchingPreferencesModal({
         <h3>{t("가까우면 좋아요")}</h3>
 
         <div className="form-section">
-          <span className="field-label">{tx(msg("선호 나이"))}</span>
-          <div className="age-range-fields">
-            <label><span>{tx(msg("최소"))}</span><input aria-label={tx(msg("파트너 최소 나이"))} type="number" min={18} max={preferences.ageMax} value={preferences.ageMin} onChange={(event) => setPreferences((current) => ({ ...current, ageMin: Math.max(18, Math.min(Number(event.target.value), current.ageMax)) }))} /><small>{tx(msg("세"))}</small></label>
-            <span className="age-range-dash">–</span>
-            <label><span>{tx(msg("최대"))}</span><input aria-label={tx(msg("파트너 최대 나이"))} type="number" min={preferences.ageMin} max={80} value={preferences.ageMax} onChange={(event) => setPreferences((current) => ({ ...current, ageMax: Math.max(current.ageMin, Math.min(Number(event.target.value), 80)) }))} /><small>{tx(msg("세"))}</small></label>
-          </div>
+          <span className="field-label">
+            {tx(msg("선호 나이"))}
+            <em>{tx(msg("{min}–{max}세"), { min: preferences.ageMin, max: preferences.ageMax })}</em>
+          </span>
+          <RangeSlider
+            min={18}
+            max={80}
+            low={preferences.ageMin}
+            high={preferences.ageMax}
+            lowLabel={tx(msg("파트너 최소 나이"))}
+            highLabel={tx(msg("파트너 최대 나이"))}
+            onChange={(low, high) => setPreferences((current) => ({ ...current, ageMin: low, ageMax: high }))}
+          />
         </div>
 
         <div className="form-section">
-          <span className="field-label">{t("파트너의 학습 단계")}</span>
-          <div className="chip-row" role="group" aria-label={t("파트너의 학습 단계")}>
-            {PARTNER_LEVELS.map((level) => (
-              <button
-                type="button"
-                key={level}
-                className={preferences.partnerLevel === level ? "chip active" : "chip"}
-                aria-pressed={preferences.partnerLevel === level}
-                onClick={() => setPreferences((current) => ({ ...current, partnerLevel: level }))}
-              >
-                {t(PARTNER_LEVEL_LABELS[level])}
-              </button>
-            ))}
-          </div>
+          <span className="field-label">
+            {t("파트너의 학습 단계")}
+            <em>{levelSummary}</em>
+          </span>
+          <RangeSlider
+            min={0}
+            max={LEARNING_LEVELS.length - 1}
+            low={LEARNING_LEVELS.indexOf(preferences.levelMin)}
+            high={LEARNING_LEVELS.indexOf(preferences.levelMax)}
+            ticks={LEARNING_LEVELS.length}
+            lowLabel={t("가장 낮은 단계")}
+            highLabel={t("가장 높은 단계")}
+            onChange={(low, high) => setPreferences((current) => ({ ...current, levelMin: LEARNING_LEVELS[low], levelMax: LEARNING_LEVELS[high] }))}
+          />
         </div>
 
         <div className="form-section">
@@ -4907,12 +5118,6 @@ const LEVEL_LABELS: Record<LearningLevel, MessageKey> = {
   advanced: msg("거의 불편함이 없어요"),
 };
 
-/** 조건 모달의 학습 단계 칩. 아무 단계나 좋다는 선택지가 맨 앞에 있어야 되돌릴 수 있습니다. */
-const PARTNER_LEVELS: PartnerLevel[] = ["any", ...LEARNING_LEVELS];
-const PARTNER_LEVEL_LABELS: Record<PartnerLevel, MessageKey> = {
-  any: msg("단계 무관"),
-  ...LEVEL_LABELS,
-};
 
 /** 몇 번째 단계인가. 점을 몇 개 칠할지 정합니다. */
 const levelStep = (level?: string) => Math.max(0, LEARNING_LEVELS.indexOf((level || "") as LearningLevel) + 1);

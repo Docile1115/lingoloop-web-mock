@@ -107,7 +107,8 @@ const DEFAULT_MATCHING_PREFERENCES = {
   preferredCountries: [],
   interests: [],
   availability: ["weekday-evening"],
-  partnerLevel: "any",
+  levelMin: LEARNING_LEVELS[0],
+  levelMax: LEARNING_LEVELS[LEARNING_LEVELS.length - 1],
   ageMin: 18,
   ageMax: 100,
   verifiedOnly: false,
@@ -412,18 +413,26 @@ function normalizedPreferences(body = {}) {
   if (!Number.isInteger(ageMin) || !Number.isInteger(ageMax) || ageMin < 18 || ageMax > 100 || ageMin > ageMax) {
     throw new ApiError(422, "VALIDATION_ERROR", "연령 범위를 확인해 주세요.", { field: "ageMin" });
   }
-  const partnerLevels = ["any", ...LEARNING_LEVELS];
-  const partnerLevel = body.partnerLevel ?? "any";
-
-  if (!partnerLevels.includes(partnerLevel)) {
-    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 매칭 조건입니다.");
+  // 학습 단계는 하나가 아니라 범위입니다 — "초급만" 보다 "초급~중급" 이 실제로 찾는 방식입니다.
+  // partnerLevel 하나만 보내던 옛 앱도 받아줍니다: 그 값 하나짜리 범위로 읽습니다.
+  const legacyLevel = body.partnerLevel;
+  const fallbackMin = legacyLevel && legacyLevel !== "any" ? legacyLevel : LEARNING_LEVELS[0];
+  const fallbackMax = legacyLevel && legacyLevel !== "any" ? legacyLevel : LEARNING_LEVELS[LEARNING_LEVELS.length - 1];
+  const levelMin = body.levelMin ?? fallbackMin;
+  const levelMax = body.levelMax ?? fallbackMax;
+  if (!LEARNING_LEVELS.includes(levelMin) || !LEARNING_LEVELS.includes(levelMax)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 학습 단계입니다.", { field: "levelMin" });
+  }
+  if (LEARNING_LEVELS.indexOf(levelMin) > LEARNING_LEVELS.indexOf(levelMax)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "학습 단계 범위를 확인해 주세요.", { field: "levelMin" });
   }
   return {
     targetLanguages,
     preferredCountries: stringArray(body.preferredCountries, "preferredCountries", [], 8, 10),
     interests: stringArray(body.interests, "interests", [], 12, 40).map((value) => value.toLocaleLowerCase()),
     availability: stringArray(body.availability, "availability", ["weekday-evening"], 4, 32),
-    partnerLevel,
+    levelMin,
+    levelMax,
     ageMin,
     ageMax,
     verifiedOnly: optionalBoolean(body.verifiedOnly, "verifiedOnly", false),
@@ -499,11 +508,18 @@ function matchCandidate(candidate, me, preferences, date) {
     reasons.push(interests + " 관심사가 같아요");
     reasonCodes.push({ code: "shared-interests", interests });
   }
-  if (preferences.partnerLevel !== "any" && candidate.learningLanguages?.[0]?.level === preferences.partnerLevel) {
-    // 예전에는 이 값을 저장만 하고 어디에도 쓰지 않았습니다 — 골라도 추천이 그대로였습니다.
+  // 예전에는 이 값을 저장만 하고 어디에도 쓰지 않았습니다 — 골라도 추천이 그대로였습니다.
+  const wholeLevelRange =
+    preferences.levelMin === LEARNING_LEVELS[0] && preferences.levelMax === LEARNING_LEVELS[LEARNING_LEVELS.length - 1];
+  const candidateLevel = LEARNING_LEVELS.indexOf(candidate.learningLanguages?.[0]?.level);
+  if (
+    !wholeLevelRange &&
+    candidateLevel >= LEARNING_LEVELS.indexOf(preferences.levelMin) &&
+    candidateLevel <= LEARNING_LEVELS.indexOf(preferences.levelMax)
+  ) {
     score += 8;
-    reasons.push("찾으시는 학습 단계와 같아요");
-    reasonCodes.push({ code: "same-level" });
+    reasons.push("찾으시는 학습 단계예요");
+    reasonCodes.push({ code: "level-in-range" });
   }
   if (matchedAvailability.length) {
     score += 8;
