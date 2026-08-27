@@ -5061,6 +5061,48 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   border-top: var(--bw-hair) solid var(--line);
 }
 
+/* 프로필 / 글 탭. 둘뿐이라 반씩 나눠 갖게 둡니다 — 왼쪽에 몰아두면 오른쪽이 빈 띠로 남습니다. */
+.profile-detail-tabs { display: grid; grid-template-columns: 1fr 1fr; margin-top: var(--sp-4); }
+.profile-detail-tabs > button { display: flex; align-items: center; justify-content: center; gap: var(--sp-1); }
+.profile-detail-tabs > button > b { margin-left: var(--sp-1); color: var(--subtle); font-weight: 600; }
+.profile-detail-tabs > button.active > b { color: inherit; }
+
+.section-note { margin: calc(var(--sp-2) * -1) 0 var(--sp-3); color: var(--subtle); font-size: 13px; }
+
+/*
+   비슷한 사람. 옆으로 넘겨 보게 둡니다 — 세로로 쌓으면 프로필 아래에
+   또 하나의 긴 목록이 붙어 정작 볼 것을 못 봅니다.
+*/
+.similar-partner-row {
+  display: flex;
+  gap: var(--sp-2);
+  margin: 0 calc(var(--view-pad-x, var(--page-pad-x)) * -1);
+  padding: var(--sp-1) var(--view-pad-x, var(--page-pad-x)) var(--sp-2);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.similar-partner-card {
+  display: flex;
+  flex: 0 0 132px;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-2);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface-soft);
+  text-align: center;
+}
+.similar-partner-card:hover { border-color: var(--line-structure); background: var(--hover-bg); }
+.similar-partner-card > strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .profile-detail-row span { display: flex; flex-direction: column; }
 .profile-detail-row strong { font-size: 15px; line-height: 21px; font-weight: 600; }
 .profile-detail-row small { color: var(--subtle); font-size: 13px; }

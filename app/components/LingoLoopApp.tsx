@@ -62,6 +62,8 @@ import {
   Volume2,
   WandSparkles,
   X,
+  CalendarClock,
+  MapPin,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -1688,6 +1690,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onOpenPost={openPost}
                 onBlock={() => blockAuthor(detail.partner.id, detail.partner.name)}
                 counts={followCounts[detail.partner.id]}
+                directory={directory}
+                onOpenProfile={openProfile}
               />
             ) : null}
 
@@ -2542,6 +2546,8 @@ function ProfileDetailView({
   onOpenPost,
   onBlock,
   counts,
+  directory,
+  onOpenProfile,
 }: {
   partner: Partner;
   onBack: () => void;
@@ -2556,7 +2562,25 @@ function ProfileDetailView({
   onOpenPost: (post: FeedPost) => void;
   onBlock: () => void;
   counts?: { following: number; followers: number; posts: number };
+  /** 비슷한 사람을 뽑아 올 명부. */
+  directory: Partner[];
+  onOpenProfile: (partner: Partner) => void;
 }) {
+  const [tab, setTab] = useState<"profile" | "posts">("profile");
+  const localTime = useLocalTime(partner.timeOffset);
+  const similar = similarPartners(partner, directory);
+
+  /* 상대가 실제로 등록한 것만 줄로 만듭니다. 비어 있는 값을 "미상" 으로
+     채우면 안 적은 사람과 구분이 안 됩니다. */
+  const facts: Array<{ id: string; icon: LucideIcon; label: string; value: string }> = [
+    partner.country
+      ? { id: "place", icon: MapPin, label: t("사는 곳"), value: [tx(partner.country), partner.city].filter(Boolean).join(" · ") }
+      : null,
+    localTime ? { id: "time", icon: Clock3, label: t("현지 시각"), value: localizeClock(localTime) } : null,
+    partner.activeTime ? { id: "active", icon: CalendarClock, label: t("주로 대화하는 시간"), value: tx(partner.activeTime) } : null,
+    partner.goal ? { id: "goal", icon: Trophy, label: t("학습 목표"), value: tx(partner.goal) } : null,
+  ].filter(Boolean) as Array<{ id: string; icon: LucideIcon; label: string; value: string }>;
+
   return (
     <div className="view detail-view">
       <DetailHeader
@@ -2600,40 +2624,129 @@ function ProfileDetailView({
         </button>
       </div>
 
-      <section className="profile-detail-section">
-        <h3>{t("관심사")}</h3>
-        <div className="interest-row large">{partner.interests.map((item) => <span key={item}>{item}</span>)}</div>
-      </section>
+      {/* 등록한 정보와 쓴 글은 성격이 다릅니다. 한 줄로 이어 붙이면 아래 것을
+          보려고 위 것을 계속 스크롤해서 지나가야 합니다. */}
+      <div className="segmented-tabs profile-detail-tabs" role="tablist" aria-label={t("프로필")}>
+        <button type="button" role="tab" aria-selected={tab === "profile"} className={tab === "profile" ? "active" : ""} onClick={() => setTab("profile")}>{t("프로필")}</button>
+        <button type="button" role="tab" aria-selected={tab === "posts"} className={tab === "posts" ? "active" : ""} onClick={() => setTab("posts")}>
+          {t("글")} <b>{counts ? counts.posts : posts.length}</b>
+        </button>
+      </div>
 
-      {/* 이 사람이 쓴 글. 어떤 사람인지 아는 데는 소개글보다 쓴 글이 더 도움이 됩니다. */}
-      <section className="profile-detail-section">
-        <h3>{t("{name}님의 글", { name: partner.name })}</h3>
-        {posts.length === 0 ? (
-          <p className="phrase-empty">{t("아직 올린 글이 없어요.")}</p>
-        ) : (
-          <div className="partner-post-list">
-            {posts.map((post) => (
-              <button type="button" key={post.id} onClick={() => onOpenPost(post)}>
-                <span className="partner-post-meta">{tx(post.time)} · {tx(post.language)}</span>
-                <span className="partner-post-text">{post.text}</span>
-                <span className="partner-post-stats">
-                  <span><Heart size={13} /> {post.likes}</span>
-                  <span><MessageCircle size={13} /> {post.comments}</span>
-                  <span><PenLine size={13} /> {post.corrections}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
+      {tab === "profile" ? (
+        <>
+          <section className="profile-detail-section">
+            <h3>{t("언어")}</h3>
+            <div className="profile-language-grid">
+              <span>
+                <small>{t("가르칠 수 있어요")}</small>
+                <strong><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.native)}</strong>
+                <em>{t("원어민")}</em>
+              </span>
+              <span>
+                <small>{t("배우고 있어요")}</small>
+                <strong>{tx(partner.learning)}</strong>
+                <em>{levelStep(partner.learningLevel) ? t(LEVEL_LABELS[partner.learningLevel as LearningLevel]) : partner.level}</em>
+              </span>
+            </div>
+          </section>
 
-      <section className="profile-detail-section">
-        <h3>{t("잘 맞는 이유")}</h3>
-        <p className="profile-detail-row"><Clock3 size={16} /><span><strong>{t("활동 시간")}</strong><small>{partner.activeTime}</small></span></p>
-        <p className="profile-detail-row"><Trophy size={16} /><span><strong>{t("학습 목표")}</strong><small>{partner.goal}</small></span></p>
-      </section>
+          {partner.interests.length ? (
+            <section className="profile-detail-section">
+              <h3>{t("관심사")}</h3>
+              <div className="interest-row large">{partner.interests.map((item) => <span key={item}>{labelOf(interestLabels, item)}</span>)}</div>
+            </section>
+          ) : null}
+
+          {facts.length ? (
+            <section className="profile-detail-section">
+              <h3>{t("등록한 정보")}</h3>
+              {facts.map((fact) => (
+                <p className="profile-detail-row" key={fact.id}>
+                  <fact.icon size={16} />
+                  <span><strong>{fact.label}</strong><small>{fact.value}</small></span>
+                </p>
+              ))}
+            </section>
+          ) : null}
+
+          {similar.length ? (
+            <section className="profile-detail-section">
+              <h3>{t("비슷한 사람")}</h3>
+              <p className="section-note">{t("같은 말을 쓰거나 관심사가 겹치는 사람이에요.")}</p>
+              <div className="similar-partner-row">
+                {similar.map((person) => (
+                  <button className="similar-partner-card" type="button" key={person.id} onClick={() => onOpenProfile(person)}>
+                    <Avatar name={person.name} flag={person.flag} accent={person.accent} size="lg" online={person.online} photo={person.photo} countryCode={person.countryCode} />
+                    <strong>{person.name}</strong>
+                    <LanguageExchange native={person.nativeCode} learning={person.learningCode} level={person.learningLevel} />
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </>
+      ) : (
+        /* 이 사람이 쓴 글. 어떤 사람인지 아는 데는 소개글보다 쓴 글이 더 도움이 됩니다. */
+        <section className="profile-detail-section">
+          {posts.length === 0 ? (
+            <div className="empty-state">
+              <PenLine size={30} strokeWidth={1.5} />
+              <strong>{t("아직 올린 글이 없어요.")}</strong>
+              <p>{t("이 사람이 글을 올리면 여기에 모여요.")}</p>
+            </div>
+          ) : (
+            <div className="partner-post-list">
+              {posts.map((post) => (
+                <button type="button" key={post.id} onClick={() => onOpenPost(post)}>
+                  <span className="partner-post-meta">{tx(post.time)} · {tx(post.language)}</span>
+                  <span className="partner-post-text">{post.text}</span>
+                  <span className="partner-post-stats">
+                    <span><Heart size={13} /> {post.likes}</span>
+                    <span><MessageCircle size={13} /> {post.comments}</span>
+                    <span><PenLine size={13} /> {post.corrections}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
+}
+
+/**
+ * 이 사람과 비슷한 사람 몇 명.
+ *
+ * 명부는 이미 받아둔 것을 씁니다 — 프로필을 열 때마다 서버에 한 번 더 묻지
+ * 않습니다. 무엇이 "비슷한" 것인지는 언어 교환에서 실제로 중요한 순서입니다:
+ * 같은 말을 가르칠 수 있는 사람이 가장 비슷하고, 그다음이 같은 말을 배우는
+ * 사람, 그다음이 관심사와 지역입니다.
+ */
+function similarPartners(partner: Partner, directory: Partner[], limit = 6): Partner[] {
+  const interests = new Set(partner.interests);
+  return directory
+    .filter((person) => person.id !== partner.id)
+    // 언어가 하나도 겹치지 않으면 관심사가 같아도 "비슷한 사람" 이 아닙니다.
+    // 이 줄이 없으면 스페인어를 가르치는 사람 밑에 베트남어를 가르치는 사람이
+    // 요리를 좋아한다는 이유로 올라옵니다.
+    .filter(
+      (person) =>
+        (person.nativeCode && person.nativeCode === partner.nativeCode) ||
+        (person.learningCode && person.learningCode === partner.learningCode),
+    )
+    .map((person) => ({
+      person,
+      score:
+        (person.nativeCode === partner.nativeCode ? 4 : 0) +
+        (person.learningCode === partner.learningCode ? 3 : 0) +
+        Math.min(3, person.interests.filter((item) => interests.has(item)).length) +
+        (person.countryCode && person.countryCode === partner.countryCode ? 1 : 0),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((entry) => entry.person);
 }
 
 /**
@@ -4746,7 +4859,7 @@ function ProfileModal({ partner, following, onToggleFollow, onStartChat, onRepor
         <div className="profile-main">
           <section><h3>{t("자기소개")}</h3><p>{partner.bio}</p></section>
           <section><h3>{t("언어 교환")}</h3><div className="profile-language-grid"><span><small>{t("가르칠 수 있어요")}</small><strong><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.native)}</strong><em>{t("원어민")}</em></span><span><small>{t("배우고 있어요")}</small><strong>{tx(partner.learning)}</strong><em>{levelStep(partner.learningLevel) ? t(LEVEL_LABELS[partner.learningLevel as LearningLevel]) : partner.level}</em></span></div></section>
-          <section><h3>{t("관심사")}</h3><div className="interest-row large">{partner.interests.map((item) => <span key={item}>{item}</span>)}</div></section>
+          <section><h3>{t("관심사")}</h3><div className="interest-row large">{partner.interests.map((item) => <span key={item}>{labelOf(interestLabels, item)}</span>)}</div></section>
         </div>
         <aside className="profile-details"><h3>{t("잘 맞는 이유")}</h3><p><Clock3 size={16} /><span><strong>{t("활동 시간")}</strong><small>{partner.activeTime}</small></span></p><p><Trophy size={16} /><span><strong>{t("학습 목표")}</strong><small>{partner.goal}</small></span></p><p><PenLine size={16} /><span><strong>{t("교정 스타일")}</strong><small>{t("중요한 오류를 대화 후에")}</small></span></p></aside>
       </div>
