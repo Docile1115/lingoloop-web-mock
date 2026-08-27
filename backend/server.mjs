@@ -108,7 +108,6 @@ const DEFAULT_MATCHING_PREFERENCES = {
   interests: [],
   availability: ["weekday-evening"],
   partnerLevel: "any",
-  partnerGender: "any",
   ageMin: 18,
   ageMax: 100,
   verifiedOnly: false,
@@ -414,10 +413,9 @@ function normalizedPreferences(body = {}) {
     throw new ApiError(422, "VALIDATION_ERROR", "연령 범위를 확인해 주세요.", { field: "ageMin" });
   }
   const partnerLevels = ["any", "beginner", "intermediate", "advanced"];
-  const genders = ["any", "same", "women", "men"];
   const partnerLevel = body.partnerLevel ?? "any";
-  const partnerGender = body.partnerGender ?? "any";
-  if (!partnerLevels.includes(partnerLevel) || !genders.includes(partnerGender)) {
+
+  if (!partnerLevels.includes(partnerLevel)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 매칭 조건입니다.");
   }
   return {
@@ -426,7 +424,6 @@ function normalizedPreferences(body = {}) {
     interests: stringArray(body.interests, "interests", [], 12, 40).map((value) => value.toLocaleLowerCase()),
     availability: stringArray(body.availability, "availability", ["weekday-evening"], 4, 32),
     partnerLevel,
-    partnerGender,
     ageMin,
     ageMax,
     verifiedOnly: optionalBoolean(body.verifiedOnly, "verifiedOnly", false),
@@ -478,11 +475,7 @@ function matchCandidate(candidate, me, preferences, date) {
     candidate.age <= preferences.ageMax &&
     (!preferences.verifiedOnly || candidate.verified) &&
     (!preferences.onlineOnly || candidate.status === "online") &&
-    (preferences.intents.length === 0 || matchedIntents.length > 0) &&
-    (preferences.partnerGender === "any" ||
-      (preferences.partnerGender === "same" && candidate.gender === me.gender) ||
-      (preferences.partnerGender === "women" && candidate.gender === "woman") ||
-      (preferences.partnerGender === "men" && candidate.gender === "man"));
+    (preferences.intents.length === 0 || matchedIntents.length > 0);
   let score = 35;
   // 매칭 이유는 화면에 그대로 나오는 문구입니다. 서버가 한국어 문장으로 만들어 보내면
   // 클라이언트가 번역할 수 없으므로, 사람이 읽는 문장(matchReasons)과 함께

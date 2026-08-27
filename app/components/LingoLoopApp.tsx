@@ -91,7 +91,6 @@ type Section = "discover" | "community" | "chats" | "practice" | "learn";
 
 type MatchAvailability = "weekday-morning" | "weekday-evening" | "weekend-morning" | "weekend-evening";
 type PartnerLevel = "any" | "beginner" | "intermediate" | "advanced";
-type PartnerGender = "any" | "same" | "women" | "men";
 type MatchIntent = "language-exchange" | "friendship" | "voice-practice" | "culture";
 type DmScope = "matches" | "mutuals" | "anyone";
 
@@ -101,7 +100,6 @@ type MatchPreferences = {
   interests: string[];
   availability: MatchAvailability[];
   partnerLevel: PartnerLevel;
-  partnerGender: PartnerGender;
   ageMin: number;
   ageMax: number;
   verifiedOnly: boolean;
@@ -220,7 +218,6 @@ const defaultMatchPreferences: MatchPreferences = {
   interests: ["travel", "movies", "coffee"],
   availability: ["weekday-evening", "weekend-morning"],
   partnerLevel: "intermediate",
-  partnerGender: "any",
   ageMin: 20,
   ageMax: 35,
   verifiedOnly: true,
@@ -261,13 +258,6 @@ const levelLabels: Record<PartnerLevel, MessageKey> = {
   beginner: msg("초급"),
   intermediate: msg("중급"),
   advanced: msg("고급"),
-};
-
-const genderLabels: Record<PartnerGender, string> = {
-  any: msg("성별 무관"),
-  same: msg("같은 성별 우선"),
-  women: msg("여성"),
-  men: msg("남성"),
 };
 
 const intentLabels: Record<MatchIntent, string> = {
@@ -863,7 +853,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       interests: matchPreferences.interests.join(","),
       availability: matchPreferences.availability.join(","),
       partnerLevel: matchPreferences.partnerLevel,
-      partnerGender: matchPreferences.partnerGender,
       ageMin: String(matchPreferences.ageMin),
       ageMax: String(matchPreferences.ageMax),
       verifiedOnly: String(matchPreferences.verifiedOnly),
@@ -2935,7 +2924,6 @@ function DiscoverView({
   // 내가 건 조건 — 카드가 아니라 헤더에 둡니다 (상대 정보와 섞이지 않게)
   const myFilters = [
     targetLanguage,
-    tx(genderLabels[preferences.partnerGender]),
     tx(msg("{min}–{max}세"), { min: preferences.ageMin, max: preferences.ageMax }),
     preferences.interests.slice(0, 2).map((item) => labelOf(interestLabels, item)).join(" · "),
     t(availabilityLabels[preferences.availability[0] ?? "weekday-evening"]),
@@ -4724,14 +4712,6 @@ function MatchingPreferencesModal({
         <div className="choice-row three-columns">
           {[{ value: "en", label: t("영어"), flag: "🇺🇸" }, { value: "es", label: t("스페인어"), flag: "🇪🇸" }, { value: "ja", label: t("일본어"), flag: "🇯🇵" }].map((item) => (
             <button type="button" className={preferences.targetLanguages.includes(item.value) ? "active" : ""} key={item.value} onClick={() => setPreferences((current) => ({ ...current, targetLanguages: [item.value] }))}>{item.flag} {item.label}</button>
-          ))}
-        </div>
-      </div>
-      <div className="form-section">
-        <span className="field-label">{tx(msg("함께할 파트너"))} <small>{tx(msg("개인 매칭 선호 · 프로필에는 공개되지 않아요"))}</small></span>
-        <div className="choice-row">
-          {(Object.entries(genderLabels) as Array<[PartnerGender, string]>).map(([value, label]) => (
-            <button type="button" className={preferences.partnerGender === value ? "active" : ""} key={value} onClick={() => setPreferences((current) => ({ ...current, partnerGender: value }))}>{tx(label)}</button>
           ))}
         </div>
       </div>
