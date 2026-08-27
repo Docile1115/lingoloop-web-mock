@@ -156,6 +156,9 @@ type ProfileDraft = {
   bio: string;
   goal: string;
   visibility: "public" | "partners";
+  /** 나이와 성별. 이것도 고칠 자리가 없어서 가입할 때 값이 그대로였습니다. */
+  age: number;
+  gender: string;
   /** 가르칠 수 있는 말·배우는 말과 단계. 예전에는 고칠 자리가 아예 없었습니다. */
   nativeCode: string;
   learningCode: string;
@@ -554,6 +557,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     bio: me.bio,
     goal: me.learningLanguages?.[0]?.goal || t("부담 없는 일상 대화"),
     visibility: "public",
+    age: me.age ?? 0,
+    gender: me.gender ?? "unspecified",
     nativeCode: me.nativeLanguages?.[0] ?? "ko",
     learningCode: me.learningLanguages?.[0]?.code ?? "en",
     learningLevel: me.learningLanguages?.[0]?.level ?? "beginner",
@@ -601,6 +606,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         body: JSON.stringify({
           name: next.name,
           bio: next.bio,
+          age: next.age,
+          gender: next.gender,
           nativeLanguages: [next.nativeCode],
           learningLanguages: [
             { code: next.learningCode, level: next.learningLevel, goal: next.goal || t("부담 없는 일상 대화") },
@@ -2530,6 +2537,7 @@ function ProfileDetailView({
         <div className="profile-head-id">
           <span className="profile-head-name">
             {partner.name}
+            <AgeGender age={partner.age} gender={partner.gender} />
             {partner.verified ? <BadgeCheck size={18} className="verified" /> : null}
           </span>
           <p className="profile-head-handle">{partner.handle}{partner.city ? ` · ${partner.city}` : ""}</p>
@@ -2634,6 +2642,38 @@ function ProfileEditView({
         />
         <small className="field-hint">{t("{n}/{max}자", { n: draft.bio.length, max: LIMITS.profileBio })}</small>
       </div>
+      <div className="form-section">
+        <label className="field-label" htmlFor="profile-age">{t("나이")}</label>
+        <input
+          id="profile-age"
+          className="text-input"
+          type="number"
+          min={18}
+          max={100}
+          value={draft.age || ""}
+          placeholder={t("숫자만")}
+          onChange={(event) => setDraft({ ...draft, age: Number(event.target.value) || 0 })}
+        />
+        <small className="field-hint">{t("만 18세부터 쓸 수 있어요.")}</small>
+      </div>
+
+      <div className="form-section">
+        <span className="field-label">{t("성별")}</span>
+        <div className="chip-row" role="group" aria-label={t("성별")}>
+          {([["woman", msg("여성")], ["man", msg("남성")], ["nonbinary", msg("논바이너리")], ["unspecified", msg("밝히지 않음")]] as Array<[string, MessageKey]>).map(([value, label]) => (
+            <button
+              type="button"
+              key={value}
+              className={draft.gender === value ? "chip active" : "chip"}
+              aria-pressed={draft.gender === value}
+              onClick={() => setDraft({ ...draft, gender: value })}
+            >
+              {tx(label)}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="form-section">
         <span className="field-label">{t("가르칠 수 있는 말")}</span>
         <div className="chip-row" role="group" aria-label={t("가르칠 수 있는 말")}>
@@ -3088,7 +3128,7 @@ function CommunityView({
                 <button className="post-author" type="button" onClick={() => onProfile(post.authorId)}>
                   <Avatar name={post.author} accent={post.accent} size="md" photo={post.photo} countryCode={post.countryCode} />
                   <span>
-                    <strong>{post.author}</strong>
+                    <strong>{post.author}<AgeGender age={post.age} gender={post.gender} /></strong>
                     <LanguageExchange native={post.nativeCode} learning={post.learningCode} level={post.learningLevel} />
                   </span>
                 </button>
@@ -4009,7 +4049,7 @@ function LearnView({
     <div className="view learn-view compact-learn">
       <header className="profile-head">
         <div className="profile-head-id">
-          <span className="profile-head-name">{profileName}<BadgeCheck size={18} className="verified" /></span>
+          <span className="profile-head-name">{profileName}<AgeGender age={me.age} gender={me.gender} /><BadgeCheck size={18} className="verified" /></span>
           <p className="profile-head-handle">{me.handle}</p>
           <LanguageExchange
             native={me.nativeLanguages?.[0]}
@@ -4764,6 +4804,26 @@ function MatchingPreferencesModal({
         <button className="primary-button" type="button" disabled={saving || !preferences.targetLanguages.length || !preferences.availability.length || !preferences.intents.length} onClick={() => void save()}>{saving ? t("저장 중…") : tx(msg("설정 저장하고 12명 보기"))}</button>
       </div>
     </div>
+  );
+}
+
+/**
+ * 나이와 성별을 이름 옆에 작게.
+ *
+ * 언어 교환은 누구와 이야기하는지가 중요해서 상대가 먼저 보고 싶어 하는 값입니다.
+ * 서버에 없거나 밝히지 않기로 한 사람은 감춥니다 — 모르는 값을 "미상" 으로
+ * 채우면 밝히지 않은 사람과 구분되지 않습니다.
+ */
+const GENDER_MARKS: Record<string, string> = { woman: "♀", man: "♂", nonbinary: "⚧" };
+
+function AgeGender({ age, gender }: { age?: number; gender?: string }) {
+  const mark = GENDER_MARKS[gender || ""];
+  if (!age && !mark) return null;
+  return (
+    <span className={`age-gender age-gender-${gender || "unspecified"}`}>
+      {mark ? <b aria-hidden="true">{mark}</b> : null}
+      {age ? <span>{age}</span> : null}
+    </span>
   );
 }
 

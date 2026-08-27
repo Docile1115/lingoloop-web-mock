@@ -1217,6 +1217,8 @@ app.get("/api/posts", requireUser, async (req, res) => {
       // 글마다 굳히지 않고 지금 프로필을 씁니다 — 언어를 바꾸면 옛 글에도 반영됩니다.
       avatarUrl: authors.get(post.authorId)?.avatarUrl || "",
       countryCode: authors.get(post.authorId)?.country?.code || "",
+      age: authors.get(post.authorId)?.age || 0,
+      gender: authors.get(post.authorId)?.gender || "unspecified",
       native: authors.get(post.authorId)?.nativeLanguages?.[0] || "",
       learning: authors.get(post.authorId)?.learningLanguages?.[0]
         ? {
@@ -1247,6 +1249,8 @@ app.post("/api/posts", requireUser, async (req, res) => {
       flag: req.auth.profile.country?.flag || "🌐",
       avatarUrl: req.auth.profile.avatarUrl || "",
       countryCode: req.auth.profile.country?.code || "",
+      age: req.auth.profile.age || 0,
+      gender: req.auth.profile.gender || "unspecified",
       native: req.auth.profile.nativeLanguages?.[0] || "",
       learning: req.auth.profile.learningLanguages?.[0]
         ? { code: req.auth.profile.learningLanguages[0].code, level: req.auth.profile.learningLanguages[0].level }

@@ -82,6 +82,9 @@ export interface ApiPost {
     flag: string;
     avatarUrl?: string;
     countryCode?: string;
+    /** 글쓴이의 나이·성별. */
+    age?: number;
+    gender?: string;
     /** 글쓴이가 가르칠 수 있는 말. */
     native?: string;
     /** 글쓴이가 배우는 말과 그 단계. */
@@ -267,6 +270,8 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
     accent: accentFor(profile.id),
     photo: profile.avatarUrl || "",
     countryCode: profile.country?.code || "",
+    age: profile.age || 0,
+    gender: profile.gender || "",
     nativeCode: profile.nativeLanguages?.[0] || "",
     learningCode: learning?.code || "",
     learningLevel: learning?.level || "",
@@ -293,6 +298,8 @@ export function toFeedPost(post: ApiPost): FeedPost {
     accent: accentFor(post.authorId),
     photo: post.author.avatarUrl || "",
     countryCode: post.author.countryCode || "",
+    age: post.author.age || 0,
+    gender: post.author.gender || "",
     nativeCode: post.author.native || "",
     learningCode: post.author.learning?.code || "",
     learningLevel: post.author.learning?.level || "",

@@ -105,6 +105,7 @@
   /* 기능색 */
   --danger: var(--red-500);
   --danger-soft: var(--red-100);
+  --danger-ink: #b02525;            /* 연한 빨강 바탕 위 글자 — 대비 6.05 */
   --danger-border: rgba(220, 38, 38, 0.24);
   --coral: var(--red-500);
   --success: var(--green-500);
@@ -4540,6 +4541,7 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
     /* 기능색 — 어두운 배경용으로 밝게 */
     --danger: #ff6b6b;
     --danger-soft: rgba(255, 107, 107, 0.14);
+    --danger-ink: #ff8787;          /* 어두운 바탕 위에서는 밝은 쪽이 읽힙니다 */
     --danger-border: rgba(255, 107, 107, 0.3);
     --coral: #ff6b6b;
     --success: var(--g-300);
@@ -7093,3 +7095,28 @@ label > svg { flex: none; }
 }
 
 .install-note { margin-top: var(--sp-4); color: var(--subtle); font-size: 13px; }
+
+
+/* ─────────────────────────────────────────────
+   이름 옆 나이·성별
+   ───────────────────────────────────────────── */
+
+.age-gender {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 2px;
+  margin-left: var(--sp-1);
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
+.age-gender b { font-size: 12px; font-weight: 700; }
+/* 성별은 색으로도 구분합니다 — 기호만으로는 작은 글씨에서 잘 안 보입니다. */
+.age-gender-woman { background: var(--danger-soft); color: var(--danger-ink); }
+.age-gender-man { background: var(--info-soft, rgba(77, 171, 247, .16)); color: var(--link); }

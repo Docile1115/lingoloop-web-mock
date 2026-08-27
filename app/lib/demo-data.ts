@@ -25,6 +25,9 @@ export type Partner = {
   photo?: string;
   /** 국가 코드(KR·JP…). 국기 아이콘을 고르는 값입니다. */
   countryCode?: string;
+  /** 나이와 성별. 서버에 없으면 화면에서 감춥니다. */
+  age?: number;
+  gender?: string;
   /** 가르칠 수 있는 말·배우는 말과 단계(언어 코드). */
   nativeCode?: string;
   learningCode?: string;
@@ -59,6 +62,9 @@ export type FeedPost = {
   photo?: string;
   /** 글쓴이 국가 코드. */
   countryCode?: string;
+  /** 나이와 성별. 서버에 없으면 화면에서 감춥니다. */
+  age?: number;
+  gender?: string;
   /** 글쓴이가 가르칠 수 있는 말(언어 코드). */
   nativeCode?: string;
   /** 글쓴이가 배우는 말과 단계. */
