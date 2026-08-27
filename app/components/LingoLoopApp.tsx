@@ -11,7 +11,6 @@ import {
   BellOff,
   BookOpenCheck,
   Bookmark,
-  CalendarClock,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -90,7 +89,8 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 type Section = "discover" | "community" | "chats" | "practice" | "learn";
 
 type MatchAvailability = "weekday-morning" | "weekday-evening" | "weekend-morning" | "weekend-evening";
-type PartnerLevel = "any" | "beginner" | "intermediate" | "advanced";
+/** 상대의 학습 단계 조건. 프로필의 단계(LEARNING_LEVELS)와 같은 값을 씁니다. */
+type PartnerLevel = "any" | LearningLevel;
 type MatchIntent = "language-exchange" | "friendship" | "voice-practice" | "culture";
 type DmScope = "matches" | "mutuals" | "anyone";
 
@@ -227,7 +227,22 @@ const defaultMatchPreferences: MatchPreferences = {
 
 /* 라벨 표는 화면 밖에서 만들어지므로 문구를 msg() 로 표시해 두고, 읽는 쪽에서 t() 로 번역합니다. */
 const languageLabels: Record<string, MessageKey> = { en: msg("영어"), es: msg("스페인어"), ja: msg("일본어") };
-const countryLabels: Record<string, MessageKey> = { CA: msg("캐나다"), US: msg("미국"), GB: msg("영국"), AU: msg("호주"), ES: msg("스페인"), JP: msg("일본") };
+/* 서버(backend/server.mjs 의 COUNTRIES)가 받는 나라 전부입니다. 예전에는 여섯 곳만
+   골를 수 있어서, 브라질·베트남 사람은 지역 조건에 아예 나오지 않았습니다. */
+const countryLabels: Record<string, MessageKey> = {
+  KR: msg("대한민국"),
+  US: msg("미국"),
+  JP: msg("일본"),
+  CN: msg("중국"),
+  GB: msg("영국"),
+  CA: msg("캐나다"),
+  AU: msg("호주"),
+  FR: msg("프랑스"),
+  DE: msg("독일"),
+  ES: msg("스페인"),
+  BR: msg("브라질"),
+  VN: msg("베트남"),
+};
 const interestLabels: Record<string, MessageKey> = { movies: msg("영화"), travel: msg("여행"), coffee: msg("카페"), music: msg("음악"), technology: msg("기술"), cooking: msg("요리"), books: msg("독서"), running: msg("운동") };
 
 /** 코드를 현재 언어의 라벨로. 모르는 코드는 원래 값을 그대로 보여줍니다. */
@@ -251,13 +266,6 @@ const availabilityLabels: Record<MatchAvailability, MessageKey> = {
   "weekday-evening": msg("평일 저녁"),
   "weekend-morning": msg("주말 오전"),
   "weekend-evening": msg("주말 저녁"),
-};
-
-const levelLabels: Record<PartnerLevel, MessageKey> = {
-  any: msg("레벨 무관"),
-  beginner: msg("초급"),
-  intermediate: msg("중급"),
-  advanced: msg("고급"),
 };
 
 const intentLabels: Record<MatchIntent, string> = {
@@ -1006,26 +1014,39 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  const saveMatchPreferences = async (preferences: MatchPreferences) => {
+  /**
+   * 매칭 조건 저장. 서버가 받아준 다음에야 화면과 저장소를 바꿉니다.
+   *
+   * 예전에는 먼저 화면을 바꾸고 서버에 보냈습니다 — 서버가 거절해도 모달은
+   * 저장된 척 닫히고, 화면에는 서버에 없는 조건이 남아 새로고침하면 되돌아갔습니다.
+   * 성공 여부를 돌려주어 모달이 실패하면 열린 채로 있게 합니다.
+   */
+  const saveMatchPreferences = async (preferences: MatchPreferences): Promise<boolean> => {
     const normalized = normalizeMatchPreferences(preferences);
-    setMatchPreferences(normalized);
-    try {
-      window.localStorage.setItem("lingoloop-match-preferences", JSON.stringify(normalized));
-    } catch {
-      // Continue with in-memory state if browser storage is unavailable.
-    }
-
     try {
       const response = await fetch("/api/matching/preferences", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(normalized),
       });
-      if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-      showToast(t("매칭 설정을 저장했어요 · 오늘의 파트너에 바로 반영돼요"));
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+        showToast(body?.error?.message || t("매칭 설정을 저장하지 못했어요."));
+        return false;
+      }
     } catch {
       showToast(t("매칭 설정을 저장하지 못했어요."));
+      return false;
     }
+
+    setMatchPreferences(normalized);
+    try {
+      window.localStorage.setItem("lingoloop-match-preferences", JSON.stringify(normalized));
+    } catch {
+      // Continue with in-memory state if browser storage is unavailable.
+    }
+    showToast(t("매칭 설정을 저장했어요 · 오늘의 파트너에 바로 반영돼요"));
+    return true;
   };
 
   const skipPartner = () => {
@@ -4337,7 +4358,7 @@ function ModalLayer({
   exchangeLength: number;
   setExchangeLength: (value: number) => void;
   matchPreferences: MatchPreferences;
-  onSaveMatchPreferences: (preferences: MatchPreferences) => Promise<void>;
+  onSaveMatchPreferences: (preferences: MatchPreferences) => Promise<boolean>;
   dailyQueue: DailyMatchRecommendation[];
   partnerIndex: number;
   signaledPartners: string[];
@@ -4370,7 +4391,7 @@ function ModalLayer({
       <div className={`modal modal-${modal.type}`} role="dialog" aria-modal="true" aria-label={modalLabel(modal.type)}>
         <button className="modal-close" type="button" onClick={requestClose} aria-label={t("닫기")}><X size={20} /></button>
         {modal.type === "profile" ? <ProfileModal partner={modal.partner} following={followingIds.includes(modal.partner.id)} onToggleFollow={onToggleFollow} onStartChat={onStartChat} onReport={() => onReport(modal.partner.name)} /> : null}
-        {modal.type === "filters" ? <MatchingPreferencesModal initial={matchPreferences} onClose={onClose} onSave={onSaveMatchPreferences} /> : null}
+        {modal.type === "filters" ? <MatchingPreferencesModal initial={matchPreferences} nativeCodes={me.nativeLanguages ?? []} onClose={onClose} onSave={onSaveMatchPreferences} /> : null}
         {modal.type === "compose" ? <ComposeModal onPublish={onPublish} onToast={onToast} /> : null}
         {modal.type === "search" ? <SearchModal directory={directory} posts={posts} savedItems={savedItems} onOpenProfile={onOpenProfile} onOpenPost={onOpenPost} onToast={onToast} /> : null}
         {modal.type === "create-room" ? <CreateRoomModal onCreate={onCreateRoom} onToast={onToast} /> : null}
@@ -4665,16 +4686,21 @@ function ProfileModal({ partner, following, onToggleFollow, onStartChat, onRepor
 
 function MatchingPreferencesModal({
   initial,
+  nativeCodes,
   onClose,
   onSave,
 }: {
   initial: MatchPreferences;
+  /** 내 모국어. 이미 할 줄 아는 말을 배울 상대로 고르게 두면 안 됩니다. */
+  nativeCodes: string[];
   onClose: () => void;
-  onSave: (preferences: MatchPreferences) => Promise<void>;
+  /** 저장에 성공했는지. 실패하면 모달을 닫지 않습니다. */
+  onSave: (preferences: MatchPreferences) => Promise<boolean>;
 }) {
   const [preferences, setPreferences] = useState<MatchPreferences>(initial);
   const [saving, setSaving] = useState(false);
   const availabilityOptions = Object.entries(availabilityLabels) as Array<[MatchAvailability, MessageKey]>;
+  const targetLanguageOptions = languageOptions.filter((option) => !nativeCodes.includes(option.code));
 
   const toggleCountry = (country: string) => setPreferences((current) => ({
     ...current,
@@ -4695,93 +4721,155 @@ function MatchingPreferencesModal({
 
   const save = async () => {
     setSaving(true);
-    await onSave(preferences);
+    const saved = await onSave(preferences);
     setSaving(false);
-    onClose();
+    if (saved) onClose();
   };
 
   return (
-    <div className="form-modal">
+    <div className="form-modal prefs-modal">
       <header>
-        <Pill tone="soft"><Target size={13} /> DAILY MATCH</Pill>
-        <h2>{t("매일 만나고 싶은 상대를 설정해요")}</h2>
-        <p>{tx(msg("필수 조건은 정확히 맞추고, 선호 조건이 가까운 파트너를 매일 12명 추천해요."))}</p>
+        <h2>{t("오늘의 파트너 조건")}</h2>
+        <p>{t("꼭 맞아야 하는 것만 필수로 두고, 나머지는 가까운 사람부터 보여드려요.")}</p>
       </header>
-      <div className="form-section">
-        <span className="field-label">{t("배우고 싶은 언어")} <small>{tx(msg("필수 조건"))}</small></span>
-        <div className="choice-row three-columns">
-          {[{ value: "en", label: t("영어"), flag: "🇺🇸" }, { value: "es", label: t("스페인어"), flag: "🇪🇸" }, { value: "ja", label: t("일본어"), flag: "🇯🇵" }].map((item) => (
-            <button type="button" className={preferences.targetLanguages.includes(item.value) ? "active" : ""} key={item.value} onClick={() => setPreferences((current) => ({ ...current, targetLanguages: [item.value] }))}>{item.flag} {item.label}</button>
-          ))}
+
+      {/* 꼭 맞아야 하는 것 ─────────────────────────── */}
+      <div className="prefs-group">
+        <h3>{t("꼭 맞아야 해요")}</h3>
+
+        <div className="form-section">
+          <span className="field-label">{t("배우고 싶은 언어")}</span>
+          <div className="chip-row" role="group" aria-label={t("배우고 싶은 언어")}>
+            {targetLanguageOptions.map((option) => (
+              <button
+                type="button"
+                key={option.code}
+                className={preferences.targetLanguages.includes(option.code) ? "chip active" : "chip"}
+                aria-pressed={preferences.targetLanguages.includes(option.code)}
+                onClick={() => setPreferences((current) => ({ ...current, targetLanguages: [option.code] }))}
+              >
+                {tx(option.label)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-section">
+          <span className="field-label">{t("주로 대화 가능한 시간")}</span>
+          <div className="chip-row" role="group" aria-label={t("주로 대화 가능한 시간")}>
+            {availabilityOptions.map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                className={preferences.availability.includes(value) ? "chip active" : "chip"}
+                aria-pressed={preferences.availability.includes(value)}
+                onClick={() => toggleAvailability(value)}
+              >
+                {t(label)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-section">
+          <span className="field-label">{tx(msg("만남 목적"))}</span>
+          <div className="chip-row" role="group" aria-label={tx(msg("만남 목적"))}>
+            {(Object.entries(intentLabels) as Array<[MatchIntent, string]>).map(([intent, label]) => (
+              <button
+                type="button"
+                key={intent}
+                className={preferences.intents.includes(intent) ? "chip active" : "chip"}
+                aria-pressed={preferences.intents.includes(intent)}
+                onClick={() => toggleIntent(intent)}
+              >
+                {tx(label)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-      <div className="form-section">
-        <span className="field-label">{tx(msg("선호 나이"))} <small>{tx(msg("우선 조건"))}</small></span>
-        <div className="age-range-fields">
-          <label><span>{tx(msg("최소"))}</span><input aria-label={tx(msg("파트너 최소 나이"))} type="number" min={18} max={preferences.ageMax} value={preferences.ageMin} onChange={(event) => setPreferences((current) => ({ ...current, ageMin: Math.max(18, Math.min(Number(event.target.value), current.ageMax)) }))} /><small>{tx(msg("세"))}</small></label>
-          <span>–</span>
-          <label><span>{tx(msg("최대"))}</span><input aria-label={tx(msg("파트너 최대 나이"))} type="number" min={preferences.ageMin} max={80} value={preferences.ageMax} onChange={(event) => setPreferences((current) => ({ ...current, ageMax: Math.max(current.ageMin, Math.min(Number(event.target.value), 80)) }))} /><small>{tx(msg("세"))}</small></label>
+
+      {/* 가까우면 좋은 것 ─────────────────────────── */}
+      <div className="prefs-group">
+        <h3>{t("가까우면 좋아요")}</h3>
+
+        <div className="form-section">
+          <span className="field-label">{tx(msg("선호 나이"))}</span>
+          <div className="age-range-fields">
+            <label><span>{tx(msg("최소"))}</span><input aria-label={tx(msg("파트너 최소 나이"))} type="number" min={18} max={preferences.ageMax} value={preferences.ageMin} onChange={(event) => setPreferences((current) => ({ ...current, ageMin: Math.max(18, Math.min(Number(event.target.value), current.ageMax)) }))} /><small>{tx(msg("세"))}</small></label>
+            <span className="age-range-dash">–</span>
+            <label><span>{tx(msg("최대"))}</span><input aria-label={tx(msg("파트너 최대 나이"))} type="number" min={preferences.ageMin} max={80} value={preferences.ageMax} onChange={(event) => setPreferences((current) => ({ ...current, ageMax: Math.max(current.ageMin, Math.min(Number(event.target.value), 80)) }))} /><small>{tx(msg("세"))}</small></label>
+          </div>
         </div>
-      </div>
-      <div className="form-section">
-        <span className="field-label">{t("파트너의 한국어 수준")}</span>
-        <div className="choice-row">
-          {(Object.entries(levelLabels) as Array<[PartnerLevel, MessageKey]>).map(([value, label]) => (
-            <button type="button" className={preferences.partnerLevel === value ? "active" : ""} key={value} onClick={() => setPreferences((current) => ({ ...current, partnerLevel: value }))}>{t(label)}</button>
-          ))}
+
+        <div className="form-section">
+          <span className="field-label">{t("파트너의 학습 단계")}</span>
+          <div className="chip-row" role="group" aria-label={t("파트너의 학습 단계")}>
+            {PARTNER_LEVELS.map((level) => (
+              <button
+                type="button"
+                key={level}
+                className={preferences.partnerLevel === level ? "chip active" : "chip"}
+                aria-pressed={preferences.partnerLevel === level}
+                onClick={() => setPreferences((current) => ({ ...current, partnerLevel: level }))}
+              >
+                {t(PARTNER_LEVEL_LABELS[level])}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-      <div className="form-section">
-        <span className="field-label">{t("선호 지역")} <small>{t("복수 선택")}</small></span>
-        <div className="chip-options">
-          {Object.entries(countryLabels).map(([country, label]) => {
-            const active = preferences.preferredCountries.includes(country);
-            return <button type="button" className={active ? "active" : ""} key={country} onClick={() => toggleCountry(country)}>{active ? <Check size={13} /> : <Plus size={13} />}{t(label)}</button>;
-          })}
+
+        <div className="form-section">
+          <span className="field-label">{t("선호 지역")}</span>
+          <div className="chip-row" role="group" aria-label={t("선호 지역")}>
+            {Object.entries(countryLabels).map(([country, label]) => (
+              <button
+                type="button"
+                key={country}
+                className={preferences.preferredCountries.includes(country) ? "chip active" : "chip"}
+                aria-pressed={preferences.preferredCountries.includes(country)}
+                onClick={() => toggleCountry(country)}
+              >
+                <CountryFlag code={country} size={16} />{t(label)}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-      <div className="form-section">
-        <span className="field-label">{t("공통 관심사")}</span>
-        <div className="chip-options">
-          {Object.entries(interestLabels).map(([interest, label]) => {
-            const active = preferences.interests.includes(interest);
-            return <button type="button" className={active ? "active" : ""} key={interest} onClick={() => toggleInterest(interest)}>{active ? <Check size={13} /> : <Plus size={13} />}{t(label)}</button>;
-          })}
+
+        <div className="form-section">
+          <span className="field-label">{t("공통 관심사")}</span>
+          <div className="chip-row" role="group" aria-label={t("공통 관심사")}>
+            {Object.entries(interestLabels).map(([interest, label]) => (
+              <button
+                type="button"
+                key={interest}
+                className={preferences.interests.includes(interest) ? "chip active" : "chip"}
+                aria-pressed={preferences.interests.includes(interest)}
+                onClick={() => toggleInterest(interest)}
+              >
+                {t(label)}
+              </button>
+            ))}
+          </div>
         </div>
+
+        <label className="setting-row standalone">
+          <span className="setting-icon"><Eye size={17} /></span>
+          <span><strong>{t("현재 온라인인 사람만")}</strong><small>{t("바로 답장할 가능성이 높아요")}</small></span>
+          <input aria-label={t("현재 온라인인 사람만 보기")} type="checkbox" checked={preferences.onlineOnly} onChange={() => setPreferences((current) => ({ ...current, onlineOnly: !current.onlineOnly }))} />
+          <i className="toggle" />
+        </label>
+        <label className="setting-row standalone">
+          <span className="setting-icon"><BadgeCheck size={17} /></span>
+          <span><strong>{tx(msg("인증된 프로필 우선"))}</strong><small>{tx(msg("전화번호 또는 신원 확인이 끝난 계정을 먼저 추천해요"))}</small></span>
+          <input aria-label={tx(msg("인증된 프로필 우선"))} type="checkbox" checked={preferences.verifiedOnly} onChange={() => setPreferences((current) => ({ ...current, verifiedOnly: !current.verifiedOnly }))} />
+          <i className="toggle" />
+        </label>
       </div>
-      <div className="form-section">
-        <span className="field-label">{tx(msg("만남 목적"))} <small>{tx(msg("복수 선택 · 우선 조건"))}</small></span>
-        <div className="chip-options">
-          {(Object.entries(intentLabels) as Array<[MatchIntent, string]>).map(([intent, label]) => {
-            const active = preferences.intents.includes(intent);
-            return <button type="button" className={active ? "active" : ""} key={intent} onClick={() => toggleIntent(intent)}>{active ? <Check size={13} /> : <Plus size={13} />}{tx(label)}</button>;
-          })}
-        </div>
-      </div>
-      <div className="form-section">
-        <span className="field-label">{t("주로 대화 가능한 시간")}</span>
-        <div className="choice-row">
-          {availabilityOptions.map(([value, label]) => (
-            <button type="button" className={preferences.availability.includes(value) ? "active" : ""} key={value} onClick={() => toggleAvailability(value)}>{preferences.availability.includes(value) ? <Check size={13} /> : null}{t(label)}</button>
-          ))}
-        </div>
-      </div>
-      <label className="setting-row standalone">
-        <span className="setting-icon"><Eye size={17} /></span>
-        <span><strong>{t("현재 온라인인 사람만")}</strong><small>{t("바로 답장할 가능성이 높아요")}</small></span>
-        <input aria-label={t("현재 온라인인 사람만 보기")} type="checkbox" checked={preferences.onlineOnly} onChange={() => setPreferences((current) => ({ ...current, onlineOnly: !current.onlineOnly }))} />
-        <i className="toggle" />
-      </label>
-      <label className="setting-row standalone">
-        <span className="setting-icon"><BadgeCheck size={17} /></span>
-        <span><strong>{tx(msg("인증된 프로필 우선"))}</strong><small>{tx(msg("전화번호 또는 신원 확인이 끝난 계정을 먼저 추천해요"))}</small></span>
-        <input aria-label={tx(msg("인증된 프로필 우선"))} type="checkbox" checked={preferences.verifiedOnly} onChange={() => setPreferences((current) => ({ ...current, verifiedOnly: !current.verifiedOnly }))} />
-        <i className="toggle" />
-      </label>
-      <div className="matching-schedule-note"><CalendarClock size={18} /><span><strong>{tx(msg("다음 추천 · 내일 오전 9시"))}</strong><small>{tx(msg("선호 조건이 부족해도 필수 조건을 벗어난 사람을 임의로 섞지 않아요."))}</small></span><Pill tone="success">{tx(msg("12명"))}</Pill></div>
+
       <div className="modal-footer">
         <button className="text-button" type="button" onClick={() => setPreferences(defaultMatchPreferences)}><RotateCcw size={15} /> {t("초기화")}</button>
-        <button className="primary-button" type="button" disabled={saving || !preferences.targetLanguages.length || !preferences.availability.length || !preferences.intents.length} onClick={() => void save()}>{saving ? t("저장 중…") : tx(msg("설정 저장하고 12명 보기"))}</button>
+        <button className="primary-button" type="button" disabled={saving || !preferences.targetLanguages.length || !preferences.availability.length || !preferences.intents.length} onClick={() => void save()}>{saving ? t("저장 중…") : t("저장")}</button>
       </div>
     </div>
   );
@@ -4817,6 +4905,13 @@ const LEVEL_LABELS: Record<LearningLevel, MessageKey> = {
   intermediate: msg("일상 대화는 해요"),
   upper: msg("어려운 얘기도 해요"),
   advanced: msg("거의 불편함이 없어요"),
+};
+
+/** 조건 모달의 학습 단계 칩. 아무 단계나 좋다는 선택지가 맨 앞에 있어야 되돌릴 수 있습니다. */
+const PARTNER_LEVELS: PartnerLevel[] = ["any", ...LEARNING_LEVELS];
+const PARTNER_LEVEL_LABELS: Record<PartnerLevel, MessageKey> = {
+  any: msg("단계 무관"),
+  ...LEVEL_LABELS,
 };
 
 /** 몇 번째 단계인가. 점을 몇 개 칠할지 정합니다. */

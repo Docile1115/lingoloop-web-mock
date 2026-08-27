@@ -412,7 +412,7 @@ function normalizedPreferences(body = {}) {
   if (!Number.isInteger(ageMin) || !Number.isInteger(ageMax) || ageMin < 18 || ageMax > 100 || ageMin > ageMax) {
     throw new ApiError(422, "VALIDATION_ERROR", "연령 범위를 확인해 주세요.", { field: "ageMin" });
   }
-  const partnerLevels = ["any", "beginner", "intermediate", "advanced"];
+  const partnerLevels = ["any", ...LEARNING_LEVELS];
   const partnerLevel = body.partnerLevel ?? "any";
 
   if (!partnerLevels.includes(partnerLevel)) {
@@ -498,6 +498,12 @@ function matchCandidate(candidate, me, preferences, date) {
     const interests = matchedInterests.slice(0, 2).join(" · ");
     reasons.push(interests + " 관심사가 같아요");
     reasonCodes.push({ code: "shared-interests", interests });
+  }
+  if (preferences.partnerLevel !== "any" && candidate.learningLanguages?.[0]?.level === preferences.partnerLevel) {
+    // 예전에는 이 값을 저장만 하고 어디에도 쓰지 않았습니다 — 골라도 추천이 그대로였습니다.
+    score += 8;
+    reasons.push("찾으시는 학습 단계와 같아요");
+    reasonCodes.push({ code: "same-level" });
   }
   if (matchedAvailability.length) {
     score += 8;
