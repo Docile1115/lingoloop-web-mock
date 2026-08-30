@@ -33,6 +33,8 @@ type SessionValue = {
   checking: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** 프로필을 고친 뒤 서버 값을 다시 읽어옵니다. */
+  refresh: () => Promise<void>;
 };
 
 const SessionContext = createContext<SessionValue>({
@@ -40,6 +42,7 @@ const SessionContext = createContext<SessionValue>({
   checking: true,
   signIn: async () => {},
   signOut: async () => {},
+  refresh: async () => {},
 });
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
@@ -74,7 +77,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const value = useMemo(() => ({ me, checking, signIn, signOut }), [me, checking, signIn, signOut]);
+  const refresh = useCallback(async () => {
+    const data = await get<{ user: Me }>("/api/auth/me");
+    setMe(data.user);
+  }, []);
+
+  const value = useMemo(
+    () => ({ me, checking, signIn, signOut, refresh }),
+    [me, checking, signIn, signOut, refresh],
+  );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 

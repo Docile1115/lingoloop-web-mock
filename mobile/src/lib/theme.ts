@@ -40,6 +40,6 @@ export const dark = {
 export type Palette = { [K in keyof typeof light]: string };
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 } as const;
-export const radius = { sm: 8, button: 10, md: 12, lg: 18, pill: 999 } as const;
+export const radius = { xs: 4, sm: 8, button: 10, md: 12, lg: 18, pill: 999 } as const;
 /** 손가락으로 누르는 것의 최소 크기. 웹은 24, 손가락은 44 가 기준입니다. */
 export const tapSize = 44;

@@ -1,174 +1,194 @@
 /**
  * 오늘의 파트너.
  *
- * 서버 응답을 화면 모양으로 옮기는 일은 웹과 **같은 어댑터**(@shared/live-data)가
- * 합니다. 시차 계산, 언어 이름, 단계 이름 같은 규칙을 앱에서 다시 짜면 두 화면이
- * 서로 다른 말을 하게 됩니다.
+ * 서버 응답을 화면 모양으로 옮기는 일은 웹과 같은 어댑터(@shared/live-data)가
+ * 합니다. 시차·언어 이름·단계 이름 규칙을 앱에서 다시 짜면 두 화면이 서로 다른
+ * 말을 하게 됩니다.
  */
-import { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { useCallback, useState } from "react";
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { toPartner, type ApiProfile } from "@shared/live-data";
 import type { Partner } from "@shared/demo-data";
-import { get } from "../lib/api";
+import { post as apiPost } from "../lib/api";
 import { t, tx } from "../lib/i18n";
-import { useSession } from "../lib/session";
+import { useApi } from "../lib/useApi";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, tapSize } from "../lib/theme";
+import { Avatar, EmptyState, Loading } from "../ui";
 
-/** 서버가 주는 모양. 필드 이름은 backend/server.mjs 의 /api/matching/daily 와 같습니다. */
+/** 서버가 주는 모양. backend/server.mjs 의 /api/matching/daily 와 같습니다. */
 type Recommendation = { partner: ApiProfile; score: number; matchReasons?: string[] };
 
-export function PartnersScreen() {
+export function PartnersScreen({
+  onOpenProfile,
+  onStartChat,
+}: {
+  onOpenProfile: (id: string) => void;
+  onStartChat: (partner: Partner) => void;
+}) {
   const c = useTheme();
-  const { me, signOut } = useSession();
-  const [partners, setPartners] = useState<Partner[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
+  const [liked, setLiked] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState("");
 
-  const load = useCallback(async () => {
-    setError("");
+  const daily = useApi<Array<{ partner: Partner; reasons: string[] }>>(
+    "/api/matching/daily",
+    [],
+    (raw: { recommendations?: Recommendation[] }) =>
+      (raw.recommendations ?? []).map((row) => ({
+        partner: toPartner(row.partner, row.score),
+        reasons: row.matchReasons ?? [],
+      })),
+  );
+
+  /* 마음 보내기. 예전 웹에서는 화면 상태만 바꾸고 상대에게는 아무 일도
+     일어나지 않았습니다 — 서버에 남겨야 상대가 받은 마음에서 볼 수 있습니다. */
+  const sendLike = useCallback(async (partner: Partner) => {
+    if (busy) return;
+    setBusy(partner.id);
+    setLiked((rows) => ({ ...rows, [partner.id]: true }));
     try {
-      const data = await get<{ recommendations?: Recommendation[] }>("/api/matching/daily");
-      setPartners((data.recommendations ?? []).map((item) => toPartner(item.partner, item.score)));
+      await apiPost(`/api/partners/${partner.id}/like`, { liked: true });
     } catch {
-      // 추천을 못 받아오면 빈 화면 + 안내입니다. 가짜 사람을 채우지 않습니다.
-      setError(t("추천을 불러오지 못했어요"));
+      setLiked((rows) => ({ ...rows, [partner.id]: false }));
+    } finally {
+      setBusy("");
     }
-  }, []);
+  }, [busy]);
 
-  useEffect(() => {
-    void load().finally(() => setLoading(false));
-  }, [load]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    void load().finally(() => setRefreshing(false));
-  }, [load]);
+  if (daily.loading) return <Loading />;
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.bg }}>
-      <View style={[s.header, { borderBottomColor: c.line }]}>
-        <View style={{ flex: 1 }}>
-          <Text style={[s.title, { color: c.ink }]}>{t("오늘의 파트너")}</Text>
-          {me ? <Text style={[s.meta, { color: c.subtle }]}>{me.name}</Text> : null}
-        </View>
-        <Pressable onPress={() => void signOut()} hitSlop={12} accessibilityRole="button">
-          <Text style={[s.signOut, { color: c.muted }]}>{t("로그아웃")}</Text>
-        </Pressable>
-      </View>
-
-      {loading ? (
-        <View style={s.center}><ActivityIndicator color={c.primary} /></View>
-      ) : (
-        <FlatList
-          data={partners}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={partners.length ? s.list : s.listEmpty}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />
-          }
-          ListEmptyComponent={
-            <View style={s.center}>
-              <Text style={[s.emptyTitle, { color: c.ink }]}>
-                {error || t("오늘 볼 파트너를 모두 확인했어요")}
+    <FlatList
+      style={{ backgroundColor: c.bg }}
+      data={daily.data}
+      keyExtractor={(row) => row.partner.id}
+      contentContainerStyle={daily.data.length ? styles.list : { flexGrow: 1 }}
+      refreshControl={
+        <RefreshControl refreshing={daily.refreshing} onRefresh={daily.refresh} tintColor={c.primary} />
+      }
+      ListEmptyComponent={
+        daily.error ? (
+          <EmptyState title={daily.error} onRetry={daily.refresh} />
+        ) : (
+          <EmptyState
+            title={t("오늘 볼 파트너를 모두 확인했어요")}
+            body={t("내일 오전 9시에 새로운 파트너를 추천해드릴게요.")}
+          />
+        )
+      }
+      renderItem={({ item }) => (
+        <View style={[styles.card, { backgroundColor: c.surfaceSoft, borderColor: c.line }]}>
+          <Pressable
+            style={styles.head}
+            onPress={() => onOpenProfile(item.partner.id)}
+            accessibilityRole="button"
+          >
+            <Avatar
+              name={item.partner.name}
+              photo={item.partner.photo}
+              size={56}
+              online={item.partner.online}
+            />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[styles.name, { color: c.ink }]} numberOfLines={1}>
+                {item.partner.name}
+                {item.partner.age ? (
+                  <Text style={{ color: c.subtle, fontSize: 14, fontWeight: "500" }}>
+                    {"  "}{item.partner.age}
+                  </Text>
+                ) : null}
               </Text>
-              <Text style={[s.emptyBody, { color: c.subtle }]}>
-                {t("내일 오전 9시에 새로운 파트너를 추천해드릴게요.")}
+              <Text style={[styles.exchange, { color: c.muted }]} numberOfLines={1}>
+                {tx(item.partner.native)} ⇄ {tx(item.partner.learning)}
               </Text>
+              {item.partner.country ? (
+                <Text style={[styles.place, { color: c.subtle }]} numberOfLines={1}>
+                  {[tx(item.partner.country), item.partner.city].filter(Boolean).join(" · ")}
+                </Text>
+              ) : null}
             </View>
-          }
-          renderItem={({ item }) => <PartnerCard partner={item} />}
-        />
-      )}
-    </View>
-  );
-}
+          </Pressable>
 
-/**
- * 화면에 그릴 수 있는 사진인지.
- *
- * RN 의 Image 는 SVG 를 못 그립니다 — 웹의 <img> 는 그립니다. 서버가 만드는
- * 기본 아바타와 로컬 시드 데이터가 SVG 데이터 URI 라, 그대로 넘기면 빈 네모만
- * 남습니다. 그릴 수 없는 것은 없는 것으로 치고 이름 첫 글자를 보여줍니다.
- */
-function drawablePhoto(photo?: string): string {
-  if (!photo) return "";
-  return photo.startsWith("data:image/svg") ? "" : photo;
-}
+          {item.partner.bio ? (
+            <Text style={[styles.bio, { color: c.muted }]} numberOfLines={3}>
+              {item.partner.bio}
+            </Text>
+          ) : null}
 
-function PartnerCard({ partner }: { partner: Partner }) {
-  const c = useTheme();
-  const photo = drawablePhoto(partner.photo);
-  return (
-    <View style={[s.card, { backgroundColor: c.surfaceSoft, borderColor: c.line }]}>
-      {photo ? (
-        <Image source={{ uri: photo }} style={s.avatar} />
-      ) : (
-        <View style={[s.avatar, s.avatarFallback, { backgroundColor: c.sunken }]}>
-          <Text style={[s.avatarLetter, { color: c.muted }]}>{partner.name.slice(0, 1)}</Text>
+          {item.reasons.length ? (
+            <View style={styles.reasons}>
+              {item.reasons.slice(0, 2).map((reason) => (
+                <Text
+                  key={reason}
+                  style={[styles.reason, { color: c.primaryStrong, backgroundColor: c.sunken }]}
+                >
+                  {tx(reason)}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          <View style={styles.actions}>
+            <Pressable
+              onPress={() => void sendLike(item.partner)}
+              disabled={liked[item.partner.id] || busy === item.partner.id}
+              accessibilityRole="button"
+              style={[
+                styles.action,
+                {
+                  backgroundColor: liked[item.partner.id] ? c.sunken : c.primary,
+                },
+              ]}
+            >
+              <Ionicons
+                name={liked[item.partner.id] ? "heart" : "heart-outline"}
+                size={17}
+                color={liked[item.partner.id] ? c.subtle : c.onPrimary}
+              />
+              <Text
+                style={{
+                  color: liked[item.partner.id] ? c.subtle : c.onPrimary,
+                  fontSize: 14,
+                  fontWeight: "700",
+                }}
+              >
+                {liked[item.partner.id] ? t("마음을 보냈어요") : t("마음 보내기")}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => onStartChat(item.partner)}
+              accessibilityRole="button"
+              style={[styles.action, { borderWidth: StyleSheet.hairlineWidth, borderColor: c.line }]}
+            >
+              <Ionicons name="chatbubble-outline" size={16} color={c.ink} />
+              <Text style={{ color: c.ink, fontSize: 14, fontWeight: "600" }}>{t("메시지")}</Text>
+            </Pressable>
+          </View>
         </View>
       )}
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={[s.name, { color: c.ink }]} numberOfLines={1}>
-          {partner.name}
-          {partner.age ? <Text style={[s.age, { color: c.subtle }]}>  {partner.age}</Text> : null}
-        </Text>
-        <Text style={[s.exchange, { color: c.muted }]} numberOfLines={1}>
-          {tx(partner.native)} ⇄ {tx(partner.learning)}
-        </Text>
-        {partner.city || partner.country ? (
-          <Text style={[s.place, { color: c.subtle }]} numberOfLines={1}>
-            {partner.flag} {[tx(partner.country), partner.city].filter(Boolean).join(" · ")}
-          </Text>
-        ) : null}
-        {partner.bio ? (
-          <Text style={[s.bio, { color: c.muted }]} numberOfLines={2}>{partner.bio}</Text>
-        ) : null}
-      </View>
-    </View>
+    />
   );
 }
 
-const s = StyleSheet.create({
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.md,
-    paddingHorizontal: space.lg,
-    paddingBottom: space.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  title: { fontSize: 22, fontWeight: "700", letterSpacing: -0.5 },
-  meta: { fontSize: 12, marginTop: 2 },
-  signOut: { fontSize: 13, fontWeight: "600", minHeight: tapSize, lineHeight: tapSize },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, gap: space.sm },
+const styles = StyleSheet.create({
   list: { padding: space.lg, gap: space.md },
-  listEmpty: { flexGrow: 1 },
-  emptyTitle: { fontSize: 16, fontWeight: "600", textAlign: "center" },
-  emptyBody: { fontSize: 13, lineHeight: 19, textAlign: "center" },
-  card: {
-    flexDirection: "row",
-    gap: space.md,
-    padding: space.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-  },
-  avatar: { width: 52, height: 52, borderRadius: radius.pill },
-  avatarFallback: { alignItems: "center", justifyContent: "center" },
-  avatarLetter: { fontSize: 20, fontWeight: "700" },
-  name: { fontSize: 16, fontWeight: "700" },
-  age: { fontSize: 13, fontWeight: "500" },
+  card: { padding: space.md, gap: space.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md },
+  head: { flexDirection: "row", alignItems: "center", gap: space.md },
+  name: { fontSize: 17, fontWeight: "700" },
   exchange: { fontSize: 13, fontWeight: "600" },
   place: { fontSize: 12 },
-  bio: { fontSize: 13, lineHeight: 18, marginTop: 2 },
+  bio: { fontSize: 14, lineHeight: 20 },
+  reasons: { flexDirection: "row", flexWrap: "wrap", gap: space.xs },
+  reason: { fontSize: 12, paddingHorizontal: space.sm, paddingVertical: 4, borderRadius: radius.pill },
+  actions: { flexDirection: "row", gap: space.sm, marginTop: space.xs },
+  action: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: tapSize,
+    borderRadius: radius.button,
+  },
 });

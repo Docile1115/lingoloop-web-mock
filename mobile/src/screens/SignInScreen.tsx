@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { ApiError } from "../lib/api";
 import { t } from "../lib/i18n";
 import { useSession } from "../lib/session";
@@ -41,8 +42,9 @@ export function SignInScreen() {
   };
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "bottom"]}>
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: c.bg }}
+      style={{ flex: 1 }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
@@ -99,6 +101,7 @@ export function SignInScreen() {
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
