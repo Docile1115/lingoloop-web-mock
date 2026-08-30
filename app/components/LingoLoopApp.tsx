@@ -675,7 +675,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       const rooms = [...(conversationList || []), ...(requestList || [])];
       setConversations(rooms.map((room) => toConversation(room)));
       setRequestConversationIds(new Set((requestList || []).map((room) => room.id)));
-      setSelectedChatId((current) => (rooms.some((room) => room.id === current) ? current : rooms[0]?.id ?? ""));
+      /* 처음 들어왔을 때 첫 대화를 자동으로 열지 않습니다.
+         열면 그 자리에서 읽음 처리되어, 안 읽은 것이 있다는 표시를 볼 틈이
+         없습니다. 이미 보고 있던 대화가 목록에 남아 있으면 그대로 둡니다. */
+      setSelectedChatId((current) => (rooms.some((room) => room.id === current) ? current : ""));
     } catch {
       /* 실패해도 빈 화면을 유지합니다. 오류는 아래 개별 동작에서 알립니다. */
     }

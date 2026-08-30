@@ -178,6 +178,17 @@ const LEVEL_NAMES: Record<string, string> = {
   advanced: "C1",
 };
 
+/** 관심사 코드를 지금 언어의 이름으로. 모르는 코드는 그대로 둡니다. */
+const INTEREST_NAMES: Record<string, string> = {
+  movies: msg("영화"), travel: msg("여행"), coffee: msg("카페"), music: msg("음악"),
+  technology: msg("기술"), cooking: msg("요리"), books: msg("독서"), running: msg("운동"),
+};
+
+export function interestName(code: string): string {
+  const key = INTEREST_NAMES[code];
+  return key ? tx(key) : code;
+}
+
 export function languageName(code: string): string {
   return LANGUAGE_NAMES[code] || code.toLocaleUpperCase();
 }
@@ -262,20 +273,34 @@ export function offsetHoursFor(countryCode?: string): number {
  */
 export type MatchReasonCode = {
   code: string;
+  /** 그 언어로 적힌 이름(English·日本語). 코드가 있으면 코드를 씁니다. */
   languages?: string;
+  languageCodes?: string[];
   country?: string;
+  countryCode?: string;
   flag?: string;
   interests?: string;
+  interestCodes?: string[];
 };
 
 export function matchReasonText(reason: MatchReasonCode, fallback = ""): string {
   switch (reason.code) {
     case "native-speaker":
-      return t("{languages} 원어민 파트너예요", { languages: tx(reason.languages || "") });
+      // 코드가 있으면 지금 언어로 적습니다 — 없으면 서버가 준 이름 그대로.
+      return t("{languages} 원어민 파트너예요", {
+        languages: reason.languageCodes?.length
+          // languageName 은 사전 키를 돌려줍니다 — tx 로 감싸야 지금 언어가 됩니다.
+          ? reason.languageCodes.map((code) => tx(languageName(code))).join(" · ")
+          : tx(reason.languages || ""),
+      });
     case "preferred-country":
       return t("희망 지역인 {country}에 있어요", { country: tx(reason.country || "") });
     case "shared-interests":
-      return t("{interests} 관심사가 같아요", { interests: tx(reason.interests || "") });
+      return t("{interests} 관심사가 같아요", {
+        interests: reason.interestCodes?.length
+          ? reason.interestCodes.map((code) => interestName(code)).join(" · ")
+          : tx(reason.interests || ""),
+      });
     case "level-in-range":
       return t("찾으시는 학습 단계예요");
     case "time-overlap":

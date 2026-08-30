@@ -102,6 +102,22 @@
   --brand: var(--g-500);
   --secondary-button: var(--n-0);
 
+  /* 세컨더리 — 노랑.
+     초록과 나란히 두었을 때 하나가 튀지 않도록 상대 밝기 차이를 재서 골랐습니다
+     (0.18 — 후보 중 가장 붙어 있으면서도 선명).
+
+     이 색은 글자로 쓰지 않습니다. 흰 배경 위 대비가 1.61 이라 안 보입니다.
+     채움으로 쓰고 그 위에 어두운 잉크를 얹거나(10.68), 밝은 바탕에 노란 글자가
+     필요하면 --secondary-ink 를 씁니다(4.98).
+
+     쓰는 자리: 안읽음 배지, 추천 이유, 주제 태그처럼 "눈에 띄되 행동을
+     재촉하지 않는" 것들. 초록은 계속 "지금 이걸 누르세요" 자리에만 씁니다. */
+  --secondary: #ffc300;
+  --secondary-text: #241a00;        /* 노랑 위 글자 — 대비 10.68 */
+  --secondary-ink: #8c6b00;         /* 밝은 바탕 위 노란 글자 — 대비 4.98 */
+  --secondary-soft: #fff6d6;
+  --secondary-border: #ffe28a;
+
   /* 기능색 */
   --danger: var(--red-500);
   --danger-soft: var(--red-100);
@@ -383,10 +399,10 @@ p {
   justify-content: center;
   margin-left: auto;
   border-radius: var(--r-pill);
-  background: var(--coral);
-  color: var(--surface);
+  background: var(--secondary);
+  color: var(--secondary-text);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .new-post-button {
@@ -1569,15 +1585,17 @@ p {
   flex: 0 0 auto;
   align-items: center;
   gap: var(--sp-1);
-  padding: var(--sp-1) var(--sp-1);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--subtle);
+  padding: 3px var(--sp-2);
+  border: var(--bw-hair) solid var(--secondary-border);
+  border-radius: var(--r-pill);
+  background: var(--secondary-soft);
+  color: var(--secondary-ink);
   font-size: 12px;
+  font-weight: 600;
 }
 
 .single-match-reasons > div svg {
-  color: var(--success);
+  color: var(--secondary-ink);
 }
 
 .single-match-opener {
@@ -2209,7 +2227,9 @@ p {
 .conversation-labels { display: flex; gap: var(--sp-1); margin-top: 2px; }
 .conversation-labels i { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 0; border-radius: 0; background: transparent; color: var(--subtle); font-size: 13px; font-style: normal; font-weight: 400; }
 .conversation-labels .group-label { background: transparent; color: var(--subtle); }
-.unread-count { display: inline-flex; width: 17px; height: 17px; align-items: center; justify-content: center; margin-top: var(--sp-5); border-radius: 50%; background: var(--primary); color: var(--primary-text); font-size: 12px; font-weight: 700; }
+/* 안읽음은 노랑입니다. 초록은 "지금 이걸 누르세요" 자리에 쓰고, 이것은
+   알림이라 눈에 띄되 행동을 재촉하지 않아야 합니다. */
+.unread-count { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; margin-top: var(--sp-5); border-radius: 50%; background: var(--secondary); color: var(--secondary-text); font-size: 12px; font-weight: 700; }
 
 .request-actions {
   display: grid;
@@ -4630,6 +4650,11 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
     --brand: var(--g-300);
     --secondary-button: #1b1e1d;
 
+    /* 어두운 화면에서는 노랑을 글자로 써도 됩니다 — 대비 12.31. */
+    --secondary-ink: #ffc300;
+    --secondary-soft: #2a2205;
+    --secondary-border: #4a3a08;
+
     /* 기능색 — 어두운 배경용으로 밝게 */
     --danger: #ff6b6b;
     --danger-soft: rgba(255, 107, 107, 0.14);
@@ -5988,7 +6013,7 @@ label > svg { flex: none; }
 .partner-progress i.done { background: var(--primary); }
 
 /* 알림 수 — 면적이 작아 10% 안에 들어갑니다 */
-.side-nav .nav-count { background: var(--primary); color: var(--primary-text); }
+.side-nav .nav-count { background: var(--secondary); color: var(--secondary-text); }
 
 /* 스위치 켜짐 */
 .toggle.on,

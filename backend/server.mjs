@@ -495,18 +495,25 @@ function matchCandidate(candidate, me, preferences, date) {
     score += 25;
     const names = matchedLanguages.map((code) => LANGUAGES.find((item) => item.code === code)?.nativeName || code).join(" · ");
     reasons.push(names + " 원어민 파트너예요");
-    reasonCodes.push({ code: "native-speaker", languages: names });
+    // 이름은 그 언어로 적힌 것입니다(English·日本語). 한국어 화면에서는 "영어"가
+    // 맞으므로 코드도 함께 보냅니다 — 화면이 자기 언어로 다시 그립니다.
+    reasonCodes.push({ code: "native-speaker", languages: names, languageCodes: matchedLanguages });
   }
   if (preferences.preferredCountries.includes(candidate.country?.code)) {
     score += 10;
     reasons.push("희망 지역인 " + (candidate.country?.flag || "") + " " + (candidate.country?.name || "") + "에 있어요");
-    reasonCodes.push({ code: "preferred-country", flag: candidate.country?.flag || "", country: candidate.country?.name || "" });
+    reasonCodes.push({
+      code: "preferred-country",
+      flag: candidate.country?.flag || "",
+      country: candidate.country?.name || "",
+      countryCode: candidate.country?.code || "",
+    });
   }
   if (matchedInterests.length) {
     score += Math.min(12, matchedInterests.length * 4);
     const interests = matchedInterests.slice(0, 2).join(" · ");
     reasons.push(interests + " 관심사가 같아요");
-    reasonCodes.push({ code: "shared-interests", interests });
+    reasonCodes.push({ code: "shared-interests", interests, interestCodes: matchedInterests.slice(0, 2) });
   }
   // 예전에는 이 값을 저장만 하고 어디에도 쓰지 않았습니다 — 골라도 추천이 그대로였습니다.
   const wholeLevelRange =
