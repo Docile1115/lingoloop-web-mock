@@ -31,7 +31,8 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-asset"
+      "expo-asset",
+      "expo-localization"
     ]
   }
 }

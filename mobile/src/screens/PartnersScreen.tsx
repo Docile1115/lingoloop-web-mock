@@ -94,14 +94,29 @@ export function PartnersScreen() {
   );
 }
 
+/**
+ * 화면에 그릴 수 있는 사진인지.
+ *
+ * RN 의 Image 는 SVG 를 못 그립니다 — 웹의 <img> 는 그립니다. 서버가 만드는
+ * 기본 아바타와 로컬 시드 데이터가 SVG 데이터 URI 라, 그대로 넘기면 빈 네모만
+ * 남습니다. 그릴 수 없는 것은 없는 것으로 치고 이름 첫 글자를 보여줍니다.
+ */
+function drawablePhoto(photo?: string): string {
+  if (!photo) return "";
+  return photo.startsWith("data:image/svg") ? "" : photo;
+}
+
 function PartnerCard({ partner }: { partner: Partner }) {
   const c = useTheme();
+  const photo = drawablePhoto(partner.photo);
   return (
     <View style={[s.card, { backgroundColor: c.surfaceSoft, borderColor: c.line }]}>
-      {partner.photo ? (
-        <Image source={{ uri: partner.photo }} style={s.avatar} />
+      {photo ? (
+        <Image source={{ uri: photo }} style={s.avatar} />
       ) : (
-        <View style={[s.avatar, { backgroundColor: c.sunken }]} />
+        <View style={[s.avatar, s.avatarFallback, { backgroundColor: c.sunken }]}>
+          <Text style={[s.avatarLetter, { color: c.muted }]}>{partner.name.slice(0, 1)}</Text>
+        </View>
       )}
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={[s.name, { color: c.ink }]} numberOfLines={1}>
@@ -149,6 +164,8 @@ const s = StyleSheet.create({
     borderRadius: radius.md,
   },
   avatar: { width: 52, height: 52, borderRadius: radius.pill },
+  avatarFallback: { alignItems: "center", justifyContent: "center" },
+  avatarLetter: { fontSize: 20, fontWeight: "700" },
   name: { fontSize: 16, fontWeight: "700" },
   age: { fontSize: 13, fontWeight: "500" },
   exchange: { fontSize: 13, fontWeight: "600" },

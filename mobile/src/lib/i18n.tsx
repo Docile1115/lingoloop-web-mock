@@ -9,7 +9,7 @@
  * (언어 고르기 화면이 생기면 setLocale 에 AsyncStorage 저장을 붙이면 됩니다.)
  */
 import { useMemo, useSyncExternalStore } from "react";
-import { NativeModules, Platform } from "react-native";
+import { getLocales } from "expo-localization";
 import {
   LocaleContext,
   currentLocaleSnapshot,
@@ -34,15 +34,19 @@ export {
   type Vars,
 } from "@shared/i18n/core";
 
-/** 기기 설정 언어. 지원하지 않는 언어면 한국어로 둡니다. */
+/**
+ * 기기 설정 언어. 지원하지 않는 언어면 한국어로 둡니다.
+ *
+ * 기기에 여러 언어가 순서대로 설정돼 있을 수 있어서 우리가 아는 것이 나올 때까지
+ * 훑습니다 — 1순위가 프랑스어이고 2순위가 영어인 사람에게 한국어를 보여줄 이유가
+ * 없습니다.
+ */
 function deviceLocale(): Locale {
-  const settings = NativeModules.SettingsManager?.settings;
-  const tag =
-    Platform.OS === "ios"
-      ? ((settings?.AppleLocale ?? settings?.AppleLanguages?.[0]) as string | undefined)
-      : (NativeModules.I18nManager?.localeIdentifier as string | undefined);
-  const guess = tag?.slice(0, 2);
-  return isLocale(guess) ? guess : "ko";
+  for (const entry of getLocales()) {
+    const guess = entry.languageCode?.slice(0, 2);
+    if (isLocale(guess)) return guess;
+  }
+  return "ko";
 }
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {
