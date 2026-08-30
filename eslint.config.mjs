@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // 앱은 자기 규칙(React Native)으로 따로 검사합니다 — mobile/ 안에서 돌립니다.
+    "mobile/**",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

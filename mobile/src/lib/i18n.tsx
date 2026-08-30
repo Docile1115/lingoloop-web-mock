@@ -1,0 +1,55 @@
+/**
+ * 앱의 언어 배선.
+ *
+ * 번역 규칙·사전·"현재 언어" 저장소는 전부 웹과 **같은 모듈**(@shared/i18n/core)을
+ * 씁니다. 따로 두면 앱에서 언어를 바꿔도 서버 응답 어댑터(live-data.ts)가 부르는
+ * t() 는 계속 한국어를 냅니다 — 저장소가 둘로 갈라지기 때문입니다.
+ *
+ * 여기 남은 것은 앱에서만 할 수 있는 일뿐입니다: 기기 설정 언어 읽기.
+ * (언어 고르기 화면이 생기면 setLocale 에 AsyncStorage 저장을 붙이면 됩니다.)
+ */
+import { useMemo, useSyncExternalStore } from "react";
+import { NativeModules, Platform } from "react-native";
+import {
+  LocaleContext,
+  currentLocaleSnapshot,
+  isLocale,
+  setCurrentLocale,
+  subscribe,
+  type Locale,
+} from "@shared/i18n/core";
+
+export {
+  LOCALES,
+  localizeClock,
+  msg,
+  t,
+  translate,
+  tx,
+  useLocale,
+  useLocaleRerender,
+  useT,
+  type Locale,
+  type MessageKey,
+  type Vars,
+} from "@shared/i18n/core";
+
+/** 기기 설정 언어. 지원하지 않는 언어면 한국어로 둡니다. */
+function deviceLocale(): Locale {
+  const settings = NativeModules.SettingsManager?.settings;
+  const tag =
+    Platform.OS === "ios"
+      ? ((settings?.AppleLocale ?? settings?.AppleLanguages?.[0]) as string | undefined)
+      : (NativeModules.I18nManager?.localeIdentifier as string | undefined);
+  const guess = tag?.slice(0, 2);
+  return isLocale(guess) ? guess : "ko";
+}
+
+export function I18nProvider({ children }: { children: React.ReactNode }) {
+  const locale = useSyncExternalStore(subscribe, currentLocaleSnapshot, currentLocaleSnapshot);
+  const value = useMemo(() => ({ locale, setLocale: setCurrentLocale }), [locale]);
+  return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
+}
+
+// 기기 언어는 모듈이 처음 불릴 때 한 번만 정합니다 — 렌더 중에 바꾸면 안 됩니다.
+setCurrentLocale(deviceLocale());

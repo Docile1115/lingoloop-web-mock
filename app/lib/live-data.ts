@@ -1,4 +1,6 @@
-import { msg, t, tx } from "./i18n";
+// 브라우저 배선이 들어 있는 ./i18n 이 아니라 플랫폼 공용 core 를 봅니다 —
+// 이 파일은 앱(React Native)에서도 그대로 씁니다.
+import { msg, t, tx } from "./i18n/core";
 import type {
   Accent,
   ChatMessage,

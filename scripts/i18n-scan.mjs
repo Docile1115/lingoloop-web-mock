@@ -14,9 +14,11 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SRC_DIRS = ["app"];
+// 웹 화면과 앱 화면. 사전은 하나라 두 곳을 함께 훑어야 합니다 —
+// 앱만 빼면 다음 실행에서 앱 문구가 "안 쓰는 키" 로 지워집니다.
+const SRC_DIRS = ["app", "mobile/src"];
 const I18N_DIR = join(ROOT, "app/lib/i18n");
-const SKIP = new Set(["node_modules", "dist", ".next", ".vinext"]);
+const SKIP = new Set(["node_modules", "dist", ".next", ".vinext", ".expo"]);
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {

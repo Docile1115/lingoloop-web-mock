@@ -61,7 +61,10 @@ test("번역 키와 사전에 중복 리터럴이 없다", async () => {
 });
 
 test("지원 언어와 서버 기본값·브라우저 저장 계약이 유지된다", async () => {
-  const [runtime, locales, app, production] = await Promise.all([
+  // 번역 규칙은 core.ts(웹·앱 공용), 브라우저 배선은 index.tsx 로 나뉘어 있습니다.
+  // 앱이 같은 사전과 같은 "현재 언어"를 쓰려면 이 경계가 유지되어야 합니다.
+  const [core, web, locales, app, production] = await Promise.all([
+    read(join(I18N, "core.ts")),
     read(join(I18N, "index.tsx")),
     // 서버 컴포넌트(layout.tsx 의 generateMetadata)도 써야 해서 "use client" 밖에 둡니다.
     read(join(I18N, "keys-locale.ts")),
@@ -70,12 +73,14 @@ test("지원 언어와 서버 기본값·브라우저 저장 계약이 유지된
   ]);
 
   assert.match(locales, /export const LOCALES = \["ko", "en", "ja"\] as const;/);
-  assert.match(runtime, /const serverLocale = \(\): Locale => "ko";/);
-  assert.match(runtime, /const raw = DICTIONARIES\[locale\]\[key\] \?\? key;/);
-  assert.match(runtime, /const STORAGE_KEY = "lingoloop\.locale";/);
-  assert.match(runtime, /document\.documentElement\.lang = locale;/);
-  assert.match(runtime, /window\.localStorage\.setItem\(STORAGE_KEY, next\);/);
-  assert.match(runtime, /document\.title = SITE_METADATA\[locale\]\.title;/);
+  assert.match(core, /export const serverLocale = \(\): Locale => "ko";/);
+  assert.match(core, /const raw = DICTIONARIES\[locale\]\[key\] \?\? key;/);
+  assert.match(core, /export const STORAGE_KEY = "lingoloop\.locale";/);
+  // core 는 어느 플랫폼도 몰라야 합니다 — DOM 을 만지면 앱에서 못 씁니다.
+  assert.doesNotMatch(core, /document\.|window\.|navigator\./, "core.ts 는 DOM 을 몰라야 합니다");
+  assert.match(web, /document\.documentElement\.lang = locale;/);
+  assert.match(web, /window\.localStorage\.setItem\(STORAGE_KEY, next\);/);
+  assert.match(web, /document\.title = SITE_METADATA\[locale\]\.title;/);
   // 예전 화면은 로그인 게이트를 거쳐 안쪽 화면을 그립니다.
   assert.match(app, /<I18nProvider>[\s\S]*<AuthGate \/>[\s\S]*<\/I18nProvider>/);
   assert.match(app, /<LingoLoopScreens key=\{me\.id\}/);
