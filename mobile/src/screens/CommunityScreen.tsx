@@ -15,7 +15,7 @@ import { t, tx } from "../lib/i18n";
 import { useApi } from "../lib/useApi";
 import { useSession } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
-import { radius, space, tapSize } from "../lib/theme";
+import { radius, space } from "../lib/theme";
 import { Avatar, EmptyState, Loading, SegmentedTabs } from "../ui";
 
 export type FeedTab = "latest" | "recommended" | "following";
@@ -23,11 +23,9 @@ export type FeedTab = "latest" | "recommended" | "following";
 export function CommunityScreen({
   onOpenPost,
   onOpenProfile,
-  onCompose,
 }: {
   onOpenPost: (post: FeedPost) => void;
   onOpenProfile: (authorId: string) => void;
-  onCompose: () => void;
 }) {
   const c = useTheme();
   const { me } = useSession();
@@ -85,25 +83,15 @@ export function CommunityScreen({
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={styles.toolbar}>
-        <View style={{ flex: 1 }}>
-          <SegmentedTabs
-            value={tab}
-            onChange={setTab}
-            options={[
-              { id: "latest", label: t("최신") },
-              { id: "recommended", label: t("추천") },
-              { id: "following", label: t("팔로잉") },
-            ]}
-          />
-        </View>
-        <Pressable
-          onPress={onCompose}
-          accessibilityRole="button"
-          accessibilityLabel={t("글쓰기")}
-          style={[styles.compose, { backgroundColor: c.primary }]}
-        >
-          <Ionicons name="create-outline" size={20} color={c.onPrimary} />
-        </Pressable>
+        <SegmentedTabs
+          value={tab}
+          onChange={setTab}
+          options={[
+            { id: "latest", label: t("최신") },
+            { id: "recommended", label: t("추천") },
+            { id: "following", label: t("팔로잉") },
+          ]}
+        />
       </View>
 
       <FlatList
@@ -223,20 +211,7 @@ export function PostCard({
 }
 
 const styles = StyleSheet.create({
-  toolbar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.sm,
-    paddingHorizontal: space.lg,
-    paddingBottom: space.sm,
-  },
-  compose: {
-    width: tapSize,
-    height: tapSize,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: radius.button,
-  },
+  toolbar: { paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.sm },
   list: { padding: space.lg, gap: space.md },
   card: { padding: space.md, gap: space.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md },
   author: { flexDirection: "row", alignItems: "center", gap: space.sm },

@@ -9,7 +9,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from "@react-navigation/
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
-import { useColorScheme } from "react-native";
+import { Pressable, useColorScheme } from "react-native";
 import type { FeedPost, Conversation, Partner } from "@shared/demo-data";
 import { post as apiPost } from "./lib/api";
 import { t } from "./lib/i18n";
@@ -72,12 +72,18 @@ async function openConversation(partner: Partner): Promise<Conversation | null> 
 function Tabs() {
   const c = useTheme();
   return (
+    /* 탭마다 헤더를 답니다. 헤더가 없으면 내용이 상태바 밑으로 들어갑니다 —
+       위쪽 안전 영역은 네비게이터가 헤더와 함께 계산해 줍니다. */
     <Tab.Navigator
       screenOptions={{
-        headerShown: false,
+        headerStyle: { backgroundColor: c.surface },
+        headerTintColor: c.ink,
+        headerTitleStyle: { fontSize: 18, fontWeight: "700" },
+        headerShadowVisible: false,
         tabBarActiveTintColor: c.primaryStrong,
         tabBarInactiveTintColor: c.subtle,
         tabBarStyle: { backgroundColor: c.surface, borderTopColor: c.line },
+        sceneStyle: { backgroundColor: c.bg },
       }}
     >
       <Tab.Screen
@@ -100,16 +106,26 @@ function Tabs() {
 
       <Tab.Screen
         name="CommunityTab"
-        options={{
+        options={({ navigation }) => ({
           title: t("커뮤니티"),
           tabBarIcon: ({ color, size }) => <Ionicons name="people-outline" size={size} color={color} />,
-        }}
+          headerRight: () => (
+            <Pressable
+              onPress={() => navigation.navigate("Compose")}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel={t("글쓰기")}
+              style={{ paddingHorizontal: 16 }}
+            >
+              <Ionicons name="create-outline" size={23} color={c.primaryStrong} />
+            </Pressable>
+          ),
+        })}
       >
         {({ navigation }) => (
           <CommunityScreen
             onOpenPost={(post) => navigation.navigate("PostDetail", { post })}
             onOpenProfile={(partnerId) => navigation.navigate("PartnerProfile", { partnerId })}
-            onCompose={() => navigation.navigate("Compose")}
           />
         )}
       </Tab.Screen>
