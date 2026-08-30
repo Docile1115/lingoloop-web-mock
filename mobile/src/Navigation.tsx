@@ -9,7 +9,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from "@react-navigation/
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, useColorScheme } from "react-native";
+import { Pressable, View, useColorScheme } from "react-native";
 import type { FeedPost, Conversation, Partner } from "@shared/demo-data";
 import { post as apiPost } from "./lib/api";
 import { t } from "./lib/i18n";
@@ -22,6 +22,9 @@ import { MeScreen } from "./screens/MeScreen";
 import { PartnerProfileScreen } from "./screens/PartnerProfileScreen";
 import { PartnersScreen } from "./screens/PartnersScreen";
 import { PostDetailScreen } from "./screens/PostDetailScreen";
+import { FiltersScreen } from "./screens/FiltersScreen";
+import { LikesScreen } from "./screens/LikesScreen";
+import { SearchScreen } from "./screens/SearchScreen";
 import { ThreadScreen } from "./screens/ThreadScreen";
 
 export type RootParams = {
@@ -31,6 +34,9 @@ export type RootParams = {
   Thread: { conversation: Conversation };
   Compose: undefined;
   EditProfile: undefined;
+  Filters: undefined;
+  Likes: undefined;
+  Search: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootParams>();
@@ -69,6 +75,37 @@ async function openConversation(partner: Partner): Promise<Conversation | null> 
   }
 }
 
+/** 헤더의 아이콘 단추. 손가락으로 누를 만한 크기를 지킵니다. */
+function HeaderButton({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  label: string;
+  onPress: () => void;
+}) {
+  const c = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={8}
+      style={({ pressed }) => ({
+        width: 40,
+        height: 40,
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 20,
+        opacity: pressed ? 0.6 : 1,
+      })}
+    >
+      <Ionicons name={icon} size={22} color={c.ink} />
+    </Pressable>
+  );
+}
+
 function Tabs() {
   const c = useTheme();
   return (
@@ -88,10 +125,24 @@ function Tabs() {
     >
       <Tab.Screen
         name="PartnersTab"
-        options={{
+        options={({ navigation }) => ({
           title: t("파트너"),
           tabBarIcon: ({ color, size }) => <Ionicons name="compass-outline" size={size} color={color} />,
-        }}
+          headerRight: () => (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingRight: 12 }}>
+              <HeaderButton
+                icon="heart-outline"
+                label={t("받은 마음")}
+                onPress={() => navigation.navigate("Likes")}
+              />
+              <HeaderButton
+                icon="options-outline"
+                label={t("조건 바꾸기")}
+                onPress={() => navigation.navigate("Filters")}
+              />
+            </View>
+          ),
+        })}
       >
         {({ navigation }) => (
           <PartnersScreen
@@ -110,15 +161,14 @@ function Tabs() {
           title: t("커뮤니티"),
           tabBarIcon: ({ color, size }) => <Ionicons name="people-outline" size={size} color={color} />,
           headerRight: () => (
-            <Pressable
-              onPress={() => navigation.navigate("Compose")}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel={t("글쓰기")}
-              style={{ paddingHorizontal: 16 }}
-            >
-              <Ionicons name="create-outline" size={23} color={c.primaryStrong} />
-            </Pressable>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingRight: 12 }}>
+              <HeaderButton icon="search" label={t("검색")} onPress={() => navigation.navigate("Search")} />
+              <HeaderButton
+                icon="create-outline"
+                label={t("글쓰기")}
+                onPress={() => navigation.navigate("Compose")}
+              />
+            </View>
           ),
         })}
       >
@@ -222,6 +272,31 @@ export function Navigation() {
 
         <Stack.Screen name="EditProfile" options={{ title: t("프로필 편집"), presentation: "modal" }}>
           {({ navigation }) => <EditProfileScreen onDone={() => navigation.goBack()} />}
+        </Stack.Screen>
+
+        <Stack.Screen name="Filters" options={{ title: t("오늘의 파트너 조건"), presentation: "modal" }}>
+          {({ navigation }) => <FiltersScreen onDone={() => navigation.goBack()} />}
+        </Stack.Screen>
+
+        <Stack.Screen name="Likes" options={{ title: t("받은 마음") }}>
+          {({ navigation }) => (
+            <LikesScreen
+              onOpenProfile={(partnerId) => navigation.navigate("PartnerProfile", { partnerId })}
+              onStartChat={async (partner) => {
+                const conversation = await openConversation(partner);
+                if (conversation) navigation.navigate("Thread", { conversation });
+              }}
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="Search" options={{ title: t("검색") }}>
+          {({ navigation }) => (
+            <SearchScreen
+              onOpenProfile={(partnerId) => navigation.navigate("PartnerProfile", { partnerId })}
+              onOpenPost={(post) => navigation.navigate("PostDetail", { post })}
+            />
+          )}
         </Stack.Screen>
       </Stack.Navigator>
     </NavigationContainer>
