@@ -83,7 +83,7 @@ import {
 } from "@/app/lib/demo-data";
 import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
 import { SignIn } from "./SignIn";
-import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply } from "../lib/live-data";
+import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, matchReasonText, type MatchReasonCode } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
@@ -138,6 +138,7 @@ type DailyMatchRecommendation = {
   partner: Partner;
   score: number;
   matchReasons: string[];
+  matchReasonCodes?: MatchReasonCode[];
   icebreaker: string;
 };
 
@@ -893,7 +894,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     fetch(`/api/matching/daily?${query.toString()}`)
       .then(async (response) => {
         if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-        return response.json() as Promise<{ data?: { recommendations?: Array<{ partner: ApiProfile; score: number; matchReasons: string[]; icebreaker: string }> } }>;
+        return response.json() as Promise<{ data?: { recommendations?: Array<{ partner: ApiProfile; score: number; matchReasons: string[]; matchReasonCodes?: MatchReasonCode[]; icebreaker: string }> } }>;
       })
       .then((body) => {
         if (cancelled) return;
@@ -901,6 +902,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           partner: displayPartnerFromApi(item.partner, item.score),
           score: item.score,
           matchReasons: item.matchReasons,
+          matchReasonCodes: item.matchReasonCodes,
           icebreaker: item.icebreaker,
         })));
         setMatchesFailed(false);
@@ -2000,7 +2002,7 @@ function PartnerCard({
         </div>
 
         <div className="match-reasons">
-          {match.matchReasons.slice(0, 3).map((reason) => <span key={reason}><Check size={12} /> {tx(reason)}</span>)}
+          {matchReasonList(match).slice(0, 3).map((reason) => <span key={reason}><Check size={12} /> {reason}</span>)}
         </div>
 
     </article>
@@ -4630,6 +4632,18 @@ function ConfirmModal({ title, body, confirmLabel, onCancel, onConfirm }: { titl
       </div>
     </div>
   );
+}
+
+/**
+ * 추천 이유 문구.
+ *
+ * 서버가 코드를 주면 지금 언어로 그리고, 없으면 서버가 준 문장 그대로 씁니다.
+ * 예전에는 늘 문장을 그대로 뿌려서 영어·일본어 화면에도 한국어가 남았습니다.
+ */
+function matchReasonList(match: { matchReasons: string[]; matchReasonCodes?: MatchReasonCode[] }): string[] {
+  const codes = match.matchReasonCodes;
+  if (!codes?.length) return match.matchReasons.map((reason) => tx(reason));
+  return codes.map((code, index) => matchReasonText(code, match.matchReasons[index] ?? ""));
 }
 
 function modalLabel(type: Exclude<ModalState, null>["type"]) {

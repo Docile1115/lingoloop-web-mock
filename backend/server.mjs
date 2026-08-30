@@ -652,9 +652,10 @@ async function conversationView(conversation, uid, includeMessages = false) {
     partner,
     preview: conversation.lastMessage || "새 대화를 시작해 보세요.",
     updatedAt: conversation.updatedAt,
+    /** 내가 아직 안 읽은 메시지 수. 보낼 때 올리고 읽을 때 0 으로 돌립니다. */
+    unreadCount: conversation.unread?.[uid] || 0,
     /* 요청함에서 받는 사람이 먼저 알아보라고 붙이는 표시입니다. 막지는 않습니다. */
     spamSignals: conversation.requestSpamSignals || [],
-    unreadCount: 0,
     requestStatus: conversationStatus(conversation),
     isIncomingRequest: conversationStatus(conversation) === "pending" && conversation.requestRecipientId === uid,
     ...(messages ? { messages } : {}),
@@ -1658,8 +1659,12 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
   const conversation = conversationSnapshot.data();
   const readAt = conversation.readAt || {};
   const latest = messages.length ? messages[messages.length - 1].sentAt : null;
-  if (latest && readAt[req.auth.uid] !== latest) {
-    await db.collection("conversations").doc(id).update({ [`readAt.${req.auth.uid}`]: latest });
+  const hadUnread = (conversation.unread?.[req.auth.uid] || 0) > 0;
+  if ((latest && readAt[req.auth.uid] !== latest) || hadUnread) {
+    await db.collection("conversations").doc(id).update({
+      ...(latest ? { [`readAt.${req.auth.uid}`]: latest } : {}),
+      [`unread.${req.auth.uid}`]: 0,
+    });
   }
 
   // 내가 보낸 메시지에만 읽음 여부를 붙입니다 — 남이 내 걸 언제 읽었는지가 궁금한 것이지,
@@ -1750,9 +1755,19 @@ async function createMessage(req, res, conversationId) {
       throw new ApiError(403, "CONVERSATION_CLOSED", "이 대화에는 메시지를 보낼 수 없습니다.");
     }
     transaction.create(messageReference, message);
+    /* 받는 사람의 안읽음을 올립니다.
+       예전에는 목록이 늘 unreadCount: 0 을 내려 보내 안읽음 표시가 아예 뜨지
+       않았습니다. 목록마다 메시지를 세면 대화 수만큼 질의가 늘어나므로
+       대화 문서에 사람별로 세어 둡니다 — 읽으면 그 자리에서 0 으로 돌립니다. */
+    const recipientId = (conversation.memberIds || []).find((memberId) => memberId !== req.auth.uid);
+    const unread = { ...(conversation.unread || {}) };
+    if (recipientId) unread[recipientId] = (unread[recipientId] || 0) + 1;
+    unread[req.auth.uid] = 0;
+
     transaction.update(conversationReference, {
       lastMessage: text,
       lastSenderId: req.auth.uid,
+      unread,
       updatedAt: timestamp,
       ...(conversationStatus(conversation) === "pending"
         ? { requestMessageSent: true, requestSpamSignals: spamSignals(text) }

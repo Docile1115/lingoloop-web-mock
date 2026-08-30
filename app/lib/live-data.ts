@@ -250,6 +250,45 @@ export function offsetHoursFor(countryCode?: string): number {
   }
 }
 
+/**
+ * 추천 이유. 서버가 준 코드를 지금 언어로 그립니다.
+ *
+ * 서버는 사람이 읽는 문장(matchReasons)과 코드+값(matchReasonCodes)을 함께
+ * 보냅니다. 문장은 늘 한국어라, 영어·일본어 화면에서 그것만 한국어로 남아
+ * 있었습니다 — 웹도 앱도 코드를 안 쓰고 문장을 그대로 뿌리고 있었습니다.
+ *
+ * 모르는 코드가 오면 서버가 준 문장으로 되돌아갑니다. 새 코드가 생겨도
+ * 빈칸이 뜨지 않습니다.
+ */
+export type MatchReasonCode = {
+  code: string;
+  languages?: string;
+  country?: string;
+  flag?: string;
+  interests?: string;
+};
+
+export function matchReasonText(reason: MatchReasonCode, fallback = ""): string {
+  switch (reason.code) {
+    case "native-speaker":
+      return t("{languages} 원어민 파트너예요", { languages: tx(reason.languages || "") });
+    case "preferred-country":
+      return t("희망 지역인 {country}에 있어요", { country: tx(reason.country || "") });
+    case "shared-interests":
+      return t("{interests} 관심사가 같아요", { interests: tx(reason.interests || "") });
+    case "level-in-range":
+      return t("찾으시는 학습 단계예요");
+    case "time-overlap":
+      return t("선호하는 학습 시간대가 겹쳐요");
+    case "first-exchange":
+      return t("새로운 실제 회원과 첫 언어 교환을 시작해 보세요");
+    case "broadened":
+      return t("일부 조건을 넓혀 찾은 가까운 파트너예요");
+    default:
+      return tx(fallback);
+  }
+}
+
 export function toPartner(profile: ApiProfile, score = 0): Partner {
   const learning = profile.learningLanguages?.[0];
   return {

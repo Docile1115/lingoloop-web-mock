@@ -1,15 +1,26 @@
 /**
  * 화면들이 같이 쓰는 조각들.
  *
- * 웹은 globals.css 의 클래스로 이 역할을 하는데 RN 에는 CSS 가 없어서
- * 컴포넌트로 둡니다. 색은 항상 useTheme() 에서 받습니다 — 값을 박아두면
- * 다크 모드에서 안 보이는 글자가 생깁니다.
+ * 인상은 Threads 를 참고했습니다 — 글마다 테두리 상자를 두르지 않고 얇은
+ * 구분선으로만 나눕니다. 상자가 많으면 화면이 촘촘해 보이고, 정작 내용보다
+ * 상자가 먼저 보입니다. 대신 글자를 키우고 여백을 넓혔습니다.
+ *
+ * 색은 항상 useTheme() 에서 받습니다 — 값을 박아두면 다크 모드에서 안 보이는
+ * 글자가 생깁니다.
  */
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { drawablePhoto } from "../lib/format";
 import { t } from "../lib/i18n";
-import { radius, space, tapSize } from "../lib/theme";
+import { radius, space, tapSize, type } from "../lib/theme";
 import { useTheme } from "../lib/useTheme";
+
+/** 이름 첫 글자 아바타의 배경. 사람마다 늘 같은 색이 나와야 알아볼 수 있습니다. */
+const TINTS = ["#00c853", "#FFC300", "#38bdf8", "#f472b6", "#a78bfa", "#fb923c"];
+function tintFor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return TINTS[hash % TINTS.length];
+}
 
 export function Avatar({
   name,
@@ -24,6 +35,7 @@ export function Avatar({
 }) {
   const c = useTheme();
   const uri = drawablePhoto(photo);
+  const tint = tintFor(name);
   return (
     <View>
       {uri ? (
@@ -31,12 +43,12 @@ export function Avatar({
       ) : (
         <View
           style={[
-            { width: size, height: size, borderRadius: size / 2, backgroundColor: c.sunken },
+            { width: size, height: size, borderRadius: size / 2, backgroundColor: tint },
             styles.center,
           ]}
         >
-          <Text style={{ color: c.muted, fontSize: size * 0.4, fontWeight: "700" }}>
-            {name.slice(0, 1)}
+          <Text style={{ color: "#0b0b0d", fontSize: size * 0.42, fontWeight: "800" }}>
+            {name.slice(0, 1).toUpperCase()}
           </Text>
         </View>
       )}
@@ -44,7 +56,13 @@ export function Avatar({
         <View
           style={[
             styles.onlineDot,
-            { backgroundColor: c.primary, borderColor: c.bg, width: size * 0.28, height: size * 0.28, borderRadius: size * 0.14 },
+            {
+              backgroundColor: c.primary,
+              borderColor: c.bg,
+              width: size * 0.3,
+              height: size * 0.3,
+              borderRadius: size * 0.15,
+            },
           ]}
         />
       ) : null}
@@ -62,23 +80,32 @@ export function EmptyState({
   title,
   body,
   onRetry,
+  emoji,
 }: {
   title: string;
   body?: string;
   onRetry?: () => void;
+  emoji?: string;
 }) {
   const c = useTheme();
   return (
     <View style={styles.empty}>
-      <Text style={[styles.emptyTitle, { color: c.ink }]}>{title}</Text>
-      {body ? <Text style={[styles.emptyBody, { color: c.subtle }]}>{body}</Text> : null}
+      {emoji ? (
+        <View style={[styles.emptyBadge, { backgroundColor: c.sunken }]}>
+          <Text style={{ fontSize: 30 }}>{emoji}</Text>
+        </View>
+      ) : null}
+      <Text style={[type.title, { color: c.ink, textAlign: "center" }]}>{title}</Text>
+      {body ? (
+        <Text style={[type.body, { color: c.subtle, textAlign: "center" }]}>{body}</Text>
+      ) : null}
       {onRetry ? (
         <Pressable
-          style={[styles.retry, { borderColor: c.line }]}
+          style={[styles.retry, { backgroundColor: c.sunken }]}
           onPress={onRetry}
           accessibilityRole="button"
         >
-          <Text style={{ color: c.ink, fontSize: 13, fontWeight: "600" }}>{t("다시 시도")}</Text>
+          <Text style={{ color: c.ink, fontSize: 14, fontWeight: "700" }}>{t("다시 시도")}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -99,33 +126,39 @@ export function PrimaryButton({
   onPress,
   disabled,
   busy,
+  tone = "primary",
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   busy?: boolean;
+  /** 노랑은 "지금 이걸 하세요" 가 아니라 "이런 것도 있어요" 자리에 씁니다. */
+  tone?: "primary" | "secondary";
 }) {
   const c = useTheme();
   const off = disabled || busy;
+  const fill = tone === "secondary" ? c.secondary : c.primary;
+  const ink = tone === "secondary" ? c.onSecondary : c.onPrimary;
   return (
     <Pressable
-      style={[styles.primary, { backgroundColor: off ? c.sunken : c.primary }]}
+      style={({ pressed }) => [
+        styles.primary,
+        { backgroundColor: off ? c.sunken : fill, opacity: pressed && !off ? 0.85 : 1 },
+      ]}
       onPress={onPress}
       disabled={off}
       accessibilityRole="button"
     >
       {busy ? (
-        <ActivityIndicator color={c.onPrimary} />
+        <ActivityIndicator color={ink} />
       ) : (
-        <Text style={{ color: off ? c.subtle : c.onPrimary, fontSize: 15, fontWeight: "700" }}>
-          {label}
-        </Text>
+        <Text style={{ color: off ? c.subtle : ink, fontSize: 15, fontWeight: "800" }}>{label}</Text>
       )}
     </Pressable>
   );
 }
 
-/** 켜고 끄는 알약 단추. 웹의 .chip 과 같은 자리입니다. */
+/** 켜고 끄는 알약 단추. */
 export function Chip({
   label,
   active,
@@ -141,19 +174,19 @@ export function Chip({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={[
+      style={({ pressed }) => [
         styles.chip,
         {
-          backgroundColor: active ? c.primary : c.surfaceSoft,
-          borderColor: active ? c.primary : c.line,
+          backgroundColor: active ? c.primary : c.sunken,
+          opacity: pressed ? 0.8 : 1,
         },
       ]}
     >
       <Text
         style={{
           color: active ? c.onPrimary : c.muted,
-          fontSize: 13,
-          fontWeight: active ? "700" : "500",
+          fontSize: 14,
+          fontWeight: active ? "800" : "600",
         }}
       >
         {label}
@@ -162,7 +195,12 @@ export function Chip({
   );
 }
 
-/** 화면 위쪽 구획 탭. 웹의 .segmented-tabs 와 같습니다. */
+/**
+ * 화면 위쪽 구획 탭.
+ *
+ * 고른 것만 진하게 칠하고 나머지는 배경을 비웁니다. 회색 상자 안에 흰 알약을
+ * 넣는 방식보다 눌린 것이 훨씬 또렷합니다.
+ */
 export function SegmentedTabs<T extends string>({
   value,
   options,
@@ -174,7 +212,7 @@ export function SegmentedTabs<T extends string>({
 }) {
   const c = useTheme();
   return (
-    <View style={[styles.segmented, { backgroundColor: c.sunken }]}>
+    <View style={styles.segmented}>
       {options.map((option) => {
         const active = option.id === value;
         return (
@@ -183,13 +221,16 @@ export function SegmentedTabs<T extends string>({
             onPress={() => onChange(option.id)}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
-            style={[styles.segment, active && { backgroundColor: c.surface }]}
+            style={({ pressed }) => [
+              styles.segment,
+              { backgroundColor: active ? c.ink : "transparent", opacity: pressed ? 0.8 : 1 },
+            ]}
           >
             <Text
               style={{
-                color: active ? c.ink : c.muted,
-                fontSize: 13,
-                fontWeight: active ? "700" : "600",
+                color: active ? c.bg : c.subtle,
+                fontSize: 14,
+                fontWeight: active ? "800" : "600",
               }}
             >
               {option.label}
@@ -201,39 +242,62 @@ export function SegmentedTabs<T extends string>({
   );
 }
 
+/** 작은 표시. 노랑은 여기서 제 몫을 합니다 — 눈에 띄되 행동을 재촉하지 않습니다. */
+export function Badge({ label, tone = "neutral" }: { label: string; tone?: "neutral" | "accent" }) {
+  const c = useTheme();
+  const accent = tone === "accent";
+  return (
+    <View style={[styles.badge, { backgroundColor: accent ? c.secondary : c.sunken }]}>
+      <Text
+        style={{
+          color: accent ? c.onSecondary : c.muted,
+          fontSize: 11.5,
+          fontWeight: "800",
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+/** 목록 사이의 얇은 선. 상자 대신 이것으로 나눕니다. */
+export function Divider() {
+  const c = useTheme();
+  return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: c.line }} />;
+}
+
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
-  onlineDot: { position: "absolute", right: 0, bottom: 0, borderWidth: 2 },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, gap: space.sm },
-  emptyTitle: { fontSize: 16, fontWeight: "600", textAlign: "center" },
-  emptyBody: { fontSize: 13, lineHeight: 19, textAlign: "center" },
+  onlineDot: { position: "absolute", right: -1, bottom: -1, borderWidth: 2.5 },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, gap: space.md },
+  emptyBadge: { width: 68, height: 68, alignItems: "center", justifyContent: "center", borderRadius: radius.pill },
   retry: {
     minHeight: tapSize,
-    marginTop: space.sm,
-    paddingHorizontal: space.lg,
+    marginTop: space.xs,
+    paddingHorizontal: space.xl,
     justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.button,
+    borderRadius: radius.pill,
   },
   primary: {
-    height: tapSize + 4,
+    height: 50,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radius.button,
   },
   chip: {
-    minHeight: 34,
-    paddingHorizontal: space.md,
+    minHeight: 36,
+    paddingHorizontal: space.lg,
     justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.pill,
   },
-  segmented: { flexDirection: "row", gap: space.xs, padding: space.xs, borderRadius: radius.button },
+  segmented: { flexDirection: "row", gap: space.xs },
   segment: {
-    flex: 1,
-    minHeight: 34,
+    minHeight: 36,
+    paddingHorizontal: space.lg,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: radius.sm,
+    borderRadius: radius.pill,
   },
+  badge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: radius.pill },
 });

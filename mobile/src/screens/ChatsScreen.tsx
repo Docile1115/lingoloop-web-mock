@@ -5,8 +5,8 @@ import type { Conversation } from "@shared/demo-data";
 import { t, tx } from "../lib/i18n";
 import { useApi } from "../lib/useApi";
 import { useTheme } from "../lib/useTheme";
-import { radius, space } from "../lib/theme";
-import { Avatar, EmptyState, Loading } from "../ui";
+import { radius, space, type } from "../lib/theme";
+import { Avatar, Divider, EmptyState, Loading } from "../ui";
 
 export function ChatsScreen({ onOpen }: { onOpen: (row: Conversation) => void }) {
   const c = useTheme();
@@ -25,7 +25,8 @@ export function ChatsScreen({ onOpen }: { onOpen: (row: Conversation) => void })
       style={{ backgroundColor: c.bg }}
       data={chats.data}
       keyExtractor={(row) => row.id}
-      contentContainerStyle={chats.data.length ? styles.list : { flexGrow: 1 }}
+      contentContainerStyle={chats.data.length ? undefined : { flexGrow: 1 }}
+      ItemSeparatorComponent={Divider}
       refreshControl={
         <RefreshControl refreshing={chats.refreshing} onRefresh={chats.refresh} tintColor={c.primary} />
       }
@@ -34,6 +35,7 @@ export function ChatsScreen({ onOpen }: { onOpen: (row: Conversation) => void })
           <EmptyState title={chats.error} onRetry={chats.refresh} />
         ) : (
           <EmptyState
+            emoji="💬"
             title={t("아직 대화가 없어요")}
             body={t("파트너 프로필에서 메시지를 보내면 여기에 모여요.")}
           />
@@ -41,24 +43,33 @@ export function ChatsScreen({ onOpen }: { onOpen: (row: Conversation) => void })
       }
       renderItem={({ item }) => (
         <Pressable
-          style={[styles.row, { borderBottomColor: c.line }]}
+          style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.surfaceSoft }]}
           onPress={() => onOpen(item)}
           accessibilityRole="button"
         >
-          <Avatar name={item.name} photo={item.photo} size={50} online={item.online} />
-          <View style={{ flex: 1, gap: 2 }}>
+          <Avatar name={item.name} photo={item.photo} size={54} online={item.online} />
+          <View style={{ flex: 1, gap: 3 }}>
             <View style={styles.head}>
-              <Text style={[styles.name, { color: c.ink }]} numberOfLines={1}>{item.name}</Text>
-              <Text style={[styles.time, { color: c.subtle }]}>{tx(item.time)}</Text>
+              <Text
+                style={[type.name, { color: c.ink, flex: 1 }]}
+                numberOfLines={1}
+              >
+                {item.name}
+              </Text>
+              <Text style={[type.caption, { color: c.subtle }]}>{tx(item.time)}</Text>
             </View>
-            <Text style={[styles.preview, { color: c.muted }]} numberOfLines={1}>
+            <Text
+              style={[type.meta, { color: item.unread ? c.ink : c.subtle }]}
+              numberOfLines={1}
+            >
               {item.preview}
             </Text>
           </View>
+          {/* 안읽음은 노랑. 초록은 "누르세요" 자리에 쓰고, 이건 알림입니다. */}
           {item.unread ? (
-            <View style={[styles.unread, { backgroundColor: c.primary }]}>
-              <Text style={{ color: c.onPrimary, fontSize: 11, fontWeight: "700" }}>
-                {item.unread}
+            <View style={[styles.unread, { backgroundColor: c.secondary }]}>
+              <Text style={{ color: c.onSecondary, fontSize: 12, fontWeight: "800" }}>
+                {item.unread > 99 ? "99+" : item.unread}
               </Text>
             </View>
           ) : null}
@@ -69,17 +80,7 @@ export function ChatsScreen({ onOpen }: { onOpen: (row: Conversation) => void })
 }
 
 const styles = StyleSheet.create({
-  list: { paddingHorizontal: space.lg },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.md,
-    paddingVertical: space.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
+  row: { flexDirection: "row", alignItems: "center", gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
   head: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
-  name: { flex: 1, fontSize: 16, fontWeight: "600" },
-  time: { fontSize: 12 },
-  preview: { fontSize: 14 },
-  unread: { minWidth: 20, height: 20, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", borderRadius: radius.pill },
+  unread: { minWidth: 24, height: 24, paddingHorizontal: 7, alignItems: "center", justifyContent: "center", borderRadius: radius.pill },
 });

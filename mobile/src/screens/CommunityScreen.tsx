@@ -15,8 +15,8 @@ import { t, tx } from "../lib/i18n";
 import { useApi } from "../lib/useApi";
 import { useSession } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
-import { radius, space } from "../lib/theme";
-import { Avatar, EmptyState, Loading, SegmentedTabs } from "../ui";
+import { space, type } from "../lib/theme";
+import { Avatar, Badge, Divider, EmptyState, Loading, SegmentedTabs } from "../ui";
 
 export type FeedTab = "latest" | "recommended" | "following";
 
@@ -97,7 +97,8 @@ export function CommunityScreen({
       <FlatList
         data={visible}
         keyExtractor={(row) => row.id}
-        contentContainerStyle={visible.length ? styles.list : { flexGrow: 1 }}
+        contentContainerStyle={visible.length ? undefined : { flexGrow: 1 }}
+        ItemSeparatorComponent={Divider}
         refreshControl={
           <RefreshControl
             refreshing={posts.refreshing}
@@ -110,11 +111,13 @@ export function CommunityScreen({
             <EmptyState title={posts.error} onRetry={posts.refresh} />
           ) : tab === "following" ? (
             <EmptyState
+              emoji="🫥"
               title={t("팔로우한 사람의 글이 없어요")}
               body={t("프로필에서 팔로우하면 그 사람의 글이 여기 모여요.")}
             />
           ) : (
             <EmptyState
+              emoji="✏️"
               title={t("아직 글이 없어요")}
               body={t("첫 글을 올려보세요. 원어민이 고쳐줄 수 있어요.")}
             />
@@ -146,81 +149,91 @@ export function PostCard({
 }) {
   const c = useTheme();
   return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.card, { backgroundColor: c.surfaceSoft, borderColor: c.line }]}
-    >
-      <Pressable style={styles.author} onPress={onAuthor} accessibilityRole="button">
-        <Avatar name={post.author} photo={post.photo} size={40} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.authorName, { color: c.ink }]} numberOfLines={1}>
-            {post.author}
-            {post.age ? <Text style={{ color: c.subtle, fontWeight: "500" }}>  {post.age}</Text> : null}
-          </Text>
-          <Text style={[styles.authorMeta, { color: c.subtle }]} numberOfLines={1}>
-            {post.nativeCode ? `${post.nativeCode.toUpperCase()} ⇄ ` : ""}
-            {post.learningCode ? post.learningCode.toUpperCase() : ""}
-            {post.time ? ` · ${tx(post.time)}` : ""}
-          </Text>
-        </View>
-        {post.requestCorrection ? (
-          <View style={[styles.badge, { backgroundColor: c.sunken }]}>
-            <Text style={{ color: c.muted, fontSize: 11, fontWeight: "600" }}>{t("교정 부탁해요")}</Text>
-          </View>
-        ) : null}
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.surfaceSoft }]}>
+      {/* 왼쪽 세로줄에 아바타, 오른쪽에 내용 — 글이 길어져도 이름 자리가 흔들리지 않습니다. */}
+      <Pressable onPress={onAuthor} accessibilityRole="button" hitSlop={6}>
+        <Avatar name={post.author} photo={post.photo} size={42} />
       </Pressable>
 
-      <Text style={[styles.body, { color: c.ink }]}>{post.text}</Text>
+      <View style={{ flex: 1, gap: 6 }}>
+        <View style={styles.head}>
+          <Text style={[type.name, { color: c.ink }]} numberOfLines={1}>
+            {post.author}
+          </Text>
+          {post.age ? (
+            <Text style={[type.caption, { color: c.subtle }]}>{post.age}</Text>
+          ) : null}
+          <View style={{ flex: 1 }} />
+          <Text style={[type.caption, { color: c.subtle }]}>{tx(post.time)}</Text>
+        </View>
 
-      {post.tags.length ? (
-        <View style={styles.tags}>
-          {post.tags.map((tag) => (
-            <Text key={tag} style={[styles.tag, { color: c.muted, backgroundColor: c.sunken }]}>
-              {tag}
+        <View style={styles.langRow}>
+          {post.nativeCode ? (
+            <Text style={[styles.lang, { color: c.muted }]}>
+              {post.nativeCode.toUpperCase()}
+              <Text style={{ color: c.subtle }}> ⇄ </Text>
+              {post.learningCode ? post.learningCode.toUpperCase() : ""}
             </Text>
-          ))}
+          ) : null}
+          {post.requestCorrection ? <Badge label={t("교정 부탁해요")} tone="accent" /> : null}
         </View>
-      ) : null}
 
-      <View style={styles.actions}>
-        <Pressable
-          onPress={onLike}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel={t("좋아요")}
-          style={styles.action}
-        >
-          <Ionicons
-            name={post.liked ? "heart" : "heart-outline"}
-            size={18}
-            color={post.liked ? c.danger : c.muted}
-          />
-          <Text style={{ color: post.liked ? c.danger : c.muted, fontSize: 13 }}>{post.likes}</Text>
-        </Pressable>
-        <View style={styles.action}>
-          <Ionicons name="chatbubble-outline" size={17} color={c.muted} />
-          <Text style={{ color: c.muted, fontSize: 13 }}>{post.comments}</Text>
+        <Text style={[type.body, { color: c.ink }]}>{post.text}</Text>
+
+        {post.tags.length ? (
+          <View style={styles.tags}>
+            {post.tags.map((tag) => (
+              <Text key={tag} style={[styles.tag, { color: c.secondaryInk }]}>{tag}</Text>
+            ))}
+          </View>
+        ) : null}
+
+        {/* 숫자는 아이콘 옆이 아니라 아래에 모읍니다 — 누르는 곳과 읽는 곳을 나눕니다. */}
+        <View style={styles.actions}>
+          <Pressable
+            onPress={onLike}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={t("좋아요")}
+            accessibilityState={{ selected: post.liked }}
+            style={styles.action}
+          >
+            <Ionicons
+              name={post.liked ? "heart" : "heart-outline"}
+              size={21}
+              color={post.liked ? c.danger : c.muted}
+            />
+          </Pressable>
+          <View style={styles.action}>
+            <Ionicons name="chatbubble-outline" size={19} color={c.muted} />
+          </View>
+          <View style={styles.action}>
+            <Ionicons name="pencil-outline" size={19} color={c.muted} />
+          </View>
         </View>
-        <View style={styles.action}>
-          <Ionicons name="pencil-outline" size={17} color={c.muted} />
-          <Text style={{ color: c.muted, fontSize: 13 }}>{post.corrections}</Text>
-        </View>
+
+        {post.likes || post.comments || post.corrections ? (
+          <Text style={[type.caption, { color: c.subtle }]}>
+            {[
+              post.likes ? t("좋아요 {n}", { n: post.likes }) : "",
+              post.comments ? t("댓글 {n}", { n: post.comments }) : "",
+              post.corrections ? t("교정 {n}", { n: post.corrections }) : "",
+            ].filter(Boolean).join(" · ")}
+          </Text>
+        ) : null}
       </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  toolbar: { paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.sm },
-  list: { padding: space.lg, gap: space.md },
-  card: { padding: space.md, gap: space.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md },
-  author: { flexDirection: "row", alignItems: "center", gap: space.sm },
-  authorName: { fontSize: 15, fontWeight: "700" },
-  authorMeta: { fontSize: 12, marginTop: 1 },
-  badge: { paddingHorizontal: space.sm, paddingVertical: 4, borderRadius: radius.pill },
-  body: { fontSize: 15, lineHeight: 21 },
-  tags: { flexDirection: "row", flexWrap: "wrap", gap: space.xs },
-  tag: { fontSize: 12, paddingHorizontal: space.sm, paddingVertical: 3, borderRadius: radius.pill },
-  actions: { flexDirection: "row", gap: space.lg, marginTop: space.xs },
-  action: { flexDirection: "row", alignItems: "center", gap: 5, minHeight: 28 },
+  toolbar: { paddingHorizontal: space.lg, paddingTop: space.xs, paddingBottom: space.md },
+  row: { flexDirection: "row", gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
+  head: { flexDirection: "row", alignItems: "center", gap: space.xs },
+  langRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  lang: { fontSize: 12, fontWeight: "800", letterSpacing: 0.3 },
+  tags: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  tag: { fontSize: 13, fontWeight: "700" },
+  actions: { flexDirection: "row", gap: space.lg, marginTop: 2 },
+  action: { minWidth: 28, minHeight: 28, alignItems: "flex-start", justifyContent: "center" },
 });
