@@ -5,7 +5,7 @@ import { SITE_METADATA } from "../app/lib/i18n/metadata.ts";
 
 // 요청에 Accept-Language 가 없으면 서버는 ko 로 그립니다.
 // 페이지가 제목을 따로 정하지 않으므로 layout 의 default 가 그대로 쓰입니다
-// (template "%s | LingoLoop" 은 하위 페이지가 제목을 줄 때만 붙습니다).
+// (template "%s | TimoTalk" 은 하위 페이지가 제목을 줄 때만 붙습니다).
 const expectedTitle = SITE_METADATA.ko.title;
 const expectedDescription = SITE_METADATA.ko.description;
 
@@ -54,9 +54,9 @@ test("운영 메타데이터와 인증 확인 화면을 서버 렌더링한다",
   );
   assert.match(
     html,
-    /<meta(?=[^>]*\bname="application-name")(?=[^>]*\bcontent="LingoLoop")[^>]*>/i,
+    /<meta(?=[^>]*\bname="application-name")(?=[^>]*\bcontent="TimoTalk")[^>]*>/i,
   );
-  assert.match(html, /LingoLoop/);
+  assert.match(html, /TimoTalk/);
   assert.match(html, /로그인 상태를 확인하고 있어요\./);
   assert.doesNotMatch(html, /Mock API 연결됨|오프라인 데모|웹 mock|mock API 프로토타입/i);
 });

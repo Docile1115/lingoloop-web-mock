@@ -22,18 +22,18 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase,
     title: {
       default: copy.title,
-      template: "%s | LingoLoop",
+      template: "%s | TimoTalk",
     },
     description: copy.description,
-    applicationName: "LingoLoop",
+    applicationName: "TimoTalk",
     keywords: copy.keywords,
-    authors: [{ name: "LingoLoop" }],
+    authors: [{ name: "TimoTalk" }],
     openGraph: {
       type: "website",
-      siteName: "LingoLoop",
+      siteName: "TimoTalk",
       title: copy.title,
       description: copy.ogDescription,
-      images: [{ url: "/og.png", width: 1732, height: 908, alt: copy.title }],
+      images: [{ url: "/og.png", width: 1731, height: 909, alt: copy.title }],
     },
     twitter: {
       card: "summary_large_image",

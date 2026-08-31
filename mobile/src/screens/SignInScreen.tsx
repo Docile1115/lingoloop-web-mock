@@ -48,7 +48,7 @@ export function SignInScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
-        <Text style={[s.brand, { color: c.ink }]}>LingoLoop</Text>
+        <Text style={[s.brand, { color: c.ink }]}>TimoTalk</Text>
         <Text style={[s.lede, { color: c.muted }]}>{t("진짜 사람과 이야기하며 언어를 배워요.")}</Text>
 
         <Text style={[s.label, { color: c.ink }]}>{t("이메일")}</Text>

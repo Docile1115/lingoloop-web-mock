@@ -1,4 +1,4 @@
-# LingoLoop 앱 (React Native / Expo)
+# TimoTalk 앱 (React Native / Expo)
 
 웹은 데스크톱 전용이고, 폰은 이 앱이 맡습니다.
 

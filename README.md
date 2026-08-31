@@ -1,9 +1,9 @@
-# LingoLoop
+# TimoTalk
 
-LingoLoop는 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화를 이어가는 반응형 웹 서비스입니다. PC와 모바일이 같은 API를 사용하며, 현재 운영 경로는 **Google Cloud Identity Platform + Firestore에 실제 계정과 데이터를 저장하는 구조**입니다.
+TimoTalk은 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화를 이어가는 반응형 웹 서비스입니다. PC와 모바일이 같은 API를 사용하며, 현재 운영 경로는 **Google Cloud Identity Platform + Firestore에 실제 계정과 데이터를 저장하는 구조**입니다.
 
 > [!IMPORTANT]
-> LingoLoop는 HelloTalk과 제휴·후원·승인 관계가 없는 독립 서비스입니다. HelloTalk의 상표, 로고, 문구, 소스 코드나 사용자 데이터를 사용하지 않습니다.
+> TimoTalk은 HelloTalk과 제휴·후원·승인 관계가 없는 독립 서비스입니다. HelloTalk의 상표, 로고, 문구, 소스 코드나 사용자 데이터를 사용하지 않습니다.
 
 > [!NOTE]
 > 이 저장소는 더 이상 메모리 fixture를 운영 데이터처럼 보여주는 mock 런타임을 사용하지 않습니다. 다만 아래의 “아직 연결하지 않은 기능”까지 완성된 것은 아닙니다.
@@ -135,7 +135,7 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 - 상태를 바꾸는 요청은 허용된 `APP_ORIGIN`을 검사하며 JSON 본문은 64KB로 제한합니다.
 - API 키와 공유 비밀은 이미지나 Git에 넣지 않고 Secret Manager에서 런타임에 주입합니다.
 - Gemini 인증 키는 API 런타임 서비스 계정에 결속되고 Vertex AI API로 제한하며, Secret Manager에서 API 서비스에만 주입합니다.
-- LingoLoop는 AI 요청·응답을 별도 컬렉션에 저장하지 않고 일일 사용 횟수만 기록합니다. 사용자가 보낸 메시지는 기존 대화 보존 정책에 따라 Firestore에 저장되며, Gemini 측 데이터 처리는 선택한 유료 API 약관을 따릅니다.
+- TimoTalk은 AI 요청·응답을 별도 컬렉션에 저장하지 않고 일일 사용 횟수만 기록합니다. 사용자가 보낸 메시지는 기존 대화 보존 정책에 따라 Firestore에 저장되며, Gemini 측 데이터 처리는 선택한 유료 API 약관을 따릅니다.
 - Cloud Run API 서비스 계정에는 필요한 최소 Firestore·Identity 권한만 부여해야 합니다.
 
 공유 비밀은 브라우저 사용자를 인증하는 수단이 아닙니다. 사용자 권한 검사는 반드시 검증된 세션 쿠키와 리소스 소유권으로 수행합니다.
@@ -383,4 +383,4 @@ mock-api/                 # 레거시 목업 참고 코드(운영 미사용)
 
 ## 브랜드·라이선스 안내
 
-상용 공개 전 저장소 라이선스와 LingoLoop 상표 사용 가능성을 별도로 확인해야 합니다. HelloTalk은 해당 권리자의 상표입니다.
+상용 공개 전 저장소 라이선스와 TimoTalk 상표 사용 가능성을 별도로 확인해야 합니다. HelloTalk은 해당 권리자의 상표입니다.

@@ -276,7 +276,7 @@ function profileForOthers(profile) {
 }
 
 function defaultProfile(uid, email, name) {
-  const normalizedName = (name || email.split("@")[0] || "LingoLoop 사용자").trim().slice(0, 40);
+  const normalizedName = (name || email.split("@")[0] || "TimoTalk 사용자").trim().slice(0, 40);
   const handleBase = normalizedName
     .normalize("NFKD")
     .replace(/[^\p{L}\p{N}]+/gu, "")

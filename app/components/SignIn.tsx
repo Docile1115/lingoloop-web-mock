@@ -105,7 +105,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
           </button>
         </div>
 
-        <h2>{mode === "login" ? t("다시 만나서 반가워요") : t("LingoLoop 시작하기")}</h2>
+        <h2>{mode === "login" ? t("다시 만나서 반가워요") : t("TimoTalk 시작하기")}</h2>
         <p className="signin-lead">
           {mode === "login" ? t("하던 대화와 기록을 그대로 가져올게요.") : t("프로필은 가입한 뒤에 천천히 채워도 돼요.")}
         </p>

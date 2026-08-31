@@ -1152,7 +1152,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `lingoloop-${t("대화 기록")}.json`;
+      link.download = `timotalk-${t("대화 기록")}.json`;
       link.click();
       URL.revokeObjectURL(url);
       showToast(t("대화 기록을 내려받았어요"));
@@ -1550,9 +1550,9 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     <div className={`app-root section-${section}`}>
       <a className="skip-link" href="#main-content">{t("본문으로 건너뛰기")}</a>
       <aside className="desktop-sidebar" aria-label={t("주요 메뉴")}>
-        <button className="brand" type="button" onClick={() => goToSection("discover")} aria-label={t("LingoLoop 홈")}>
+        <button className="brand" type="button" onClick={() => goToSection("discover")} aria-label={t("TimoTalk 홈")}>
           <span className="brand-mark"><Languages size={22} strokeWidth={2.4} /></span>
-          <span className="brand-wordmark">Lingo<span>Loop</span></span>
+          <span className="brand-wordmark">Timo<span>Talk</span></span>
         </button>
 
         <nav className="side-nav">

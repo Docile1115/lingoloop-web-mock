@@ -382,7 +382,7 @@ function LoadingScreen() {
   return (
     <main className={styles.loading}>
       <span className={styles.brandMark}><Languages size={24} /></span>
-      <strong>LingoLoop</strong>
+      <strong>TimoTalk</strong>
       <p>{t("로그인 상태를 확인하고 있어요.")}</p>
     </main>
   );
@@ -444,7 +444,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserProfile) 
           <button type="button" className={mode === "register" ? styles.active : ""} onClick={() => setMode("register")}>{t("회원가입")}</button>
         </div>
         <div>
-          <h2>{mode === "login" ? t("다시 만나서 반가워요") : t("LingoLoop 시작하기")}</h2>
+          <h2>{mode === "login" ? t("다시 만나서 반가워요") : t("TimoTalk 시작하기")}</h2>
           <p>{mode === "login" ? t("하던 대화와 기록을 그대로 가져올게요.") : t("프로필은 가입한 뒤에 천천히 채워도 돼요.")}</p>
         </div>
         <form onSubmit={submit} className={styles.authForm}>

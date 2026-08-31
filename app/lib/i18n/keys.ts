@@ -918,11 +918,11 @@ export const MESSAGE_KEYS = [
   "Google 로그인 · 설정 필요",
   "Google로 계속하기",
   "Jisoo 🇰🇷 · 2분 전",
-  "LingoLoop 시작하기",
-  "LingoLoop 홈",
   "Play 스토어 · 준비 중",
   "Play 스토어에서 받기",
   "STEP {step} / 3",
+  "TimoTalk 시작하기",
+  "TimoTalk 홈",
 ] as const;
 
 export type MessageKey = (typeof MESSAGE_KEYS)[number];

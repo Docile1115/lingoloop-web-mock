@@ -10,24 +10,24 @@ import type { Locale } from "./keys-locale";
  */
 export const SITE_METADATA: Record<Locale, { title: string; description: string; ogDescription: string; keywords: string[] }> = {
   ko: {
-    title: "LingoLoop — 진짜 사람과 배우는 언어 교환",
+    title: "TimoTalk — 진짜 사람과 배우는 언어 교환",
     description:
       "진짜 사람과 이야기하며 언어를 배워요. 주고받은 대화와 써둔 글은 계정에 남아 폰을 바꿔도 그대로 이어져요.",
     ogDescription: "나와 맞는 사람을 찾고, 커뮤니티에서 연습하고, 대화는 계정에 그대로 남아요.",
-    keywords: ["언어 교환", "언어 파트너", "외국어 회화", "language exchange", "LingoLoop"],
+    keywords: ["언어 교환", "언어 파트너", "외국어 회화", "language exchange", "TimoTalk"],
   },
   en: {
-    title: "LingoLoop — Learn a language with real people",
+    title: "TimoTalk — Learn a language with real people",
     description:
       "Trade languages with real people. Your profile, posts and conversations stay in your account, so nothing is lost when you switch devices.",
     ogDescription: "Find a partner who fits you, practice with the community, and keep every conversation in your account.",
-    keywords: ["language exchange", "language partner", "practice speaking", "LingoLoop"],
+    keywords: ["language exchange", "language partner", "practice speaking", "TimoTalk"],
   },
   ja: {
-    title: "LingoLoop — 実際の人と学ぶ言語交換",
+    title: "TimoTalk — 実際の人と学ぶ言語交換",
     description:
       "実際の人と言語を教え合いましょう。プロフィール・投稿・会話はアカウントに残るので、機種を変えても引き継がれます。",
     ogDescription: "自分に合うパートナーを見つけ、コミュニティで練習し、会話はアカウントにそのまま残ります。",
-    keywords: ["言語交換", "言語パートナー", "会話練習", "language exchange", "LingoLoop"],
+    keywords: ["言語交換", "言語パートナー", "会話練習", "language exchange", "TimoTalk"],
   },
 };
