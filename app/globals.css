@@ -7014,6 +7014,59 @@ label > svg { flex: none; }
 .signin-card h2 { margin: 0 0 6px; font-size: 21px; }
 .signin-lead { margin: 0 0 var(--sp-5); color: var(--muted); font-size: 14px; }
 
+.signin-social {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+
+.signin-provider {
+  display: grid;
+  min-height: 46px;
+  grid-template-columns: 48px 1fr 48px;
+  align-items: center;
+  padding: 0;
+  border: var(--bw-thin) solid var(--line-structure);
+  border-radius: var(--r-btn);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.signin-provider::after { content: ""; }
+.signin-provider:disabled { cursor: not-allowed; opacity: .46; }
+.signin-provider-google { background: var(--surface); color: var(--ink); }
+.signin-provider-google:hover:not(:disabled) { background: var(--surface-soft); }
+.signin-provider-apple { border-color: #111; background: #111; color: #fff; }
+.signin-provider-apple:hover:not(:disabled) { background: #292929; }
+
+.signin-provider-mark {
+  display: inline-grid;
+  place-items: center;
+  justify-self: stretch;
+  font-family: Arial, sans-serif;
+  font-weight: 800;
+}
+
+.signin-provider-mark-google { color: #4285f4; font-size: 19px; }
+.signin-provider-mark-apple { font-size: 10px; letter-spacing: -.03em; }
+
+.signin-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.signin-divider::before,
+.signin-divider::after {
+  height: var(--bw-hair);
+  flex: 1;
+  background: var(--line);
+  content: "";
+}
+
 .signin-form { display: grid; gap: var(--sp-4); }
 .signin-form label { display: grid; gap: 7px; color: var(--muted); font-size: 13px; font-weight: 600; }
 

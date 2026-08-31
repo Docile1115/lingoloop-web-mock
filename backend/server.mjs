@@ -12,6 +12,10 @@ const IDENTITY_API_KEY = process.env.IDENTITY_API_KEY;
 // 이 값을 바꿔 씁니다 — GEMINI_API_BASE_URL 과 같은 방식입니다.
 const IDENTITY_API_BASE_URL =
   process.env.IDENTITY_API_BASE_URL || "https://identitytoolkit.googleapis.com";
+const IDENTITY_WEB_API_KEY = process.env.IDENTITY_WEB_API_KEY || IDENTITY_API_KEY;
+const FIREBASE_AUTH_DOMAIN = process.env.FIREBASE_AUTH_DOMAIN || `${PROJECT_ID}.firebaseapp.com`;
+const GOOGLE_AUTH_ENABLED = process.env.GOOGLE_AUTH_ENABLED === "true";
+const APPLE_AUTH_ENABLED = process.env.APPLE_AUTH_ENABLED === "true";
 const PROXY_SHARED_SECRET = process.env.PROXY_SHARED_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
@@ -361,12 +365,22 @@ async function identityPost(method, payload) {
   return body;
 }
 
-async function issueSession(res, idToken) {
-  const decoded = await auth.verifyIdToken(idToken);
+async function verifyRecentIdToken(idToken) {
+  let decoded;
+  try {
+    decoded = await auth.verifyIdToken(idToken);
+  } catch {
+    throw new ApiError(401, "INVALID_ID_TOKEN", "로그인 정보가 유효하지 않습니다. 다시 시도해 주세요.");
+  }
   const currentSeconds = Math.floor(Date.now() / 1000);
   if (!decoded.auth_time || currentSeconds - decoded.auth_time > 5 * 60) {
     throw new ApiError(401, "RECENT_LOGIN_REQUIRED", "다시 로그인해 주세요.");
   }
+  return decoded;
+}
+
+async function issueSession(res, idToken, decoded = undefined) {
+  const verifiedToken = decoded || await verifyRecentIdToken(idToken);
   const cookie = await auth.createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_MS });
   res.cookie(COOKIE_NAME, cookie, {
     maxAge: SESSION_MAX_AGE_MS,
@@ -375,7 +389,7 @@ async function issueSession(res, idToken) {
     sameSite: "lax",
     path: "/",
   });
-  return decoded;
+  return verifiedToken;
 }
 
 async function sessionUser(req) {
@@ -841,6 +855,21 @@ app.get("/api/health", async (req, res) => {
   });
 });
 
+app.get("/api/auth/config", async (req, res) => {
+  res.set("cache-control", "no-store");
+  return success(res, req, {
+    firebase: {
+      apiKey: IDENTITY_WEB_API_KEY,
+      authDomain: FIREBASE_AUTH_DOMAIN,
+      projectId: PROJECT_ID,
+    },
+    providers: {
+      google: GOOGLE_AUTH_ENABLED,
+      apple: APPLE_AUTH_ENABLED,
+    },
+  });
+});
+
 app.post("/api/auth/register", authRateLimit, async (req, res) => {
   const email = safeString(req.body?.email, "email", { min: 5, max: 254 }).toLocaleLowerCase();
   const password = safeSecret(req.body?.password, "password", { min: 10, max: 128 });
@@ -912,6 +941,27 @@ app.post("/api/auth/login", authRateLimit, async (req, res) => {
     user: {
       ...publicProfile(profile),
       email: userRecord.email || email,
+      emailVerified: userRecord.emailVerified,
+    },
+  });
+});
+
+app.post("/api/auth/session", authRateLimit, async (req, res) => {
+  const idToken = safeSecret(req.body?.idToken, "idToken", { min: 20, max: 8192 });
+  const decoded = await verifyRecentIdToken(idToken);
+  const userRecord = await auth.getUser(decoded.uid);
+  if (userRecord.disabled) {
+    throw new ApiError(403, "ACCOUNT_DISABLED", "비활성화된 계정입니다.");
+  }
+  const profile = await ensureProfile(decoded.uid, userRecord.email, userRecord.displayName);
+  if (profile.accountStatus !== "active") {
+    throw new ApiError(403, "ACCOUNT_RESTRICTED", "사용이 제한된 계정입니다.");
+  }
+  await issueSession(res, idToken, decoded);
+  return success(res, req, {
+    user: {
+      ...publicProfile(profile),
+      email: userRecord.email || "",
       emailVerified: userRecord.emailVerified,
     },
   });

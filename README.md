@@ -14,7 +14,7 @@ LingoLoop는 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화�
 
 | 영역 | 현재 동작 |
 | --- | --- |
-| 로그인 | Identity Platform 이메일·비밀번호 계정, Firebase Admin 세션 쿠키 |
+| 로그인 | Identity Platform 이메일·비밀번호, Google/Apple 연결 코드와 Firebase Admin 세션 쿠키. 소셜 공급자는 운영 자격정보 설정 후 활성화 |
 | 프로필 | 이름, 소개, 모국어, 학습 언어 등 Firestore 저장·수정 |
 | 매칭 | 실제 가입자 프로필과 저장된 선호 조건으로 일일 추천 생성·저장 |
 | 커뮤니티 | 게시물 작성·조회·좋아요를 Firestore에 영속 저장 |
@@ -65,7 +65,7 @@ flowchart LR
     subgraph GCP["Google Cloud"]
         WebRun["Cloud Run · lingoloop-web\nReact/Vinext"]
         ApiRun["Cloud Run · lingoloop-api\nNode.js/Express"]
-        Identity["Identity Platform\n이메일 계정"]
+        Identity["Identity Platform\n이메일 · Google · Apple"]
         Firestore[("Firestore Native\n운영 데이터")]
         Gemini["Vertex AI Gemini\n2.5 Flash-Lite"]
         Secrets["Secret Manager"]
@@ -80,6 +80,7 @@ flowchart LR
     Build -->|"API 먼저"| ApiRun
     Build -->|"API 성공 후 웹"| WebRun
     Web -->|"HTTPS"| WebRun
+    Web -->|"로그인 팝업 · 단기 ID 토큰"| Identity
     Native -.->|"향후 HTTPS API"| ApiRun
     WebRun -->|"same-origin /api/*\n내부 공유 비밀"| ApiRun
     ApiRun --> Identity
@@ -91,7 +92,7 @@ flowchart LR
     ApiRun --> Logs
 ```
 
-브라우저는 Firestore나 Identity Platform을 직접 호출하지 않습니다. 모든 데이터 요청은 웹 서비스의 same-origin `/api/*` 프록시를 거쳐 API 서비스로 전달됩니다. API 서비스만 전용 서비스 계정으로 Firestore를 사용하며, 브라우저에는 Identity API 키·Gemini 키·프록시 공유 비밀을 노출하지 않습니다.
+브라우저의 일반 데이터 요청은 모두 웹 서비스의 same-origin `/api/*` 프록시를 거쳐 API 서비스로 전달됩니다. 소셜 로그인 때만 Firebase 웹 SDK가 Identity Platform에서 짧게 유효한 ID 토큰을 받고, 이를 API가 최대 14일의 `HttpOnly` 세션 쿠키로 교환합니다. Firebase 웹 API 키와 프로젝트 식별자는 공개 클라이언트 설정이며 인증 비밀이 아닙니다. OAuth Client Secret, Gemini 키와 프록시 공유 비밀은 브라우저에 노출하지 않습니다. API 서비스만 전용 서비스 계정으로 Firestore를 사용합니다.
 
 ## 데이터 모델
 
@@ -127,7 +128,8 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 
 ## 인증과 보안 경계
 
-- 회원가입·로그인은 서버가 Identity Platform REST API와 통신합니다.
+- 이메일 회원가입·로그인은 서버가 Identity Platform REST API와 통신합니다.
+- Google·Apple 로그인은 Firebase 웹 SDK의 팝업으로 받은 ID 토큰을 `POST /api/auth/session`에서 검증한 뒤 같은 보안 세션 쿠키로 교환합니다. Firebase 클라이언트 로그인 상태는 메모리에만 두고 교환 직후 제거합니다.
 - 로그인 성공 후 최대 14일의 `HttpOnly`, `Secure`, `SameSite=Lax` 세션 쿠키를 발급합니다.
 - `/api/*`는 웹 프록시의 `x-lingoloop-proxy` 공유 비밀을 요구합니다. `/healthz/`만 인프라 상태 확인을 위해 공개합니다.
 - 상태를 바꾸는 요청은 허용된 `APP_ORIGIN`을 검사하며 JSON 본문은 64KB로 제한합니다.
@@ -146,8 +148,10 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 | --- | --- | --- |
 | `GET` | `/healthz/` | API 프로세스와 Firestore 연결 상태 확인 |
 | `GET` | `/api/health` | 운영 API·AI 구성 상태 확인 |
+| `GET` | `/api/auth/config` | 공개 Firebase 설정과 활성 소셜 공급자 조회 |
 | `POST` | `/api/auth/register` | 이메일 계정 생성과 기본 프로필 저장 |
 | `POST` | `/api/auth/login` | 로그인 후 서버 세션 쿠키 발급 |
+| `POST` | `/api/auth/session` | Google·Apple ID 토큰 검증과 서버 세션 쿠키 발급 |
 | `GET` | `/api/auth/me` | 현재 사용자 조회 |
 | `POST` | `/api/auth/logout` | 세션 종료 |
 | `GET` | `/api/bootstrap` | 로그인 후 초기 데이터와 기능 상태 조회 |
@@ -207,6 +211,10 @@ gcloud auth application-default login
 $env:GOOGLE_CLOUD_PROJECT = "your-dev-project"
 $env:APP_ORIGIN = "http://localhost:5174"
 $env:IDENTITY_API_KEY = "your-identity-platform-api-key"
+$env:IDENTITY_WEB_API_KEY = "your-browser-restricted-identity-api-key"
+$env:FIREBASE_AUTH_DOMAIN = "your-dev-project.firebaseapp.com"
+$env:GOOGLE_AUTH_ENABLED = "true"
+$env:APPLE_AUTH_ENABLED = "false"
 $env:PROXY_SHARED_SECRET = "a-long-random-secret"
 $env:COOKIE_SECURE = "false"
 $env:GEMINI_MODEL = "gemini-2.5-flash-lite"
@@ -236,6 +244,10 @@ npm run dev
 | `GOOGLE_CLOUD_PROJECT` | 예 | Identity Platform·Firestore GCP 프로젝트 ID |
 | `APP_ORIGIN` | 예 | 쉼표로 구분한 허용 웹 origin |
 | `IDENTITY_API_KEY` | 예 | Identity Platform REST API 키. Secret Manager로 주입 |
+| `IDENTITY_WEB_API_KEY` | 아니요 | 브라우저용 Identity API 키. 없으면 `IDENTITY_API_KEY` 사용 |
+| `FIREBASE_AUTH_DOMAIN` | 아니요 | 기본값 `<GOOGLE_CLOUD_PROJECT>.firebaseapp.com` |
+| `GOOGLE_AUTH_ENABLED` | 아니요 | Identity Platform Google 공급자까지 저장한 경우 `true` |
+| `APPLE_AUTH_ENABLED` | 아니요 | Identity Platform Apple 공급자까지 저장한 경우 `true` |
 | `PROXY_SHARED_SECRET` | 예 | 웹 프록시와 API 사이 공유 비밀 |
 | `COOKIE_SECURE` | 운영 예 | 운영은 기본값 `true`, 로컬 HTTP만 `false` |
 | `GEMINI_API_KEY` | 아니요 | 서비스 계정 결속 Gemini 인증 키. Secret Manager로 API 서비스에만 주입 |
@@ -268,6 +280,14 @@ npm run dev
 4. Vertex AI API와 API 런타임 서비스 계정에 결속된 Gemini 인증 키
 5. Secret Manager의 Identity API 키, Gemini 키와 프록시 공유 비밀
 6. 웹·API 전용 서비스 계정과 최소 IAM 권한
+
+### Google·Apple 로그인 공급자
+
+Identity Platform의 승인 도메인에는 스킴 없이 운영 웹 호스트를 추가합니다. 현재 운영 호스트는 `lingoloop-web-254296987362.asia-northeast1.run.app`입니다.
+
+Google 로그인은 Google Auth Platform에서 외부 사용자용 동의 화면과 웹 OAuth Client를 만든 다음, Identity Platform의 Google 공급자에 Client ID와 Client Secret을 저장합니다. 승인된 redirect URI는 정확히 `https://YOUR_PROJECT.firebaseapp.com/__/auth/handler`이며 완료 후 `GOOGLE_AUTH_ENABLED=true`로 API를 배포합니다.
+
+Apple 로그인에는 Apple Developer Program의 primary App ID, Services ID, Team ID, Key ID와 한 번만 다운로드 가능한 `.p8` private key가 필요합니다. Services ID에는 `YOUR_PROJECT.firebaseapp.com`을 도메인으로, `https://YOUR_PROJECT.firebaseapp.com/__/auth/handler`를 Return URL로 등록합니다. `.p8`은 Git이나 프런트 코드에 넣지 않고 Identity Platform의 Apple 공급자 설정에 직접 입력하며 완료 후 `APPLE_AUTH_ENABLED=true`로 API를 배포합니다.
 
 API를 먼저 배포한 뒤 반환된 URL을 웹의 `LINGOLOOP_API_URL`에 설정합니다. 비밀은 `--set-env-vars`가 아니라 Cloud Run의 Secret Manager 참조로 연결합니다.
 

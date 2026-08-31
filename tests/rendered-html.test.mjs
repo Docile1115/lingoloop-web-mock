@@ -64,10 +64,12 @@ test("운영 메타데이터와 인증 확인 화면을 서버 렌더링한다",
 test("운영 화면은 원래 디자인을 쓰고 데이터는 서버에서 온다", async () => {
   // 화면은 오래 다듬어 온 LingoLoopApp 을 그대로 쓰고, fixture 대신 서버를 봅니다.
   // 디자인과 데이터 출처는 따로 정할 수 있는 문제라 둘을 함께 고정합니다.
-  const [page, app, adapter] = await Promise.all([
+  const [page, app, adapter, signIn, socialAuth] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/LingoLoopApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/live-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/SignIn.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/social-auth.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /import LingoLoopApp from/);
@@ -77,6 +79,12 @@ test("운영 화면은 원래 디자인을 쓰고 데이터는 서버에서 온�
   // 로그인을 거쳐야 안쪽 화면이 나옵니다.
   assert.match(app, /"\/api\/auth\/me"/);
   assert.match(app, /<AuthGate \/>/);
+  assert.match(signIn, /"\/api\/auth\/config"/);
+  assert.match(signIn, /"\/api\/auth\/session"/);
+  assert.match(signIn, /getSocialIdToken/);
+  assert.match(socialAuth, /signInWithPopup/);
+  assert.match(socialAuth, /inMemoryPersistence/);
+  assert.match(socialAuth, /signOut\(auth\)/);
 
   // 목록은 fixture 가 아니라 서버에서 받습니다.
   for (const route of ["/api/posts", "/api/conversations", "/api/saved-phrases", "/api/corrections/received"]) {
@@ -131,6 +139,8 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
   assert.match(source, /applicationDefault\(\)/);
   assert.match(source, /auth\.createSessionCookie/);
   assert.match(source, /auth\.verifySessionCookie/);
+  assert.match(source, /app\.post\("\/api\/auth\/session"/);
+  assert.match(source, /verifyRecentIdToken/);
   assert.match(source, /httpOnly: true/);
   assert.match(source, /secure: COOKIE_SECURE/);
   assert.match(source, /sameSite: "lax"/);

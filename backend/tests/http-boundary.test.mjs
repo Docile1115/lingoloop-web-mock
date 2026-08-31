@@ -81,6 +81,29 @@ test("HTTP boundary rejects bypasses and serves only non-mock metadata", async (
   assert.equal(languageBody.meta.persistent, true);
   assert.ok(languageBody.data.some((language) => language.code === "ko"));
 
+  const authConfig = await fetch(baseUrl + "/api/auth/config", {
+    headers: { "x-lingoloop-proxy": "test-proxy-secret" },
+  });
+  const authConfigBody = await authConfig.json();
+  assert.equal(authConfig.status, 200);
+  assert.equal(authConfigBody.data.firebase.projectId, "lingoloop-test");
+  assert.equal(authConfigBody.data.firebase.authDomain, "lingoloop-test.firebaseapp.com");
+  assert.equal(authConfigBody.data.providers.google, false);
+  assert.equal(authConfigBody.data.providers.apple, false);
+  assert.equal(authConfigBody.meta.mock, false);
+
+  const invalidSocialToken = await fetch(baseUrl + "/api/auth/session", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: "http://localhost:5174",
+      "x-lingoloop-proxy": "test-proxy-secret",
+    },
+    body: JSON.stringify({ idToken: "too-short" }),
+  });
+  assert.equal(invalidSocialToken.status, 422);
+  assert.equal((await invalidSocialToken.json()).error.code, "VALIDATION_ERROR");
+
   const invalidOrigin = await fetch(baseUrl + "/api/auth/register", {
     method: "POST",
     headers: {

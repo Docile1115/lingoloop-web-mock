@@ -1,9 +1,10 @@
 "use client";
 
 import { Languages, LockKeyhole, Mail, User } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { t } from "../lib/i18n";
 import { api, type ApiProfile } from "../lib/live-data";
+import type { SocialAuthConfig, SocialAuthFailure, SocialProvider } from "../lib/social-auth";
 
 /**
  * 로그인·가입 화면.
@@ -18,6 +19,21 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [socialConfig, setSocialConfig] = useState<SocialAuthConfig | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api<SocialAuthConfig>("/api/auth/config")
+      .then((config) => {
+        if (active) setSocialConfig(config);
+      })
+      .catch(() => {
+        // 이메일 로그인은 소셜 공급자 설정 조회가 실패해도 계속 사용할 수 있습니다.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -34,6 +50,35 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
       onSignedIn(result.user);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitSocial = async (provider: SocialProvider) => {
+    if (!socialConfig) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { getSocialIdToken } = await import("../lib/social-auth");
+      const idToken = await getSocialIdToken(socialConfig, provider);
+      const result = await api<{ user: ApiProfile }>("/api/auth/session", {
+        method: "POST",
+        body: JSON.stringify({ idToken }),
+      });
+      onSignedIn(result.user);
+    } catch (caught) {
+      const messages: Record<SocialAuthFailure, string> = {
+        "provider-disabled": t("이 로그인 방식은 아직 준비 중이에요."),
+        "popup-closed": t("로그인 창이 닫혔어요. 다시 시도해 주세요."),
+        "popup-blocked": t("브라우저에서 로그인 팝업을 허용한 뒤 다시 시도해 주세요."),
+        "account-exists": t("같은 이메일로 가입된 계정이 있어요. 기존 로그인 방식으로 먼저 로그인해 주세요."),
+        "unauthorized-domain": t("현재 서비스 주소에서는 로그인할 수 없어요. 관리자에게 알려 주세요."),
+      };
+      const reason = typeof caught === "object" && caught && "reason" in caught
+        ? String(caught.reason) as SocialAuthFailure
+        : undefined;
+      setError(reason && reason in messages ? messages[reason] : t("소셜 로그인을 처리하지 못했어요. 잠시 후 다시 시도해 주세요."));
     } finally {
       setBusy(false);
     }
@@ -64,6 +109,28 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
         <p className="signin-lead">
           {mode === "login" ? t("하던 대화와 기록을 그대로 가져올게요.") : t("프로필은 가입한 뒤에 천천히 채워도 돼요.")}
         </p>
+
+        <div className="signin-social" aria-label={t("간편 로그인")}>
+          <button
+            type="button"
+            className="signin-provider signin-provider-google"
+            onClick={() => void submitSocial("google")}
+            disabled={busy || !socialConfig?.providers.google}
+          >
+            <span className="signin-provider-mark signin-provider-mark-google" aria-hidden="true">G</span>
+            <span>{socialConfig?.providers.google ? t("Google로 계속하기") : t("Google 로그인 · 설정 필요")}</span>
+          </button>
+          <button
+            type="button"
+            className="signin-provider signin-provider-apple"
+            onClick={() => void submitSocial("apple")}
+            disabled={busy || !socialConfig?.providers.apple}
+          >
+            <span className="signin-provider-mark signin-provider-mark-apple" aria-hidden="true">Apple</span>
+            <span>{socialConfig?.providers.apple ? t("Apple로 계속하기") : t("Apple 로그인 · 설정 필요")}</span>
+          </button>
+          <div className="signin-divider"><span>{t("또는 이메일로 계속하기")}</span></div>
+        </div>
 
         <form onSubmit={submit} className="signin-form">
           {mode === "register" ? (
