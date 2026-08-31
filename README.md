@@ -14,7 +14,7 @@ TimoTalk은 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화를
 
 | 영역 | 현재 동작 |
 | --- | --- |
-| 로그인 | Identity Platform 이메일·비밀번호, Google/Apple 연결 코드와 Firebase Admin 세션 쿠키. 소셜 공급자는 운영 자격정보 설정 후 활성화 |
+| 로그인 | PC·Android 웹은 Google, iOS 웹은 Apple만 노출하고 Firebase Admin 세션 쿠키로 서버 세션을 유지. 각 소셜 공급자는 운영 자격정보 설정 후 활성화 |
 | 프로필 | 이름, 소개, 모국어, 학습 언어 등 Firestore 저장·수정 |
 | 매칭 | 실제 가입자 프로필과 저장된 선호 조건으로 일일 추천 생성·저장 |
 | 커뮤니티 | 게시물 작성·조회·좋아요를 Firestore에 영속 저장 |
@@ -37,7 +37,7 @@ API 성공 응답에는 다음 메타데이터가 포함됩니다.
 ### 아직 연결하지 않은 기능
 
 - 음성 대화(보이스룸, WebRTC/SFU). Phase 1 범위에서 제외했습니다.
-- 전화번호·신분증 인증. 현재 실제 인증 상태는 이메일 인증까지만 확인
+- 전화번호·신분증 인증. 현재는 소셜 공급자가 확인한 계정 정보만 사용
 - 모바일 푸시 알림과 네이티브 앱
 - 영어·일본어 UI. 운영 데이터 전환 화면은 현재 한국어 MVP이며 기존 다국어 사전과 통합 예정
 - 결제, VIP 권한, 광고 보상. 초기 제품 정책에 따라 의도적으로 제외
@@ -65,7 +65,7 @@ flowchart LR
     subgraph GCP["Google Cloud"]
         WebRun["Cloud Run · lingoloop-web\nReact/Vinext"]
         ApiRun["Cloud Run · lingoloop-api\nNode.js/Express"]
-        Identity["Identity Platform\n이메일 · Google · Apple"]
+        Identity["Identity Platform\nGoogle · Apple"]
         Firestore[("Firestore Native\n운영 데이터")]
         Gemini["Vertex AI Gemini\n2.5 Flash-Lite"]
         Secrets["Secret Manager"]
@@ -128,8 +128,8 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 
 ## 인증과 보안 경계
 
-- 이메일 회원가입·로그인은 서버가 Identity Platform REST API와 통신합니다.
-- Google·Apple 로그인은 Firebase 웹 SDK의 팝업으로 받은 ID 토큰을 `POST /api/auth/session`에서 검증한 뒤 같은 보안 세션 쿠키로 교환합니다. Firebase 클라이언트 로그인 상태는 메모리에만 두고 교환 직후 제거합니다.
+- PC·Android 웹에서는 Google만, iPhone·iPad 웹에서는 Apple만 표시합니다. 이메일·비밀번호 회원가입과 로그인 API는 제공하지 않습니다.
+- Google·Apple 로그인은 Firebase 웹 SDK의 팝업으로 받은 ID 토큰을 `POST /api/auth/session`에서 검증한 뒤 같은 보안 세션 쿠키로 교환합니다. API는 활성화된 두 소셜 공급자의 토큰만 허용하며, Firebase 클라이언트 로그인 상태는 메모리에만 두고 교환 직후 제거합니다.
 - 로그인 성공 후 최대 14일의 `HttpOnly`, `Secure`, `SameSite=Lax` 세션 쿠키를 발급합니다.
 - `/api/*`는 웹 프록시의 `x-lingoloop-proxy` 공유 비밀을 요구합니다. `/healthz/`만 인프라 상태 확인을 위해 공개합니다.
 - 상태를 바꾸는 요청은 허용된 `APP_ORIGIN`을 검사하며 JSON 본문은 64KB로 제한합니다.
@@ -149,8 +149,6 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 | `GET` | `/healthz/` | API 프로세스와 Firestore 연결 상태 확인 |
 | `GET` | `/api/health` | 운영 API·AI 구성 상태 확인 |
 | `GET` | `/api/auth/config` | 공개 Firebase 설정과 활성 소셜 공급자 조회 |
-| `POST` | `/api/auth/register` | 이메일 계정 생성과 기본 프로필 저장 |
-| `POST` | `/api/auth/login` | 로그인 후 서버 세션 쿠키 발급 |
 | `POST` | `/api/auth/session` | Google·Apple ID 토큰 검증과 서버 세션 쿠키 발급 |
 | `GET` | `/api/auth/me` | 현재 사용자 조회 |
 | `POST` | `/api/auth/logout` | 세션 종료 |
@@ -275,7 +273,7 @@ npm run dev
 최초 환경에서는 다음 리소스가 필요합니다.
 
 1. Firestore Native `(default)` 데이터베이스
-2. Identity Platform 이메일·비밀번호 로그인
+2. Identity Platform Google 로그인과 향후 Apple 로그인
 3. 제한된 Identity Platform API 키
 4. Vertex AI API와 API 런타임 서비스 계정에 결속된 Gemini 인증 키
 5. Secret Manager의 Identity API 키, Gemini 키와 프록시 공유 비밀
@@ -320,7 +318,7 @@ curl.exe https://YOUR_API_URL/healthz/
 curl.exe https://YOUR_WEB_URL/api/health
 ```
 
-두 번째 요청은 웹 프록시를 통과해야 하며 `meta.mock`이 `false`여야 합니다. 회원가입, 프로필 수정, 게시물·메시지 작성 후 다시 로그인해 데이터가 복원되는지도 서로 다른 두 테스트 계정으로 검증합니다.
+두 번째 요청은 웹 프록시를 통과해야 하며 `meta.mock`이 `false`여야 합니다. 소셜 계정의 최초 로그인, 프로필 수정, 게시물·메시지 작성 후 다시 로그인해 데이터가 복원되는지도 서로 다른 두 테스트 계정으로 검증합니다.
 
 ### `main` 자동 배포
 
@@ -378,7 +376,7 @@ mock-api/                 # 레거시 목업 참고 코드(운영 미사용)
 - 신고 증거 접근 권한, 운영자 감사 로그, 사람의 최종 제재 원칙
 - 백업·PITR·복구 훈련과 데이터 삭제 보호
 - 예산 알림, Cloud Run 최대 인스턴스, Gemini 사용량·월 지출 한도
-- 이메일 인증 강제 시점, 전화번호 인증 도입 범위와 재가입 방지 정책
+- 전화번호 인증 도입 범위와 재가입 방지 정책
 - 부하·침투·접근성 테스트 및 앱스토어 정책 검토
 
 ## 브랜드·라이선스 안내

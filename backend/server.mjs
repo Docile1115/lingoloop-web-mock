@@ -8,10 +8,7 @@ import { decideDmRoute, spamSignals } from "./policy.mjs";
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
 const IDENTITY_API_KEY = process.env.IDENTITY_API_KEY;
-// 기본값은 실제 Identity Platform 입니다. 로컬에서 Auth 에뮬레이터를 붙일 때만
-// 이 값을 바꿔 씁니다 — GEMINI_API_BASE_URL 과 같은 방식입니다.
-const IDENTITY_API_BASE_URL =
-  process.env.IDENTITY_API_BASE_URL || "https://identitytoolkit.googleapis.com";
+// 브라우저의 소셜 로그인 팝업에 전달하는 공개 Firebase 웹 API 키입니다.
 const IDENTITY_WEB_API_KEY = process.env.IDENTITY_WEB_API_KEY || IDENTITY_API_KEY;
 const FIREBASE_AUTH_DOMAIN = process.env.FIREBASE_AUTH_DOMAIN || `${PROJECT_ID}.firebaseapp.com`;
 const GOOGLE_AUTH_ENABLED = process.env.GOOGLE_AUTH_ENABLED === "true";
@@ -328,41 +325,14 @@ async function ensureProfile(uid, email, name) {
   return profile;
 }
 
-function mapIdentityError(payload, fallbackCode) {
-  const remote = payload?.error?.message || fallbackCode;
-  const code = String(remote).split(" : ")[0];
-  if (code === "EMAIL_EXISTS") return new ApiError(409, "EMAIL_EXISTS", "이미 가입된 이메일입니다.");
-  if (code === "INVALID_LOGIN_CREDENTIALS" || code === "EMAIL_NOT_FOUND" || code === "INVALID_PASSWORD") {
-    return new ApiError(401, "INVALID_LOGIN_CREDENTIALS", "이메일 또는 비밀번호를 확인해 주세요.");
+function assertEnabledSignInProvider(decoded) {
+  const provider = decoded?.firebase?.sign_in_provider;
+  const enabled =
+    (provider === "google.com" && GOOGLE_AUTH_ENABLED) ||
+    (provider === "apple.com" && APPLE_AUTH_ENABLED);
+  if (!enabled) {
+    throw new ApiError(403, "AUTH_PROVIDER_NOT_ALLOWED", "지원하는 소셜 로그인으로 다시 로그인해 주세요.");
   }
-  if (code.startsWith("WEAK_PASSWORD")) {
-    return new ApiError(422, "WEAK_PASSWORD", "비밀번호는 10자 이상으로 설정해 주세요.");
-  }
-  if (code === "TOO_MANY_ATTEMPTS_TRY_LATER") {
-    return new ApiError(429, "TOO_MANY_ATTEMPTS", "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.");
-  }
-  if (code === "USER_DISABLED") return new ApiError(403, "ACCOUNT_DISABLED", "비활성화된 계정입니다.");
-  return new ApiError(502, "IDENTITY_PROVIDER_ERROR", "인증 서비스 요청을 처리하지 못했습니다.");
-}
-
-async function identityPost(method, payload) {
-  let response;
-  try {
-    response = await fetch(
-      IDENTITY_API_BASE_URL + "/v1/accounts:" + method + "?key=" + encodeURIComponent(IDENTITY_API_KEY),
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(15_000),
-      },
-    );
-  } catch {
-    throw new ApiError(503, "IDENTITY_PROVIDER_UNAVAILABLE", "인증 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
-  }
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw mapIdentityError(body, method);
-  return body;
 }
 
 async function verifyRecentIdToken(idToken) {
@@ -376,6 +346,7 @@ async function verifyRecentIdToken(idToken) {
   if (!decoded.auth_time || currentSeconds - decoded.auth_time > 5 * 60) {
     throw new ApiError(401, "RECENT_LOGIN_REQUIRED", "다시 로그인해 주세요.");
   }
+  assertEnabledSignInProvider(decoded);
   return decoded;
 }
 
@@ -401,6 +372,7 @@ async function sessionUser(req) {
   } catch {
     throw new ApiError(401, "INVALID_SESSION", "세션이 만료되었습니다. 다시 로그인해 주세요.");
   }
+  assertEnabledSignInProvider(decoded);
   const userRecord = await auth.getUser(decoded.uid);
   if (userRecord.disabled) throw new ApiError(403, "ACCOUNT_DISABLED", "비활성화된 계정입니다.");
   const profile = await ensureProfile(decoded.uid, userRecord.email, userRecord.displayName);
@@ -866,82 +838,6 @@ app.get("/api/auth/config", async (req, res) => {
     providers: {
       google: GOOGLE_AUTH_ENABLED,
       apple: APPLE_AUTH_ENABLED,
-    },
-  });
-});
-
-app.post("/api/auth/register", authRateLimit, async (req, res) => {
-  const email = safeString(req.body?.email, "email", { min: 5, max: 254 }).toLocaleLowerCase();
-  const password = safeSecret(req.body?.password, "password", { min: 10, max: 128 });
-  const name = safeString(req.body?.name, "name", { min: 2, max: 40 });
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new ApiError(422, "INVALID_EMAIL", "이메일 형식을 확인해 주세요.", { field: "email" });
-  }
-  const identity = await identityPost("signUp", { email, password, returnSecureToken: true });
-  let activeIdToken = identity.idToken;
-  try {
-    const updatedIdentity = await identityPost("update", {
-      idToken: activeIdToken,
-      displayName: name,
-      returnSecureToken: true,
-    });
-    activeIdToken = updatedIdentity.idToken || activeIdToken;
-    const profile = defaultProfile(identity.localId, email, name);
-    const batch = db.batch();
-    batch.create(db.collection("profiles").doc(identity.localId), profile);
-    batch.set(db.collection("matchingPreferences").doc(identity.localId), {
-      ...DEFAULT_MATCHING_PREFERENCES,
-      version: preferenceVersion(DEFAULT_MATCHING_PREFERENCES),
-      updatedAt: nowIso(),
-    });
-    batch.set(db.collection("dmPolicies").doc(identity.localId), { ...DEFAULT_DM_PRIVACY, updatedAt: nowIso() });
-    await batch.commit();
-    await issueSession(res, activeIdToken);
-    let emailVerificationSent = false;
-    try {
-      await identityPost("sendOobCode", { requestType: "VERIFY_EMAIL", idToken: activeIdToken });
-      emailVerificationSent = true;
-    } catch {
-      emailVerificationSent = false;
-    }
-    return success(
-      res,
-      req,
-      {
-        user: { ...publicProfile(profile), email, emailVerified: false },
-        emailVerificationSent,
-      },
-      201,
-    );
-  } catch (error) {
-    await Promise.allSettled([
-      identityPost("delete", { idToken: activeIdToken }),
-      db.collection("profiles").doc(identity.localId).delete(),
-      db.collection("matchingPreferences").doc(identity.localId).delete(),
-      db.collection("dmPolicies").doc(identity.localId).delete(),
-    ]);
-    res.clearCookie(COOKIE_NAME, {
-      httpOnly: true,
-      secure: COOKIE_SECURE,
-      sameSite: "lax",
-      path: "/",
-    });
-    throw error;
-  }
-});
-
-app.post("/api/auth/login", authRateLimit, async (req, res) => {
-  const email = safeString(req.body?.email, "email", { min: 5, max: 254 }).toLocaleLowerCase();
-  const password = safeSecret(req.body?.password, "password", { min: 1, max: 128 });
-  const identity = await identityPost("signInWithPassword", { email, password, returnSecureToken: true });
-  const userRecord = await auth.getUser(identity.localId);
-  const profile = await ensureProfile(identity.localId, userRecord.email, userRecord.displayName);
-  await issueSession(res, identity.idToken);
-  return success(res, req, {
-    user: {
-      ...publicProfile(profile),
-      email: userRecord.email || email,
-      emailVerified: userRecord.emailVerified,
     },
   });
 });

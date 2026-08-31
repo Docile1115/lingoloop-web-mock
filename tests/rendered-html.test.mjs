@@ -82,6 +82,10 @@ test("운영 화면은 원래 디자인을 쓰고 데이터는 서버에서 온�
   assert.match(signIn, /"\/api\/auth\/config"/);
   assert.match(signIn, /"\/api\/auth\/session"/);
   assert.match(signIn, /getSocialIdToken/);
+  assert.match(signIn, /isIOSDevice/);
+  assert.match(signIn, /provider === "apple"/);
+  assert.doesNotMatch(signIn, /\/api\/auth\/(?:login|register)/);
+  assert.doesNotMatch(signIn, /type="(?:email|password)"|role="tablist"/);
   assert.match(socialAuth, /signInWithPopup/);
   assert.match(socialAuth, /inMemoryPersistence/);
   assert.match(socialAuth, /signOut\(auth\)/);
@@ -168,8 +172,6 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
   }
 
   for (const route of [
-    "/api/auth/register",
-    "/api/auth/login",
     "/api/auth/me",
     "/api/profile",
     "/api/matching/daily",
@@ -187,6 +189,9 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
   ]) {
     assert.ok(source.includes(`"${route}"`), `${route} 운영 route가 필요합니다`);
   }
+  assert.doesNotMatch(source, /app\.post\("\/api\/auth\/(?:register|login)"/);
+  assert.match(source, /AUTH_PROVIDER_NOT_ALLOWED/);
+  assert.match(source, /sign_in_provider/);
 });
 
 test("Gemini AI는 운영 API와 실제 대화 UI에 연결된다", async () => {

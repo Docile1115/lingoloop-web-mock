@@ -58,10 +58,11 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2>4. Google 로그인과 처리 위탁</h2>
+        <h2>4. Google·Apple 로그인과 처리 위탁</h2>
         <p>
-          Google 로그인을 선택하면 Google로부터 계정 식별자, 이메일 주소, 표시 이름과 기본 프로필 정보를 받을 수 있습니다.
-          Google 계정 비밀번호는 TimoTalk이 받거나 저장하지 않습니다.
+          Google 또는 Apple 로그인을 선택하면 해당 공급자로부터 계정 식별자, 이메일 주소, 표시 이름과 기본 프로필 정보를 받을 수 있습니다.
+          Apple의 이메일 가리기 기능을 사용하면 실제 이메일 대신 Apple이 만든 전달용 주소를 받을 수 있습니다.
+          Google·Apple 계정 비밀번호는 TimoTalk이 받거나 저장하지 않습니다.
         </p>
         <p>
           계정 인증은 Google Cloud Identity Platform, 서비스 데이터는 Firestore, 애플리케이션 실행은 Cloud Run을 사용합니다.

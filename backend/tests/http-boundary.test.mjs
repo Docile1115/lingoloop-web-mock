@@ -104,19 +104,19 @@ test("HTTP boundary rejects bypasses and serves only non-mock metadata", async (
   assert.equal(invalidSocialToken.status, 422);
   assert.equal((await invalidSocialToken.json()).error.code, "VALIDATION_ERROR");
 
-  const invalidOrigin = await fetch(baseUrl + "/api/auth/register", {
+  const invalidOrigin = await fetch(baseUrl + "/api/auth/session", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       origin: "https://attacker.example",
       "x-lingoloop-proxy": "test-proxy-secret",
     },
-    body: JSON.stringify({ email: "person@example.com", password: "password-123", name: "Person" }),
+    body: JSON.stringify({ idToken: "x".repeat(32) }),
   });
   assert.equal(invalidOrigin.status, 403);
   assert.equal((await invalidOrigin.json()).error.code, "INVALID_ORIGIN");
 
-  const invalidJson = await fetch(baseUrl + "/api/auth/register", {
+  const invalidJson = await fetch(baseUrl + "/api/auth/session", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -127,6 +127,19 @@ test("HTTP boundary rejects bypasses and serves only non-mock metadata", async (
   });
   assert.equal(invalidJson.status, 400);
   assert.equal((await invalidJson.json()).error.code, "INVALID_JSON");
+
+  for (const path of ["/api/auth/register", "/api/auth/login"]) {
+    const removedEmailAuth = await fetch(baseUrl + path, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost:5174",
+        "x-lingoloop-proxy": "test-proxy-secret",
+      },
+      body: JSON.stringify({ email: "person@example.com", password: "password-123" }),
+    });
+    assert.equal(removedEmailAuth.status, 404);
+  }
 
   const malformedCookie = await fetch(baseUrl + "/api/auth/me", {
     headers: {

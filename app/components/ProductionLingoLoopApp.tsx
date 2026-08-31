@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { I18nProvider, type MessageKey, msg, t, tx, useLocale, useLocaleRerender, LOCALES, LOCALE_LABEL } from "../lib/i18n";
+import { SignIn } from "./SignIn";
 import styles from "./ProductionLingoLoopApp.module.css";
 
 type Tab = "partners" | "community" | "chats" | "profile" | "reports";
@@ -389,88 +390,30 @@ function LoadingScreen() {
 }
 
 function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserProfile) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      const result = await apiRequest<{ user: UserProfile; emailVerificationSent?: boolean }>(
-        mode === "login" ? "/api/auth/login" : "/api/auth/register",
-        {
-          method: "POST",
-          body: JSON.stringify(mode === "login" ? { email, password } : { name, email, password }),
-        },
-      );
-      if (result.emailVerificationSent) setNotice(t("확인 메일을 보냈어요."));
-      onAuthenticated(result.user);
-    } catch (caught) {
-      setError(errorText(caught));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <main className={styles.authPage}>
-      <section className={styles.authIntro}>
-        <div className={styles.authBrand}>
-          <span className={styles.brandMark}><Languages size={24} /></span>
-          <span>Timo<strong>Talk</strong></span>
-        </div>
-        <p className={styles.eyebrow}>REAL LANGUAGE EXCHANGE</p>
-        <h1>{t("진짜 사람과 이야기하며 배워요.")}</h1>
-        <p className={styles.authDescription}>
-          {t("주고받은 대화와 써둔 글은 계정에 남아요. 폰을 바꿔도 그대로 이어져요.")}
-        </p>
-        <ul className={styles.authFacts}>
-          <li><Database size={18} /> {t("기록이 남아요")}</li>
-          <li><LockKeyhole size={18} /> {t("안전한 로그인")}</li>
-          <li><ShieldCheck size={18} /> {t("내 정보는 나만")}</li>
-        </ul>
-      </section>
-
-      <section className={styles.authCard}>
-        <div className={styles.authTabs}>
-          <button type="button" className={mode === "login" ? styles.active : ""} onClick={() => setMode("login")}>{t("로그인")}</button>
-          <button type="button" className={mode === "register" ? styles.active : ""} onClick={() => setMode("register")}>{t("회원가입")}</button>
-        </div>
-        <div>
-          <h2>{mode === "login" ? t("다시 만나서 반가워요") : t("TimoTalk 시작하기")}</h2>
-          <p>{mode === "login" ? t("하던 대화와 기록을 그대로 가져올게요.") : t("프로필은 가입한 뒤에 천천히 채워도 돼요.")}</p>
-        </div>
-        <form onSubmit={submit} className={styles.authForm}>
-          {mode === "register" ? (
-            <label>
-              {t("이름")}
-              <input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={40} placeholder={t("다른 사람에게 보일 이름")} autoComplete="name" required />
-            </label>
-          ) : null}
-          <label>
-            {t("이메일")}
-            <span className={styles.inputWithIcon}><Mail size={17} /><input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@example.com" autoComplete="email" required /></span>
-          </label>
-          <label>
-            {t("비밀번호")}
-            <span className={styles.inputWithIcon}><LockKeyhole size={17} /><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" minLength={mode === "register" ? 10 : 1} maxLength={128} placeholder={mode === "register" ? t("10자 이상") : t("비밀번호")} autoComplete={mode === "register" ? "new-password" : "current-password"} required /></span>
-          </label>
-          {error ? <p className={styles.formError} role="alert">{error}</p> : null}
-          {notice ? <p className={styles.formNotice}>{notice}</p> : null}
-          <button className={styles.primaryButton} type="submit" disabled={busy}>
-            {busy ? t("처리 중…") : mode === "login" ? t("로그인") : t("계정 만들기")}
-          </button>
-        </form>
-        <small className={styles.authLegal}>{t("가입하면 커뮤니티 운영정책과 개인정보 처리 방침에 동의하게 돼요.")}</small>
-      </section>
-    </main>
+    <SignIn
+      onSignedIn={(user) => onAuthenticated({
+        id: user.id,
+        email: "",
+        emailVerified: false,
+        name: user.name,
+        handle: user.handle,
+        country: user.country || { code: "", name: "", flag: "" },
+        city: user.city,
+        nativeLanguages: user.nativeLanguages,
+        learningLanguages: user.learningLanguages,
+        bio: user.bio,
+        interests: user.interests,
+        availability: user.availability,
+        intents: [],
+        age: user.age,
+        gender: user.gender,
+        status: user.status,
+        verified: Boolean(user.verified),
+        responseRate: 100,
+        exchangeScore: user.exchangeScore || 0,
+      })}
+    />
   );
 }
 

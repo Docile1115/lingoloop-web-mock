@@ -6123,59 +6123,10 @@ function LanguagePicker() {
   );
 }
 
-/**
- * 앱 스토어 주소.
- *
- * 아직 심사 전이라 비어 있습니다. 주소가 나오면 여기만 채우면 버튼이 살아납니다.
- * 지어낸 주소를 넣어두면 눌러본 사람이 엉뚱한 곳으로 갑니다.
- */
-const STORE_LINKS = {
-  ios: "",
-  android: "",
-};
-
-/**
- * 앱 설치 안내.
- *
- * 폰·태블릿에서만 보입니다. 어느 쪽을 보여줄지는 자바스크립트가 아니라 CSS 가
- * 정합니다(globals.css 의 미디어쿼리) — 자바스크립트로 갈랐더니 서버가 아무것도
- * 그리지 못했고, 폰에서는 앱 화면이 잠깐 보였다가 바뀌었습니다.
- */
-function InstallAppScreen() {
-  return (
-    <main className="install-page">
-      <div className="install-card">
-        <span className="brand-mark install-mark"><Languages size={26} /></span>
-        <h1>Timo<strong>Talk</strong></h1>
-        <p className="install-lead">{t("휴대폰과 태블릿에서는 앱으로 만나요.")}</p>
-        <p className="install-body">{t("앱을 설치하면 대화 알림을 받고, 오프라인에서도 저장한 표현을 볼 수 있어요.")}</p>
-
-        <div className="install-stores">
-          {STORE_LINKS.ios ? (
-            <a className="primary-button" href={STORE_LINKS.ios}>{t("App Store 에서 받기")}</a>
-          ) : (
-            <span className="install-soon">{t("App Store · 준비 중")}</span>
-          )}
-          {STORE_LINKS.android ? (
-            <a className="primary-button" href={STORE_LINKS.android}>{t("Play 스토어에서 받기")}</a>
-          ) : (
-            <span className="install-soon">{t("Play 스토어 · 준비 중")}</span>
-          )}
-        </div>
-
-        <p className="install-note">{t("컴퓨터에서는 브라우저로 바로 쓸 수 있어요.")}</p>
-      </div>
-    </main>
-  );
-}
-
 export default function LingoLoopApp() {
   return (
     <I18nProvider>
-      <InstallAppScreen />
-      <div className="desktop-surface">
-        <AuthGate />
-      </div>
+      <AuthGate />
     </I18nProvider>
   );
 }
