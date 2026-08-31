@@ -1,0 +1,266 @@
+.shell {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--primary-soft) 76%, transparent) 0, transparent 34rem),
+    var(--canvas);
+  color: var(--ink);
+}
+
+.skipLink {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+  padding: 10px 14px;
+  border-radius: var(--r-btn);
+  background: var(--ink);
+  color: var(--surface);
+  transform: translateY(-160%);
+}
+
+.skipLink:focus {
+  transform: translateY(0);
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--canvas) 90%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+.headerInner,
+.main,
+.footer {
+  width: min(100% - 40px, 860px);
+  margin-inline: auto;
+}
+
+.headerInner {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.brand strong {
+  color: var(--primary-ink);
+}
+
+.brandMark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--primary-gradient);
+  color: var(--primary-text);
+  font-size: 17px;
+  font-weight: 800;
+  box-shadow: var(--shadow-sm);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav a {
+  padding: 9px 12px;
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.nav a:hover,
+.nav a:focus-visible {
+  background: var(--hover-bg);
+  color: var(--ink);
+}
+
+.nav a[aria-current="page"] {
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.main {
+  padding-block: 52px 72px;
+}
+
+.hero {
+  padding: clamp(26px, 6vw, 48px);
+  border: 1px solid var(--primary-border);
+  border-radius: clamp(20px, 4vw, 32px);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--primary-soft) 86%, var(--surface)), var(--surface));
+  box-shadow: var(--shadow-md);
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: var(--primary-ink);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(32px, 7vw, 52px);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.summary {
+  max-width: 680px;
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: clamp(15px, 2.3vw, 18px);
+  line-height: 1.72;
+}
+
+.updated {
+  margin: 20px 0 0;
+  color: var(--subtle);
+  font-size: 13px;
+}
+
+.content {
+  padding: 18px clamp(4px, 4vw, 28px) 0;
+}
+
+.content section {
+  padding: 32px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.content section:last-child {
+  border-bottom: 0;
+}
+
+.content h2 {
+  margin: 0 0 14px;
+  font-size: clamp(20px, 3vw, 24px);
+  line-height: 1.35;
+  letter-spacing: -0.018em;
+}
+
+.content h3 {
+  margin: 24px 0 8px;
+  font-size: 16px;
+}
+
+.content p,
+.content li {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.content p {
+  margin: 10px 0;
+}
+
+.content ul {
+  margin: 12px 0;
+  padding-left: 21px;
+}
+
+.content li + li {
+  margin-top: 8px;
+}
+
+.content a,
+.footer a {
+  color: var(--primary-ink);
+  font-weight: 600;
+  text-underline-offset: 3px;
+}
+
+.note {
+  padding: 16px 18px;
+  border: 1px solid var(--primary-border);
+  border-radius: var(--r-md);
+  background: var(--primary-soft);
+}
+
+.footer {
+  padding-block: 26px 40px;
+  border-top: 1px solid var(--line);
+  color: var(--subtle);
+  font-size: 13px;
+}
+
+.footer div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.footer p {
+  margin: 10px 0 0;
+}
+
+@media (max-width: 620px) {
+  .headerInner,
+  .main,
+  .footer {
+    width: min(100% - 28px, 860px);
+  }
+
+  .headerInner {
+    min-height: 60px;
+  }
+
+  .brand {
+    font-size: 16px;
+  }
+
+  .brandMark {
+    width: 31px;
+    height: 31px;
+  }
+
+  .nav a {
+    padding: 8px 9px;
+    font-size: 12px;
+  }
+
+  .main {
+    padding-block: 26px 48px;
+  }
+
+  .hero {
+    padding: 26px 22px;
+  }
+
+  .content section {
+    padding: 26px 0;
+  }
+}
+
+@media (max-width: 430px) {
+  .brand span:last-child {
+    display: none;
+  }
+}

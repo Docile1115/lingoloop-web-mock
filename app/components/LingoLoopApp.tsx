@@ -6146,7 +6146,7 @@ function InstallAppScreen() {
     <main className="install-page">
       <div className="install-card">
         <span className="brand-mark install-mark"><Languages size={26} /></span>
-        <h1>Lingo<strong>Loop</strong></h1>
+        <h1>Timo<strong>Talk</strong></h1>
         <p className="install-lead">{t("휴대폰과 태블릿에서는 앱으로 만나요.")}</p>
         <p className="install-body">{t("앱을 설치하면 대화 알림을 받고, 오프라인에서도 저장한 표현을 볼 수 있어요.")}</p>
 
@@ -6211,7 +6211,7 @@ function AuthGate() {
         <section className="signin-intro">
           <div className="signin-brand">
             <span className="brand-mark"><Languages size={22} /></span>
-            <span>Lingo<strong>Loop</strong></span>
+            <span>Timo<strong>Talk</strong></span>
           </div>
           <p>{t("로그인 상태를 확인하고 있어요.")}</p>
         </section>

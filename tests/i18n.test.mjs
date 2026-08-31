@@ -169,6 +169,11 @@ test("화면 코드에 한국어가 그대로 남아 있지 않다", async () =>
     // 서버에서 언어를 정하게 되면 그때 함께 옮겨야 합니다.
     "app/layout.tsx",
     "app/page.tsx",
+    // 법률·정책 문서는 현재 한국어 원문을 정본으로 제공하는 서버 렌더링 페이지입니다.
+    // 부분 번역으로 법적 의미가 달라지지 않도록 별도 번역 검토 전까지 제품 UI 사전에서 제외합니다.
+    "app/components/LegalPage.tsx",
+    "app/privacy/page.tsx",
+    "app/terms/page.tsx",
     // 코드·React Native 공유용 숫자/색 토큰. 한국어는 렌더 문구가 아닌 측정 근거 주석입니다.
     "app/lib/tokens.ts",
   ];

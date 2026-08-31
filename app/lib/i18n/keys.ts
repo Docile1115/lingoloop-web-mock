@@ -923,6 +923,8 @@ export const MESSAGE_KEYS = [
   "STEP {step} / 3",
   "TimoTalk 시작하기",
   "TimoTalk 홈",
+  "개인정보 처리방침",
+  "이용약관",
 ] as const;
 
 export type MessageKey = (typeof MESSAGE_KEYS)[number];

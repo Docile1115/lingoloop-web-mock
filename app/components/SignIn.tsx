@@ -89,7 +89,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
       <section className="signin-intro">
         <div className="signin-brand">
           <span className="brand-mark"><Languages size={22} /></span>
-          <span>Lingo<strong>Loop</strong></span>
+          <span>Timo<strong>Talk</strong></span>
         </div>
         <h1>{t("진짜 사람과 이야기하며 배워요.")}</h1>
         <p>{t("주고받은 대화와 써둔 글은 계정에 남아요. 폰을 바꿔도 그대로 이어져요.")}</p>
@@ -171,7 +171,11 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
           </button>
         </form>
 
-        <small className="signin-legal">{t("가입하면 커뮤니티 운영정책과 개인정보 처리 방침에 동의하게 돼요.")}</small>
+        <small className="signin-legal">
+          <a href="/terms">{t("이용약관")}</a>
+          <span aria-hidden="true"> · </span>
+          <a href="/privacy">{t("개인정보 처리방침")}</a>
+        </small>
       </section>
     </main>
   );

@@ -7088,6 +7088,8 @@ label > svg { flex: none; }
 .signin-form .primary-button { min-height: 46px; margin-top: var(--sp-1); }
 .signin-error { margin: 0; color: var(--danger); font-size: 13px; }
 .signin-legal { display: block; margin-top: var(--sp-4); color: var(--subtle); font-size: 12px; line-height: 1.5; }
+.signin-legal a { color: inherit; font-weight: 600; text-underline-offset: 2px; }
+.signin-legal a:hover { color: var(--primary-ink); }
 
 @media (max-width: 940px) {
   .signin-page { grid-template-columns: minmax(0, 1fr); gap: var(--sp-6); }

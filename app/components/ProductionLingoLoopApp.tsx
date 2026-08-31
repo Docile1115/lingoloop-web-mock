@@ -424,7 +424,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserProfile) 
       <section className={styles.authIntro}>
         <div className={styles.authBrand}>
           <span className={styles.brandMark}><Languages size={24} /></span>
-          <span>Lingo<strong>Loop</strong></span>
+          <span>Timo<strong>Talk</strong></span>
         </div>
         <p className={styles.eyebrow}>REAL LANGUAGE EXCHANGE</p>
         <h1>{t("진짜 사람과 이야기하며 배워요.")}</h1>
@@ -1285,7 +1285,7 @@ function OperationalApp({
       <aside className={styles.sidebar}>
         <button type="button" className={styles.brand} onClick={() => setTab("partners")}>
           <span className={styles.brandMark}><Languages size={22} /></span>
-          <span>Lingo<strong>Loop</strong></span>
+          <span>Timo<strong>Talk</strong></span>
         </button>
         <nav>
           {(isAdmin ? [...navItems, adminNavItem] : navItems).map((item) => {
@@ -1309,7 +1309,7 @@ function OperationalApp({
         <header className={styles.mobileHeader}>
           <button type="button" className={styles.brand} onClick={() => setTab("partners")}>
             <span className={styles.brandMark}><Languages size={20} /></span>
-            <span>Lingo<strong>Loop</strong></span>
+            <span>Timo<strong>Talk</strong></span>
           </button>
           <span className={styles.liveDot} title={t("서버에 연결되어 있어요")} />
         </header>

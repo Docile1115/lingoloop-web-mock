@@ -923,6 +923,8 @@ export const ja: Record<MessageKey, string> = {
   "Jisoo 🇰🇷 · 2분 전": "Jisoo 🇰🇷 · 2分前",
   "TimoTalk 시작하기": "TimoTalkを始める",
   "TimoTalk 홈": "TimoTalk ホーム",
+  "개인정보 처리방침": "プライバシーポリシー",
+  "이용약관": "利用規約",
   "Play 스토어 · 준비 중": "Google Play · 準備中",
   "Play 스토어에서 받기": "Google Play で入手",
   "STEP {step} / 3": "STEP {step} / 3",
