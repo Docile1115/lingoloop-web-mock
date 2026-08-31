@@ -83,7 +83,7 @@ import {
 } from "@/app/lib/demo-data";
 import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
 import { SignIn } from "./SignIn";
-import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, matchReasonText, type MatchReasonCode } from "../lib/live-data";
+import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, type ApiNotification, type ApiNotificationPage, matchReasonText, type MatchReasonCode } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
@@ -188,6 +188,7 @@ type ModalState =
   | { type: "exchange" }
   | { type: "partner-list" }
   | { type: "likes" }
+  | { type: "notifications" }
   | { type: "report"; target: string; targetId?: string; targetType?: "user" | "post" | "room" }
   | { type: "onboarding" }
   | { type: "confirm"; title: string; body: string; confirmLabel: string; onConfirm: () => void }
@@ -541,6 +542,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [corrections, setCorrections] = useState<ApiCorrection[]>([]);
   const [likesReceived, setLikesReceived] = useState<ApiReceivedLike[]>([]);
   const [sentLikes, setSentLikes] = useState<ApiReceivedLike[]>([]);
+  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [notificationLoading, setNotificationLoading] = useState(true);
+  const [notificationError, setNotificationError] = useState(false);
   /** 팔로잉·팔로워 수. 보는 사람마다 달라서 id 별로 담아둡니다. */
   const [followCounts, setFollowCounts] = useState<Record<string, { following: number; followers: number; posts: number }>>({});
   /** 크게 보고 있는 사진. 비어 있으면 안 띄웁니다. */
@@ -643,6 +648,20 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     }
   };
 
+  const loadNotifications = useCallback(async (silent = false) => {
+    if (!silent) setNotificationLoading(true);
+    try {
+      const result = await api<ApiNotificationPage>("/api/notifications");
+      setNotifications(result.items || []);
+      setNotificationUnreadCount(result.unreadCount || 0);
+      setNotificationError(false);
+    } catch {
+      setNotificationError(true);
+    } finally {
+      if (!silent) setNotificationLoading(false);
+    }
+  }, []);
+
   const reload = useCallback(async () => {
     try {
       const [postList, conversationList, requestList, phraseList, correctionList, likeList, followList, blockList, peopleList, sentLikeList] = await Promise.all([
@@ -688,6 +707,20 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     const timer = window.setTimeout(() => void reload(), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadNotifications(), 0);
+    const interval = window.setInterval(() => void loadNotifications(true), 45_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void loadNotifications(true);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [loadNotifications]);
 
   // 숨긴 사람 복원. 서버 값이 아니라 이 기기의 기록이라 마운트 이후에 읽습니다.
   // (다른 복원 코드와 같이 rAF 뒤로 미룹니다 — 하이드레이션 중 setState 를 피합니다.)
@@ -1113,7 +1146,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     const wasFollowing = followingIds.includes(partner.id);
     setFollowingIds((current) => (wasFollowing ? current.filter((id) => id !== partner.id) : [...current, partner.id]));
     try {
-      const result = await api<{ following: boolean }>(`/api/partners/${encodeURIComponent(partner.id)}/follow`, { method: "POST" });
+      const result = await api<{ following: boolean }>(`/api/partners/${encodeURIComponent(partner.id)}/follow`, {
+        method: "POST",
+        body: JSON.stringify({ following: !wasFollowing }),
+      });
       setFollowingIds((current) => {
         const without = current.filter((id) => id !== partner.id);
         return result.following ? [...without, partner.id] : without;
@@ -1198,6 +1234,83 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     resetViewScroll();
   };
 
+  const markNotificationRead = async (notification: ApiNotification) => {
+    if (notification.readAt) return;
+    const readAt = new Date().toISOString();
+    setNotifications((current) => current.map((item) => (item.id === notification.id ? { ...item, readAt } : item)));
+    setNotificationUnreadCount((current) => Math.max(0, current - 1));
+    try {
+      await api(`/api/notifications/${encodeURIComponent(notification.id)}/read`, { method: "PATCH" });
+    } catch (caught) {
+      void loadNotifications();
+      showToast(caught instanceof Error ? caught.message : t("알림을 읽음 처리하지 못했어요."));
+    }
+  };
+
+  const markAllNotificationsRead = async () => {
+    const unread = notifications.filter((notification) => !notification.readAt);
+    if (!unread.length) return;
+    const readAt = new Date().toISOString();
+    setNotifications((current) => current.map((notification) => ({ ...notification, readAt: notification.readAt || readAt })));
+    setNotificationUnreadCount(0);
+    try {
+      const result = await api<{ hasMore: boolean }>("/api/notifications/read-all", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (result.hasMore) void loadNotifications(true);
+    } catch (caught) {
+      void loadNotifications();
+      showToast(caught instanceof Error ? caught.message : t("알림을 읽음 처리하지 못했어요."));
+    }
+  };
+
+  const openNotification = async (notification: ApiNotification) => {
+    setModal(null);
+
+    if (notification.postId) {
+      let post = posts.find((item) => item.id === notification.postId);
+      if (!post) {
+        try {
+          const latest = await api<ApiPost[]>("/api/posts");
+          const savedIds = new Set(savedItems.map((item) => item.id));
+          const feed = (latest || []).map((item) => ({ ...toFeedPost(item), saved: savedIds.has(item.id) }));
+          setPosts(feed);
+          setMyPostList(feed.filter((item) => item.authorId === me.id));
+          post = feed.find((item) => item.id === notification.postId);
+        } catch {
+          // 아래의 찾을 수 없음 안내로 합칩니다.
+        }
+      }
+      if (!post) {
+        showToast(t("이 알림의 글을 더 이상 볼 수 없어요."));
+        return;
+      }
+      setSection("community");
+      setDetail({ kind: "post", post });
+      window.history.pushState(null, "", `#community/post/${post.id}`);
+      resetViewScroll();
+      return;
+    }
+
+    if (notification.conversationId) {
+      await reload();
+      setSelectedChatId(notification.conversationId);
+      setSection("chats");
+      setMobileThreadOpen(true);
+      window.history.replaceState(null, "", "#chats");
+      resetViewScroll();
+      return;
+    }
+
+    if (notification.actor) {
+      openProfile(toPartner(notification.actor));
+      return;
+    }
+
+    showToast(t("이 알림의 대상을 더 이상 볼 수 없어요."));
+  };
+
   /** 게시물 번역 — 열려 있으면 닫고, 처음 열면 mock 번역 API 를 호출합니다(실패 시 fixture 번역을 표시). */
   const translatePost = (post: FeedPost) => {
     if (translatedPosts.has(post.id)) {
@@ -1256,7 +1369,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     const nextLiked = !post.liked;
     updatePost(postId, (item) => ({ ...item, liked: nextLiked, likes: item.likes + (nextLiked ? 1 : -1) }));
     showToast(nextLiked ? t("좋아요를 눌렀어요") : t("좋아요를 취소했어요"));
-    api<{ liked: boolean; likes: number }>(`/api/posts/${encodeURIComponent(postId)}/like`, { method: "POST" })
+    api<{ liked: boolean; likes: number }>(`/api/posts/${encodeURIComponent(postId)}/like`, {
+      method: "POST",
+      body: JSON.stringify({ liked: nextLiked }),
+    })
       .then((result) => updatePost(postId, (item) => ({ ...item, liked: result.liked, likes: result.likes })))
       .catch((caught) => {
         updatePost(postId, (item) => ({ ...item, liked: !nextLiked, likes: item.likes + (nextLiked ? -1 : 1) }));
@@ -1587,6 +1703,11 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               <Search size={20} />
               <span>{t("검색")}</span>
             </button>
+            <button type="button" onClick={() => { setModal({ type: "notifications" }); void loadNotifications(true); }}>
+              <Bell size={20} />
+              <span>{t("알림")}</span>
+              {notificationUnreadCount > 0 ? <span className="nav-count">{notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}</span> : null}
+            </button>
           </div>
 
           {/* 그룹 3 — 내 정보 */}
@@ -1631,6 +1752,12 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           {/* 로고는 뺐습니다. 지금 어느 탭인지는 아래 내비가 알려주고, 로고는 매 화면
               같은 자리를 먹기만 합니다. */}
           <div className="topbar-actions">
+            <IconButton
+              label={t("알림")}
+              icon={Bell}
+              badge={notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}
+              onClick={() => { setModal({ type: "notifications" }); void loadNotifications(true); }}
+            />
             <IconButton label={t("검색")} icon={Search} onClick={() => setModal({ type: "search" })} />
             {section === "community" ? <IconButton label={t("글쓰기")} icon={PenLine} className="top-compose-button" onClick={() => setModal({ type: "compose" })} /> : null}
           </div>
@@ -1895,6 +2022,14 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           savedItems={savedItems}
           likesReceived={likesReceived}
           sentLikes={sentLikes}
+          notifications={notifications}
+          notificationUnreadCount={notificationUnreadCount}
+          notificationLoading={notificationLoading}
+          notificationError={notificationError}
+          onRetryNotifications={() => void loadNotifications()}
+          onReadNotification={(notification) => void markNotificationRead(notification)}
+          onReadAllNotifications={() => void markAllNotificationsRead()}
+          onOpenNotification={(notification) => void openNotification(notification)}
           followingIds={followingIds}
           onToggleFollow={(partner) => void toggleFollow(partner)}
           onOpenPost={(post) => { setModal(null); openPost(post); }}
@@ -4129,12 +4264,11 @@ function SettingsModal({
                     </>
                   ) : null}
 
-                  {/* 켜고 끌 것이 아직 없습니다. 앱 밖으로 알림을 보내는 길(푸시·메일)이
-                      없어서, 스위치를 두면 켜도 꺼도 아무 일이 없습니다.
-                      지금 어떻게 알려주는지만 사실대로 적습니다. */}
+                  {/* 앱 안 알림은 항상 켜져 있습니다. 휴대폰 푸시는 아직 연결하지 않았으므로
+                      실제로 동작하지 않는 스위치 대신 현재 범위를 사실대로 안내합니다. */}
                   {settingsPane === "notifications" ? (
                     <>
-                      <div className="data-sync-status"><Bell size={17} /><span><strong>{t("앱 안에서 알려드려요")}</strong><small>{t("새 메시지는 대화 탭의 숫자로, 받은 교정은 프로필에서 확인할 수 있어요.")}</small></span></div>
+                      <div className="data-sync-status"><Bell size={17} /><span><strong>{t("앱 안에서 알려드려요")}</strong><small>{t("좋아요·댓글·교정·팔로우는 상단 알림함에서 확인할 수 있어요.")}</small></span></div>
                       <div className="settings-subhead"><strong>{t("푸시 알림")}</strong><small>{t("휴대폰 알림은 아직 준비 중이에요. 준비되면 여기서 켜고 끌 수 있어요.")}</small></div>
                     </>
                   ) : null}
@@ -4485,6 +4619,14 @@ function ModalLayer({
   savedItems,
   likesReceived,
   sentLikes,
+  notifications,
+  notificationUnreadCount,
+  notificationLoading,
+  notificationError,
+  onRetryNotifications,
+  onReadNotification,
+  onReadAllNotifications,
+  onOpenNotification,
   followingIds,
   onToggleFollow,
   onOpenPost,
@@ -4531,6 +4673,14 @@ function ModalLayer({
   savedItems: SavedPhrase[];
   likesReceived: ApiReceivedLike[];
   sentLikes: ApiReceivedLike[];
+  notifications: ApiNotification[];
+  notificationUnreadCount: number;
+  notificationLoading: boolean;
+  notificationError: boolean;
+  onRetryNotifications: () => void;
+  onReadNotification: (notification: ApiNotification) => void;
+  onReadAllNotifications: () => void;
+  onOpenNotification: (notification: ApiNotification) => void;
   followingIds: string[];
   onToggleFollow: (partner: Partner) => void;
   onOpenPost: (post: FeedPost) => void;
@@ -4594,6 +4744,18 @@ function ModalLayer({
           />
         ) : null}
         {modal.type === "partner-list" ? <PartnerListModal queue={dailyQueue} index={partnerIndex} signaled={signaledPartners} onJump={onJumpPartner} onProfile={onOpenPartnerProfile} /> : null}
+        {modal.type === "notifications" ? (
+          <NotificationsModal
+            items={notifications}
+            unreadCount={notificationUnreadCount}
+            loading={notificationLoading}
+            failed={notificationError}
+            onRetry={onRetryNotifications}
+            onRead={onReadNotification}
+            onReadAll={onReadAllNotifications}
+            onOpen={onOpenNotification}
+          />
+        ) : null}
         {modal.type === "likes" ? (
           <LikesModal
             received={likesReceived.map((item) => ({
@@ -4650,8 +4812,122 @@ function matchReasonList(match: { matchReasons: string[]; matchReasonCodes?: Mat
 }
 
 function modalLabel(type: Exclude<ModalState, null>["type"]) {
-  const labels: Record<Exclude<ModalState, null>["type"], string> = { review: t("4분 복습 시작"), "new-chat": t("새 대화"), profile: t("파트너 프로필"), filters: t("매칭 설정"), "community-filters": t("커뮤니티 필터"), compose: t("새 게시물"), search: t("통합 검색"), "create-room": t("보이스룸 만들기"), room: t("보이스룸"), exchange: t("언어 교환 세션"), "partner-list": t("오늘의 파트너 목록"), likes: t("주고받은 마음"), report: t("신고 및 차단"), onboarding: t("학습 목표 설정"), confirm: t("확인") };
+  const labels: Record<Exclude<ModalState, null>["type"], string> = { review: t("4분 복습 시작"), "new-chat": t("새 대화"), profile: t("파트너 프로필"), filters: t("매칭 설정"), "community-filters": t("커뮤니티 필터"), compose: t("새 게시물"), search: t("통합 검색"), "create-room": t("보이스룸 만들기"), room: t("보이스룸"), exchange: t("언어 교환 세션"), "partner-list": t("오늘의 파트너 목록"), likes: t("주고받은 마음"), notifications: t("알림"), report: t("신고 및 차단"), onboarding: t("학습 목표 설정"), confirm: t("확인") };
   return labels[type];
+}
+
+type NotificationTab = "all" | "community" | "people";
+
+function notificationCategory(type: ApiNotification["type"]): Exclude<NotificationTab, "all"> {
+  return ["post_like", "post_reply", "post_correction", "comment_reply"].includes(type) ? "community" : "people";
+}
+
+function notificationPresentation(notification: ApiNotification): { icon: LucideIcon; accent: Accent; title: string } {
+  const name = notification.actor?.name || t("알 수 없는 상대");
+  switch (notification.type) {
+    case "post_like":
+      return { icon: Heart, accent: "coral", title: t("{name}님이 내 글을 좋아해요", { name }) };
+    case "post_reply":
+      return { icon: MessageCircle, accent: "violet", title: t("{name}님이 내 글에 댓글을 남겼어요", { name }) };
+    case "post_correction":
+      return { icon: PenLine, accent: "mint", title: t("{name}님이 내 문장을 교정했어요", { name }) };
+    case "comment_reply":
+      return { icon: MessageCircle, accent: "violet", title: t("{name}님이 내 댓글에 답글을 남겼어요", { name }) };
+    case "partner_like":
+      return { icon: Heart, accent: "coral", title: t("{name}님이 마음을 보냈어요", { name }) };
+    case "follow":
+      return { icon: UserPlus, accent: "mint", title: t("{name}님이 나를 팔로우했어요", { name }) };
+    case "message_request":
+      return { icon: MessageCircle, accent: "amber", title: t("{name}님이 메시지 요청을 보냈어요", { name }) };
+    case "request_accepted":
+      return { icon: CheckCircle2, accent: "mint", title: t("{name}님이 메시지 요청을 수락했어요", { name }) };
+  }
+}
+
+function NotificationsModal({
+  items,
+  unreadCount,
+  loading,
+  failed,
+  onRetry,
+  onRead,
+  onReadAll,
+  onOpen,
+}: {
+  items: ApiNotification[];
+  unreadCount: number;
+  loading: boolean;
+  failed: boolean;
+  onRetry: () => void;
+  onRead: (notification: ApiNotification) => void;
+  onReadAll: () => void;
+  onOpen: (notification: ApiNotification) => void;
+}) {
+  const [tab, setTab] = useState<NotificationTab>("all");
+  const filtered = tab === "all" ? items : items.filter((item) => notificationCategory(item.type) === tab);
+  const communityCount = items.filter((item) => notificationCategory(item.type) === "community").length;
+  const peopleCount = items.length - communityCount;
+
+  return (
+    <div className="notifications-content">
+      <header>
+        <div>
+          <h2>{t("알림")}</h2>
+          <p>{t("내 활동에 생긴 새 소식을 한곳에서 확인하세요.")}</p>
+        </div>
+        <button type="button" disabled={!unreadCount} onClick={onReadAll}>{t("모두 읽음")}</button>
+      </header>
+
+      <div className="notification-tabs" role="tablist" aria-label={t("알림 종류")}>
+        {([
+          ["all", t("전체"), items.length],
+          ["community", t("커뮤니티"), communityCount],
+          ["people", t("파트너"), peopleCount],
+        ] as Array<[NotificationTab, string, number]>).map(([id, label, count]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
+            {label} <span>{count}</span>
+          </button>
+        ))}
+      </div>
+
+      {loading && !items.length ? (
+        <div className="notification-state" role="status"><RefreshCw className="spinning" size={22} /><strong>{t("알림을 불러오는 중이에요.")}</strong></div>
+      ) : failed && !items.length ? (
+        <div className="notification-state" role="alert"><BellOff size={25} /><strong>{t("알림을 불러오지 못했어요.")}</strong><button type="button" onClick={onRetry}>{t("다시 시도")}</button></div>
+      ) : filtered.length ? (
+        <div className="notification-list">
+          {filtered.map((notification) => {
+            const presentation = notificationPresentation(notification);
+            const Icon = presentation.icon;
+            return (
+              <button
+                type="button"
+                key={notification.id}
+                className={notification.readAt ? "" : "unread"}
+                onClick={() => { onRead(notification); onOpen(notification); }}
+              >
+                <span className={`notification-icon accent-${presentation.accent}`}><Icon size={17} /></span>
+                <span>
+                  <strong>{presentation.title}</strong>
+                  <small>{notification.excerpt || t("눌러서 확인해 보세요.")}</small>
+                  <em>{liveRelativeTime(notification.createdAt)}</em>
+                </span>
+                {!notification.readAt ? <i aria-hidden="true" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="notification-state">
+          <BellOff size={25} />
+          <strong>{tab === "all" ? t("새 알림이 없어요") : t("이 종류의 알림이 없어요")}</strong>
+          <p>{t("좋아요, 댓글, 교정, 받은 마음이 생기면 여기에 알려드려요.")}</p>
+        </div>
+      )}
+
+      {failed && items.length ? <footer><button type="button" onClick={onRetry}><RefreshCw size={14} /> {t("새로고침")}</button></footer> : null}
+    </div>
+  );
 }
 
 

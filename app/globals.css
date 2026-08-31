@@ -3678,13 +3678,17 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 .notifications-content { padding: var(--sp-5); }
 .notifications-content > header { display: flex; align-items: flex-start; justify-content: space-between; }
 .notifications-content h2 { margin-top: var(--sp-2); font-size: 24px; }
+.notifications-content > header p { margin-top: var(--sp-1); padding-right: var(--sp-3); color: var(--muted); font-size: 13px; line-height: 1.45; }
 .notifications-content > header > button { margin: var(--sp-2) var(--sp-6) 0 0; border: 0; background: transparent; color: var(--ink); font-size: 13px; }
+.notifications-content > header > button:disabled { color: var(--subtle); cursor: default; }
 .notification-tabs { display: flex; gap: var(--sp-4); margin-top: var(--sp-4); border-bottom: var(--bw-hair) solid var(--line); }
 .notification-tabs button { padding: 0 1px 9px; border: 0; background: transparent; color: var(--muted); font-size: 13px; }
 .notification-tabs button.active { border-bottom: 2px solid var(--primary); color: var(--ink); font-weight: 600; }
 .notification-tabs span { margin-left: var(--sp-1); color: var(--coral); }
+.notification-list { max-height: min(55vh, 540px); overflow-y: auto; overscroll-behavior: contain; }
 .notification-list button { position: relative; display: flex; width: 100%; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-1); border: 0; border-bottom: var(--bw-hair) solid var(--line); background: transparent; text-align: left; }
-.notification-list button.unread { background: linear-gradient(90deg,var(--surface),transparent); }
+.notification-list button:hover { background: var(--hover-bg); }
+.notification-list button.unread { background: linear-gradient(90deg,var(--secondary-soft),transparent); }
 .notification-icon { display: inline-flex; width: 35px; height: 35px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: var(--r-btn); }
 .accent-violet { background: var(--sunken); color: var(--ink); }
 .accent-coral { background: var(--danger-soft); color: var(--coral); }
@@ -3695,6 +3699,10 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 .notification-list small { margin-top: var(--sp-1); color: var(--muted); font-size: 13px; line-height: 1.4; }
 .notification-list em { margin-top: var(--sp-1); color: var(--subtle); font-size: 12px; font-style: normal; }
 .notification-list button > i { width: 6px; height: 6px; margin-top: var(--sp-2); border-radius: 50%; background: var(--primary); }
+.notification-state { display: flex; min-height: 230px; align-items: center; justify-content: center; flex-direction: column; padding: var(--sp-5); color: var(--subtle); text-align: center; }
+.notification-state strong { margin-top: var(--sp-2); color: var(--ink); font-size: 15px; }
+.notification-state p { max-width: 30ch; margin-top: var(--sp-1); font-size: 13px; line-height: 1.5; }
+.notification-state button { min-height: 36px; margin-top: var(--sp-3); padding: 0 var(--sp-3); border: var(--bw-hair) solid var(--line-strong); border-radius: var(--r-btn); background: var(--surface); color: var(--ink); font-size: 13px; font-weight: 600; }
 .notifications-content > footer { display: flex; justify-content: center; padding-top: var(--sp-3); }
 .notifications-content > footer button { display: flex; align-items: center; gap: var(--sp-1); border: 0; background: transparent; color: var(--muted); font-size: 13px; }
 

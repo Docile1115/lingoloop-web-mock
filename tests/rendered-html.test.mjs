@@ -91,7 +91,7 @@ test("운영 화면은 원래 디자인을 쓰고 데이터는 서버에서 온�
   assert.match(socialAuth, /signOut\(auth\)/);
 
   // 목록은 fixture 가 아니라 서버에서 받습니다.
-  for (const route of ["/api/posts", "/api/conversations", "/api/saved-phrases", "/api/corrections/received"]) {
+  for (const route of ["/api/posts", "/api/conversations", "/api/saved-phrases", "/api/corrections/received", "/api/notifications"]) {
     assert.ok(app.includes(`"${route}"`) || app.includes(`\`${route}`), `${route} 를 불러와야 합니다`);
   }
   assert.doesNotMatch(app, /useState<FeedPost\[\]>\(initialPosts\)/);
@@ -167,6 +167,7 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
     "blocks",
     "replies",
     "savedPhrases",
+    "notifications",
   ]) {
     assert.match(source, new RegExp(`collection\\("${collection}"\\)`));
   }
@@ -184,6 +185,9 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
     "/api/saved-phrases",
     "/api/corrections/received",
     "/api/likes/received",
+    "/api/notifications",
+    "/api/notifications/:notificationId/read",
+    "/api/notifications/read-all",
     "/api/countries",
     "/api/partners/:partnerId/block",
   ]) {

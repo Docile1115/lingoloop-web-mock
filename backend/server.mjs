@@ -4,6 +4,7 @@ import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { extractGeminiText, GeminiProviderError, generateGeminiContent } from "./gemini.mjs";
+import { buildNotification, notificationDocumentId, NOTIFICATION_TYPES } from "./notifications.mjs";
 import { decideDmRoute, spamSignals } from "./policy.mjs";
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
@@ -625,6 +626,36 @@ async function profilesByIds(ids) {
   return new Map(snapshots.filter((snapshot) => snapshot.exists).map((snapshot) => [snapshot.id, snapshot.data()]));
 }
 
+function notificationItems(recipientId) {
+  return db.collection("notifications").doc(recipientId).collection("items");
+}
+
+function notificationRef({ type, recipientId, actorId, sourceId }) {
+  const id = notificationDocumentId({ type, recipientId, actorId, sourceId });
+  return notificationItems(recipientId).doc(id);
+}
+
+/** 원본 행동과 같은 transaction 안에서만 호출합니다. */
+function putNotification(transaction, event) {
+  const notification = buildNotification(event);
+  if (!notification) return null;
+  transaction.set(notificationItems(notification.recipientId).doc(notification.id), notification);
+  return notification;
+}
+
+function removeNotification(transaction, event) {
+  if (!event.recipientId || !event.actorId || event.recipientId === event.actorId) return;
+  transaction.delete(notificationRef(event));
+}
+
+async function unreadNotificationCount(uid) {
+  const [snapshot, blocked] = await Promise.all([
+    notificationItems(uid).where("readAt", "==", null).limit(500).get(),
+    blockedBothWays(uid),
+  ]);
+  return snapshot.docs.filter((document) => !blocked.has(document.data().actorId)).length;
+}
+
 async function conversationView(conversation, uid, includeMessages = false) {
   const partnerId = conversation.memberIds.find((id) => id !== uid);
   const partnerSnapshot = partnerId ? await db.collection("profiles").doc(partnerId).get() : null;
@@ -894,11 +925,12 @@ app.get("/api/bootstrap", requireUser, async (req, res) => {
     updatedAt: nowIso(),
   });
   const profile = { ...req.auth.profile, status: "online", lastActiveAt: nowIso() };
+  const notifications = await unreadNotificationCount(req.auth.uid);
   return success(res, req, {
     currentUser: publicProfile(profile),
     languages: LANGUAGES,
     countries: COUNTRIES,
-    unread: { conversations: 0, notifications: 0, requests: 0 },
+    unread: { conversations: 0, notifications, requests: 0 },
     isAdmin: ADMIN_UIDS.has(req.auth.uid),
     featureFlags: {
       persistentProfiles: true,
@@ -917,6 +949,61 @@ app.get("/api/profile", requireUser, async (req, res) => {
     email: req.auth.email,
     emailVerified: req.auth.emailVerified,
   });
+});
+
+app.get("/api/notifications", requireUser, async (req, res) => {
+  const [snapshot, blocked] = await Promise.all([
+    notificationItems(req.auth.uid).orderBy("createdAt", "desc").limit(100).get(),
+    blockedBothWays(req.auth.uid),
+  ]);
+  const rows = snapshot.docs
+    .map((document) => document.data())
+    .filter((notification) => NOTIFICATION_TYPES.has(notification.type) && !blocked.has(notification.actorId));
+  const actors = await profilesByIds(rows.map((notification) => notification.actorId));
+  const items = rows.map((notification) => ({
+    ...notification,
+    actor: actors.get(notification.actorId) ? profileForOthers(actors.get(notification.actorId)) : null,
+  }));
+  return success(
+    res,
+    req,
+    {
+      items,
+      unreadCount: items.filter((notification) => !notification.readAt).length,
+    },
+    200,
+    { pagination: { total: items.length, nextCursor: null } },
+  );
+});
+
+app.patch("/api/notifications/:notificationId/read", requireUser, async (req, res) => {
+  const notificationId = safeString(req.params.notificationId, "notificationId", { min: 40, max: 40 });
+  const reference = notificationItems(req.auth.uid).doc(notificationId);
+  const snapshot = await reference.get();
+  if (!snapshot.exists) throw new ApiError(404, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다.");
+  const readAt = snapshot.data().readAt || nowIso();
+  if (!snapshot.data().readAt) await reference.update({ readAt });
+  return success(res, req, { id: notificationId, readAt });
+});
+
+app.post("/api/notifications/read-all", requireUser, async (req, res) => {
+  const readAt = nowIso();
+  let updated = 0;
+  let hasMore = false;
+  while (updated < 2000) {
+    const snapshot = await notificationItems(req.auth.uid).where("readAt", "==", null).limit(400).get();
+    if (snapshot.empty) break;
+    const batch = db.batch();
+    snapshot.docs.forEach((document) => batch.update(document.ref, { readAt }));
+    await batch.commit();
+    updated += snapshot.size;
+    if (snapshot.size < 400) break;
+  }
+  if (updated >= 2000) {
+    const remaining = await notificationItems(req.auth.uid).where("readAt", "==", null).limit(1).get();
+    hasMore = !remaining.empty;
+  }
+  return success(res, req, { updated, readAt, hasMore });
 });
 
 app.patch("/api/profile", requireUser, async (req, res) => {
@@ -1073,16 +1160,25 @@ app.post("/api/partners/:partnerId/block", requireUser, async (req, res) => {
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인을 차단할 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists) throw new ApiError(404, "PARTNER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
-  await db.collection("blocks").doc(blockId(req.auth.uid, partnerId)).set({
+  const [mineFromPartner, partnerFromMine] = await Promise.all([
+    notificationItems(req.auth.uid).where("actorId", "==", partnerId).limit(200).get(),
+    notificationItems(partnerId).where("actorId", "==", req.auth.uid).limit(200).get(),
+  ]);
+  // 차단하면 마음·팔로우·서로에게서 온 알림도 함께 지웁니다. 차단을 풀었을 때
+  // 오래된 관계 알림이 다시 나타나지 않아야 합니다.
+  const batch = db.batch();
+  batch.set(db.collection("blocks").doc(blockId(req.auth.uid, partnerId)), {
     id: blockId(req.auth.uid, partnerId),
     blockerId: req.auth.uid,
     blockedId: partnerId,
     createdAt: nowIso(),
   });
-  // 차단하면 서로 보낸 마음도 지웁니다 — 남겨두면 매칭·알림에서 다시 이어집니다.
-  const batch = db.batch();
   batch.delete(db.collection("likes").doc(req.auth.uid + "_" + partnerId));
   batch.delete(db.collection("likes").doc(partnerId + "_" + req.auth.uid));
+  batch.delete(db.collection("follows").doc(req.auth.uid + "_" + partnerId));
+  batch.delete(db.collection("follows").doc(partnerId + "_" + req.auth.uid));
+  mineFromPartner.docs.forEach((document) => batch.delete(document.ref));
+  partnerFromMine.docs.forEach((document) => batch.delete(document.ref));
   await batch.commit();
   return success(res, req, { blockedId: partnerId, blocked: true }, 201);
 });
@@ -1107,13 +1203,35 @@ app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
     throw new ApiError(403, "PARTNER_BLOCKED", "차단된 상대에게는 마음을 보낼 수 없습니다.");
   }
   const timestamp = nowIso();
-  await db.collection("likes").doc(req.auth.uid + "_" + partnerId).set({
-    fromUserId: req.auth.uid,
-    toUserId: partnerId,
-    createdAt: timestamp,
+  const reference = db.collection("likes").doc(req.auth.uid + "_" + partnerId);
+  const reverseReference = db.collection("likes").doc(partnerId + "_" + req.auth.uid);
+  const result = await db.runTransaction(async (transaction) => {
+    const [existing, reverse] = await Promise.all([
+      transaction.get(reference),
+      transaction.get(reverseReference),
+    ]);
+    if (!existing.exists) {
+      transaction.create(reference, {
+        fromUserId: req.auth.uid,
+        toUserId: partnerId,
+        createdAt: timestamp,
+      });
+      putNotification(transaction, {
+        type: "partner_like",
+        recipientId: partnerId,
+        actorId: req.auth.uid,
+        sourceId: partnerId,
+        createdAt: timestamp,
+      });
+    }
+    return { created: !existing.exists, mutual: reverse.exists };
   });
-  const reverse = await db.collection("likes").doc(partnerId + "_" + req.auth.uid).get();
-  return success(res, req, { liked: true, mutual: reverse.exists, partner: profileForOthers(partnerSnapshot.data()) }, 201);
+  return success(
+    res,
+    req,
+    { liked: true, mutual: result.mutual, partner: profileForOthers(partnerSnapshot.data()) },
+    result.created ? 201 : 200,
+  );
 });
 
 app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
@@ -1123,12 +1241,37 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
     throw new ApiError(404, "PARTNER_NOT_FOUND", "파트너를 찾을 수 없습니다.");
   }
+  if (await isBlockedBetween(req.auth.uid, partnerId)) {
+    throw new ApiError(403, "PARTNER_BLOCKED", "차단된 상대를 팔로우할 수 없습니다.");
+  }
   const reference = db.collection("follows").doc(req.auth.uid + "_" + partnerId);
+  const requestedFollowing = req.body?.following === undefined
+    ? null
+    : optionalBoolean(req.body.following, "following", false);
   const following = await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
-    if (snapshot.exists) transaction.delete(reference);
-    else transaction.create(reference, { fromUserId: req.auth.uid, toUserId: partnerId, createdAt: nowIso() });
-    return !snapshot.exists;
+    const next = requestedFollowing ?? !snapshot.exists;
+    if (next === snapshot.exists) return next;
+    if (next) {
+      const createdAt = nowIso();
+      transaction.create(reference, { fromUserId: req.auth.uid, toUserId: partnerId, createdAt });
+      putNotification(transaction, {
+        type: "follow",
+        recipientId: partnerId,
+        actorId: req.auth.uid,
+        sourceId: partnerId,
+        createdAt,
+      });
+    } else {
+      transaction.delete(reference);
+      removeNotification(transaction, {
+        type: "follow",
+        recipientId: partnerId,
+        actorId: req.auth.uid,
+        sourceId: partnerId,
+      });
+    }
+    return next;
   });
   const reverse = await db.collection("follows").doc(partnerId + "_" + req.auth.uid).get();
   return success(res, req, { following, mutual: following && reverse.exists, partner: profileForOthers(partnerSnapshot.data()) });
@@ -1328,9 +1471,16 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
     createdAt: timestamp,
   };
   const postReference = db.collection("posts").doc(postId);
+  const parentReference = parentId ? postReference.collection("replies").doc(parentId) : null;
   await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(postReference);
+    const [snapshot, parentSnapshot] = await Promise.all([
+      transaction.get(postReference),
+      parentReference ? transaction.get(parentReference) : Promise.resolve(null),
+    ]);
     if (!snapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
+    if (parentReference && !parentSnapshot?.exists) {
+      throw new ApiError(404, "REPLY_NOT_FOUND", "답글을 남길 댓글을 찾을 수 없습니다.");
+    }
     const current = snapshot.data();
     transaction.create(postReference.collection("replies").doc(reply.id), reply);
     transaction.update(postReference, {
@@ -1338,6 +1488,29 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
       corrections: kind === "correction" ? (current.corrections || 0) + 1 : current.corrections || 0,
       updatedAt: timestamp,
     });
+    putNotification(transaction, {
+      type: kind === "correction" ? "post_correction" : "post_reply",
+      recipientId: current.authorId,
+      actorId: req.auth.uid,
+      sourceId: reply.id,
+      postId,
+      replyId: reply.id,
+      excerpt: text,
+      createdAt: timestamp,
+    });
+    const parentAuthorId = parentSnapshot?.data()?.authorId;
+    if (parentAuthorId && parentAuthorId !== current.authorId) {
+      putNotification(transaction, {
+        type: "comment_reply",
+        recipientId: parentAuthorId,
+        actorId: req.auth.uid,
+        sourceId: reply.id,
+        postId,
+        replyId: reply.id,
+        excerpt: text,
+        createdAt: timestamp,
+      });
+    }
   });
   return success(
     res,
@@ -1474,9 +1647,10 @@ app.delete("/api/saved-phrases/:itemId", requireUser, async (req, res) => {
 
 app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
   const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  await readablePost(postId, req.auth.uid);
   const postReference = db.collection("posts").doc(postId);
   const reactionReference = postReference.collection("reactions").doc(req.auth.uid);
-  const partnerIds = await acceptedPartnerIds(req.auth.uid);
+  const requestedLiked = req.body?.liked === undefined ? null : optionalBoolean(req.body.liked, "liked", false);
   const result = await db.runTransaction(async (transaction) => {
     const [postSnapshot, reactionSnapshot] = await Promise.all([
       transaction.get(postReference),
@@ -1484,15 +1658,32 @@ app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
     ]);
     if (!postSnapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
     const post = postSnapshot.data();
-    const readable =
-      post.visibility === "public" ||
-      post.authorId === req.auth.uid ||
-      (post.visibility === "partners" && partnerIds.has(post.authorId));
-    if (!readable) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
-    const liked = !reactionSnapshot.exists;
-    if (liked) transaction.create(reactionReference, { userId: req.auth.uid, createdAt: nowIso() });
-    else transaction.delete(reactionReference);
-    transaction.update(postReference, { likes: FieldValue.increment(liked ? 1 : -1), updatedAt: nowIso() });
+    const liked = requestedLiked ?? !reactionSnapshot.exists;
+    if (liked === reactionSnapshot.exists) {
+      return { liked, likes: Math.max(0, Number(post.likes || 0)) };
+    }
+    const timestamp = nowIso();
+    if (liked) {
+      transaction.create(reactionReference, { userId: req.auth.uid, createdAt: timestamp });
+      putNotification(transaction, {
+        type: "post_like",
+        recipientId: post.authorId,
+        actorId: req.auth.uid,
+        sourceId: postId,
+        postId,
+        excerpt: post.text,
+        createdAt: timestamp,
+      });
+    } else {
+      transaction.delete(reactionReference);
+      removeNotification(transaction, {
+        type: "post_like",
+        recipientId: post.authorId,
+        actorId: req.auth.uid,
+        sourceId: postId,
+      });
+    }
+    transaction.update(postReference, { likes: FieldValue.increment(liked ? 1 : -1), updatedAt: timestamp });
     return { liked, likes: Math.max(0, Number(postSnapshot.data().likes || 0) + (liked ? 1 : -1)) };
   });
   return success(res, req, result);
@@ -1586,13 +1777,28 @@ app.post("/api/conversations/:conversationId/accept", requireUser, async (req, r
     if (conversationStatus(data) !== "pending" || data.requestRecipientId !== req.auth.uid) {
       throw new ApiError(403, "REQUEST_ACCEPT_FORBIDDEN", "이 메시지 요청을 수락할 수 없습니다.");
     }
+    const timestamp = nowIso();
     const patch = {
       requestStatus: "accepted",
       requestSenderId: null,
       requestRecipientId: null,
-      updatedAt: nowIso(),
+      updatedAt: timestamp,
     };
     transaction.update(reference, patch);
+    removeNotification(transaction, {
+      type: "message_request",
+      recipientId: req.auth.uid,
+      actorId: data.requestSenderId,
+      sourceId: id,
+    });
+    putNotification(transaction, {
+      type: "request_accepted",
+      recipientId: data.requestSenderId,
+      actorId: req.auth.uid,
+      sourceId: id,
+      conversationId: id,
+      createdAt: timestamp,
+    });
     return { ...data, ...patch };
   });
   return success(res, req, await conversationView(conversation, req.auth.uid, true));
@@ -1716,6 +1922,18 @@ async function createMessage(req, res, conversationId) {
     const unread = { ...(conversation.unread || {}) };
     if (recipientId) unread[recipientId] = (unread[recipientId] || 0) + 1;
     unread[req.auth.uid] = 0;
+
+    if (recipientId && conversationStatus(conversation) === "pending") {
+      putNotification(transaction, {
+        type: "message_request",
+        recipientId,
+        actorId: req.auth.uid,
+        sourceId: id,
+        conversationId: id,
+        excerpt: text,
+        createdAt: timestamp,
+      });
+    }
 
     transaction.update(conversationReference, {
       lastMessage: text,

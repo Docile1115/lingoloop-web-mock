@@ -440,6 +440,34 @@ export interface ApiReceivedLike {
   mutual: boolean;
 }
 
+export type ApiNotificationType =
+  | "post_like"
+  | "post_reply"
+  | "post_correction"
+  | "comment_reply"
+  | "partner_like"
+  | "follow"
+  | "message_request"
+  | "request_accepted";
+
+export interface ApiNotification {
+  id: string;
+  type: ApiNotificationType;
+  actorId: string;
+  actor: ApiProfile | null;
+  postId: string;
+  replyId: string;
+  conversationId: string;
+  excerpt: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface ApiNotificationPage {
+  items: ApiNotification[];
+  unreadCount: number;
+}
+
 export interface ApiCorrection {
   id: string;
   postId: string;
