@@ -6957,96 +6957,159 @@ label > svg { flex: none; }
 /* ─────────────────────────────────────────────
    소셜 로그인 — 앱 안쪽과 같은 토큰을 씁니다.
    ───────────────────────────────────────────── */
+/* ─────────────────────────────────────────────
+   로그인
+
+   가운데 한 칸입니다. 예전에는 좌우 두 칸이었는데, 페이지 최대 너비가 없어서
+   넓은 화면에서 왼쪽 글과 오른쪽 카드 사이가 400px 가까이 벌어졌습니다.
+   카드 안에 버튼이 하나뿐이라 화면 절반을 채울 내용도 아니었습니다.
+   ───────────────────────────────────────────── */
+
 .signin-page {
   display: grid;
   min-height: 100dvh;
-  align-content: center;
-  gap: var(--sp-7);
-  grid-template-columns: minmax(0, 1fr) min(430px, 100%);
+  place-items: center;
   padding: var(--sp-6) var(--page-pad-x);
   background: var(--canvas);
 }
 
-.signin-intro { max-width: 520px; }
+.signin-panel {
+  display: flex;
+  width: 100%;
+  max-width: 420px;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
 
+/* 브랜드. 이름이 없으면 무엇에 로그인하는지 알 수 없습니다. */
 .signin-brand {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-6);
-  font-size: 19px;
-  font-weight: 700;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-5);
 }
 
-.signin-brand strong { color: var(--primary); }
-
-.signin-intro h1 {
-  margin: 0 0 var(--sp-3);
-  font-size: 38px;
-  line-height: 1.25;
-  letter-spacing: -0.02em;
-}
-
-.signin-intro p { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.65; }
-
-.signin-card {
-  padding: var(--sp-6);
-  border: var(--bw-hair) solid var(--line);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.signin-card h2 { margin: 0 0 6px; font-size: 21px; }
-.signin-lead { margin: 0 0 var(--sp-5); color: var(--muted); font-size: 14px; }
-
-.signin-social {
+/* 초록 원색 위에 어두운 글자 — 대비 8.03. */
+.signin-mark {
   display: grid;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-4);
+  width: 52px;
+  height: 52px;
+  border-radius: 17px;
+  background: var(--primary-gradient);
+  color: var(--primary-text);
+  place-items: center;
 }
+
+.signin-wordmark { font-size: 25px; font-weight: 800; letter-spacing: -0.03em; }
+.signin-wordmark strong { color: var(--primary-ink); font-weight: 800; }
+
+.signin-title {
+  margin: 0 0 var(--sp-3);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+.signin-sub {
+  margin: 0 0 var(--sp-6);
+  max-width: 34ch;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.signin-social { display: grid; width: 100%; gap: var(--sp-3); }
 
 .signin-provider {
   display: grid;
-  min-height: 46px;
-  grid-template-columns: 48px 1fr 48px;
+  width: 100%;
+  min-height: 52px;
+  grid-template-columns: 52px 1fr 52px;
   align-items: center;
   padding: 0;
   border: var(--bw-thin) solid var(--line-structure);
-  border-radius: var(--r-btn);
-  font-size: 14px;
-  font-weight: 650;
+  border-radius: var(--r-pill);
+  font-size: 15px;
+  font-weight: 700;
 }
 
-.signin-provider::after { content: ""; }
-.signin-provider:disabled { cursor: not-allowed; opacity: .46; }
+.signin-provider:disabled { cursor: not-allowed; opacity: .5; }
 .signin-provider-google { background: var(--surface); color: var(--ink); }
-.signin-provider-google:hover:not(:disabled) { background: var(--surface-soft); }
-.signin-provider-apple { border-color: #111; background: #111; color: #fff; }
-.signin-provider-apple:hover:not(:disabled) { background: #292929; }
+.signin-provider-google:hover:not(:disabled) { border-color: var(--ink); background: var(--surface-soft); }
+.signin-provider-apple { border-color: var(--ink); background: var(--ink); color: var(--canvas); }
+.signin-provider-apple:hover:not(:disabled) { opacity: .88; }
 .signin-provider-loading { background: var(--surface-soft); color: var(--muted); }
 
 .signin-provider-mark {
   display: inline-grid;
-  place-items: center;
   justify-self: stretch;
   font-family: Arial, sans-serif;
   font-weight: 800;
+  place-items: center;
 }
 
-.signin-provider-mark-google { color: #4285f4; font-size: 19px; }
-.signin-provider-mark-apple { font-size: 10px; letter-spacing: -.03em; }
+.signin-provider-mark-google { color: #4285f4; font-size: 20px; }
+.signin-provider-mark-apple::before { content: ""; font-size: 21px; }
 
-.signin-error { margin: 0; color: var(--danger); font-size: 13px; }
-.signin-legal { display: block; margin-top: var(--sp-4); color: var(--subtle); font-size: 12px; line-height: 1.5; }
+/* 아직 설정이 안 끝났다는 안내. 사용자 잘못이 아니라 기다리면 되는 일입니다. */
+.signin-note {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-btn);
+  background: var(--secondary-soft);
+  color: var(--secondary-ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.signin-error { margin: 0; color: var(--danger); font-size: 13px; line-height: 1.5; }
+
+/* 무엇을 하는 서비스인지. 로그인만 덩그러니 있으면 무엇에 로그인하는지 모릅니다. */
+.signin-points {
+  display: grid;
+  margin: var(--sp-6) 0 0;
+  padding: 0;
+  gap: var(--sp-3);
+  justify-items: start;
+  list-style: none;
+  text-align: left;
+}
+
+.signin-points li {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: start;
+  gap: var(--sp-2);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.signin-points li::before {
+  content: "✓";
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--secondary);
+  color: var(--secondary-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+}
+
+.signin-legal { display: block; margin-top: var(--sp-6); color: var(--subtle); font-size: 12px; line-height: 1.6; }
 .signin-legal a { color: inherit; font-weight: 600; text-underline-offset: 2px; }
 .signin-legal a:hover { color: var(--primary-ink); }
 
-@media (max-width: 940px) {
-  .signin-page { grid-template-columns: minmax(0, 1fr); gap: var(--sp-6); }
-  .signin-intro { max-width: none; text-align: center; }
-  .signin-brand { justify-content: center; }
-  .signin-intro h1 { font-size: 28px; }
+@media (max-width: 640px) {
+  .signin-title { font-size: 27px; }
+  .signin-mark { width: 54px; height: 54px; }
 }
 
 /* 설정의 로그아웃 — 되돌릴 수 있는 행동이라 크게 두지 않습니다. */
