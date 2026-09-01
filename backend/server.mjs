@@ -766,24 +766,46 @@ function authRateLimit(req, _res, next) {
     nextAuthAttemptSweepAt = timestamp + 60_000;
   }
   const forwardedIp = String(req.get("cf-connecting-ip") || req.ip || "unknown").slice(0, 128);
-  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLocaleLowerCase() : "unknown";
-  const key = crypto.createHash("sha256").update(forwardedIp + ":" + email).digest("hex");
-  if (!authAttempts.has(key) && authAttempts.size >= 10_000) {
-    next(new ApiError(429, "RATE_LIMITED", "로그인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."));
-    return;
-  }
-  const current = authAttempts.get(key);
-  if (!current || current.resetAt <= timestamp) {
-    authAttempts.set(key, { count: 1, resetAt: timestamp + 15 * 60 * 1000 });
-    next();
-    return;
-  }
-  current.count += 1;
-  if (current.count > 30) {
+  /* 누구의 시도인가.
+     비밀번호 로그인은 email 로 구분했는데 소셜 로그인(/api/auth/session)은
+     idToken 만 보냅니다. 그래서 한 IP 뒤의 모든 사람이 같은 바구니를 써서,
+     카페·사무실처럼 NAT 를 함께 쓰면 서로를 막았습니다.
+     토큰의 sub 를 꺼내 계정별로 셉니다 — 검증은 뒤에서 하므로 여기서는
+     구분자로만 쓰고, 위조해서 바구니를 늘리는 것은 아래 IP 한도가 막습니다. */
+  const identity = authIdentity(req);
+  const takeSlot = (key, limit) => {
+    if (!authAttempts.has(key) && authAttempts.size >= 10_000) return false;
+    const current = authAttempts.get(key);
+    if (!current || current.resetAt <= timestamp) {
+      authAttempts.set(key, { count: 1, resetAt: timestamp + 15 * 60 * 1000 });
+      return true;
+    }
+    current.count += 1;
+    return current.count <= limit;
+  };
+  const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
+  // 계정별 30회, 그리고 한 IP 전체로 300회. 한 사람이 막혀도 옆 사람은 안 막힙니다.
+  const ok = takeSlot(hash(forwardedIp + ":" + identity), 30) && takeSlot(hash("ip:" + forwardedIp), 300);
+  if (!ok) {
     next(new ApiError(429, "RATE_LIMITED", "로그인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."));
     return;
   }
   next();
+}
+
+/** 시도한 사람을 구분할 값. 이메일이 있으면 그것, 없으면 토큰의 sub 입니다. */
+function authIdentity(req) {
+  if (typeof req.body?.email === "string") return req.body.email.trim().toLocaleLowerCase();
+  const token = typeof req.body?.idToken === "string" ? req.body.idToken : "";
+  const payload = token.split(".")[1];
+  if (!payload) return "unknown";
+  try {
+    // 검증하지 않습니다 — 진짜인지는 뒤에서 봅니다. 여기서는 구분자일 뿐입니다.
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return String(claims.sub || claims.user_id || "unknown").slice(0, 128);
+  } catch {
+    return "unknown";
+  }
 }
 
 app.use((req, res, next) => {
