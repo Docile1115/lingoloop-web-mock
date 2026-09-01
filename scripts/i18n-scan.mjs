@@ -100,6 +100,23 @@ for (const name of ["en", "ja"]) {
   const blank = [...dict.entries].filter(([, v]) => v.trim() === "").map(([k]) => k);
   missingTotal += missing.length + blank.length;
 
+  /* 안 쓰는 키는 언제나 지웁니다.
+     예전에는 --fill 을 줄 때만 사전을 다시 썼습니다. 그래서 화면에서 문구를
+     지우면 keys.ts 에서는 빠지는데 en/ja 에는 남아, 다음 타입 검사에서
+     "Record 에 없는 키" 로 터졌습니다. 사람이 매번 손으로 지워야 했습니다. */
+  if (!fill && stale.length && dict.src) {
+    const kept = sorted.filter((k) => dict.entries.has(k)).map((k) => [k, dict.entries.get(k)]);
+    writeFileSync(
+      dict.path,
+      dict.src.slice(0, dict.src.indexOf("export const ")) +
+        `export const ${name}: Record<MessageKey, string> = {\n` +
+        kept.map(([k, v]) => `  ${esc(k)}: ${esc(v)},`).join("\n") +
+        `\n};\n`,
+      "utf8",
+    );
+    console.log(`   ${name}: 안 쓰는 키 ${stale.length}개를 지웠습니다`);
+  }
+
   if (fill) {
     const merged = sorted.map((k) => [k, dict.entries.get(k) ?? ""]);
     writeFileSync(
