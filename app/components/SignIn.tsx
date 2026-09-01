@@ -107,8 +107,10 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
           </button>
 
           {/* 설정이 안 끝난 것은 사용자 잘못이 아닙니다. 버튼 이름에 섞지 않고 따로 알립니다. */}
+          {/* 이 상태는 배포 설정이 덜 끝났을 때만 나옵니다. 사용자가 할 수 있는 일이
+              없으므로 원인을 늘어놓지 않고, 지금 안 된다는 것만 분명히 알립니다. */}
           {provider && !providerEnabled && !busy ? (
-            <p className="signin-note">{t("관리자가 로그인 설정을 마치면 바로 쓸 수 있어요.")}</p>
+            <p className="signin-note">{t("지금은 로그인할 수 없어요. 잠시 후 다시 시도해 주세요.")}</p>
           ) : null}
           {error ? <p className="signin-error" role="alert">{error}</p> : null}
         </div>
@@ -119,12 +121,15 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
           <li>{t("대화는 계정에 남아 기기를 바꿔도 이어져요")}</li>
         </ul>
 
-        <small className="signin-legal">
-          <a href="/terms">{t("이용약관")}</a>
-          <span aria-hidden="true"> · </span>
-          <a href="/privacy">{t("개인정보 처리방침")}</a>
-        </small>
       </div>
+
+      {/* 약관은 화면 맨 아래에 둡니다. 로그인 버튼 바로 밑에 붙어 있으면
+          눌러야 하는 것과 읽어두는 것이 같은 무게로 보입니다. */}
+      <small className="signin-legal">
+        <a href="/terms">{t("이용약관")}</a>
+        <span aria-hidden="true"> · </span>
+        <a href="/privacy">{t("개인정보 처리방침")}</a>
+      </small>
     </main>
   );
 }

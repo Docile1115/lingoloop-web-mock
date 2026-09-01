@@ -6968,7 +6968,11 @@ label > svg { flex: none; }
 .signin-page {
   display: grid;
   min-height: 100dvh;
-  place-items: center;
+  align-items: center;
+  justify-items: center;
+  /* 가운데 칸과 맨 아래 약관, 두 줄입니다. 첫 줄이 남는 높이를 다 가져가므로
+     내용이 길어져도 약관은 계속 바닥에 있습니다. */
+  grid-template-rows: 1fr auto;
   padding: var(--sp-6) var(--page-pad-x);
   background: var(--canvas);
 }
@@ -7103,7 +7107,7 @@ label > svg { flex: none; }
   text-align: center;
 }
 
-.signin-legal { display: block; margin-top: var(--sp-6); color: var(--subtle); font-size: 12px; line-height: 1.6; }
+.signin-legal { display: block; padding-top: var(--sp-6); color: var(--subtle); font-size: 12px; line-height: 1.6; text-align: center; }
 .signin-legal a { color: inherit; font-weight: 600; text-underline-offset: 2px; }
 .signin-legal a:hover { color: var(--primary-ink); }
 
