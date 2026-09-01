@@ -44,7 +44,12 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
   }, []);
 
   const submitSocial = async (provider: SocialProvider) => {
-    if (!socialConfig) return;
+    // 설정을 아직 못 받아왔으면 조용히 넘어가지 않습니다 — 눌렀는데 아무 일도
+    // 일어나지 않으면 고장인지 느린 건지 알 수 없습니다.
+    if (!socialConfig) {
+      setError(t("로그인 설정을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요."));
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -72,7 +77,6 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
     }
   };
 
-  const providerEnabled = provider ? Boolean(socialConfig?.providers[provider]) : false;
   const providerLabel = provider === "apple"
     ? t("Apple로 계속하기")
     : provider === "google"
@@ -98,7 +102,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
             type="button"
             className={`signin-provider ${provider ? `signin-provider-${provider}` : "signin-provider-loading"}`}
             onClick={() => provider && void submitSocial(provider)}
-            disabled={busy || !provider || !providerEnabled}
+            disabled={busy || !provider}
           >
             <span className={`signin-provider-mark ${provider ? `signin-provider-mark-${provider}` : ""}`} aria-hidden="true">
               {provider === "google" ? "G" : provider === "apple" ? "" : "…"}
@@ -107,11 +111,6 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
           </button>
 
           {/* 설정이 안 끝난 것은 사용자 잘못이 아닙니다. 버튼 이름에 섞지 않고 따로 알립니다. */}
-          {/* 이 상태는 배포 설정이 덜 끝났을 때만 나옵니다. 사용자가 할 수 있는 일이
-              없으므로 원인을 늘어놓지 않고, 지금 안 된다는 것만 분명히 알립니다. */}
-          {provider && !providerEnabled && !busy ? (
-            <p className="signin-note">{t("지금은 로그인할 수 없어요. 잠시 후 다시 시도해 주세요.")}</p>
-          ) : null}
           {error ? <p className="signin-error" role="alert">{error}</p> : null}
         </div>
 
