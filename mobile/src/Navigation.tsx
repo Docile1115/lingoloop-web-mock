@@ -262,7 +262,11 @@ export function Navigation() {
           )}
         </Stack.Screen>
 
-        <Stack.Screen name="Thread">
+        {/* 제목은 상대 이름입니다. 옵션을 비워두면 화면 이름("Thread")이 그대로 나옵니다. */}
+        <Stack.Screen
+          name="Thread"
+          options={({ route }) => ({ title: route.params.conversation.name })}
+        >
           {({ route }) => <ThreadScreen conversation={route.params.conversation} />}
         </Stack.Screen>
 

@@ -490,6 +490,111 @@ p {
   backdrop-filter: blur(18px);
 }
 
+/* 커뮤니티에서는 무엇을 보고 있는지 고르는 줄이 필요해 상단바를 띄웁니다.
+   목록 위에 또 한 줄을 두면 글이 시작되기까지 두 번 내려가야 합니다. */
+.topbar:has(.topbar-feed) { display: flex; height: 60px; padding: 0; border-bottom: 0; background: transparent; }
+
+/* 상단 줄 바로 아래에 카드가 옵니다. .view 의 기본 위 여백을 두면 그 사이가
+   한 번 더 벌어져 빈 띠처럼 보입니다. */
+.topbar:has(.topbar-feed) + .workspace-grid .view { margin-top: 0; }
+
+/* 본문 카드는 화면 가운데 정렬(max-width: --page-max)입니다. 이 줄도 같은 폭·같은
+   중앙에 두어야 "최신" 이 글 카드 왼쪽 끝과, 거르기가 오른쪽 끝과 맞습니다.
+   사이드바는 fixed 라 상단바가 그 아래로 깔리는데, 가운데 정렬이면 겹치지 않습니다. */
+.topbar-feed {
+  width: 100%;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 0 var(--sp-5);
+}
+
+/* 알림·검색·글쓰기는 좌측 네비게이션에 있습니다. 상단바에 또 두면 같은 것이 둘입니다. */
+.topbar:has(.topbar-feed) .topbar-actions { display: none; }
+
+/* 왼쪽부터 채우고, 오른쪽으로 밀 것이 있으면 .topbar-spacer 를 넣습니다.
+   space-between 으로 두면 항목이 둘일 때 제목이 오른쪽 끝으로 날아갑니다. */
+.topbar-feed { display: flex; align-items: center; justify-content: flex-start; gap: var(--sp-3); }
+
+/* 화면 이름. 선택기(.feed-select-trigger)와 같은 크기라 화면을 옮겨도 제목 줄이
+   같은 자리에서 같은 크기로 보입니다. */
+/* 여백 없이 줄의 왼쪽 끝에 붙습니다 — 커뮤니티의 "최신" 과 같은 자리입니다. */
+.topbar-title { padding: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
+
+/* 화면 이름 옆에 붙는 선택기는 한 단계 작고 흐리게 둡니다 — 제목과 같은 무게면
+   둘 중 무엇이 화면 이름인지 모릅니다. 커뮤니티처럼 제목이 없는 화면에서는
+   선택기가 곧 제목이라 크게 그대로 둡니다. */
+.topbar-feed:has(.topbar-title) .menu-trigger.feed-select-trigger {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 400;
+}
+
+/* 제목과 선택기가 왼쪽에 붙고, 오른쪽 동작은 반대편 끝에 섭니다. */
+.topbar-spacer { flex: 1; }
+
+/* 뒤로가기. 제목 왼쪽에 붙되 줄의 왼쪽 끝은 제목이 아니라 이 버튼입니다. */
+.topbar-back {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  margin-left: -8px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink);
+}
+.topbar-back:hover { background: var(--hover-bg); }
+
+/* 선택기에 붙는 개수. 초록은 "누르세요" 자리라 알림 수는 노랑을 씁니다. */
+.topbar-select-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--secondary);
+  color: var(--secondary-text);
+  font-size: 11.5px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+
+.topbar-action {
+  min-height: 36px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.topbar-action:hover:not(:disabled) { background: var(--hover-bg); }
+.topbar-action:disabled { color: var(--subtle); cursor: default; }
+
+/* 트리거만 여기서 꾸밉니다. 메뉴 몸통은 .menu-panel 하나로 통일했습니다. */
+/* 좌우 여백 없이 줄의 왼쪽 끝에 붙습니다 — 아래 카드의 글자 시작점과 맞습니다.
+   호버 배경도 두지 않습니다. 제목처럼 읽히는 자리라 배경이 깔리면 눌러야 하는
+   것처럼 보입니다(누를 수는 있고, 화살표가 그것을 알려줍니다). */
+.menu-trigger.feed-select-trigger {
+  display: inline-flex;
+  width: auto;
+  min-height: 38px;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.menu-trigger.feed-select-trigger svg { color: var(--muted); }
+
 .mobile-brand {
   display: none;
 }
@@ -568,9 +673,13 @@ p {
 
 .workspace-grid {
   display: grid;
+  /* 상단 줄이 생기면 그만큼 뺍니다. 100vh 로 두면 화면이 상단 줄 높이만큼
+     넘쳐서 목록 맨 아래가 잘리고, 스크롤로도 닿지 않습니다. */
   height: 100vh;
   grid-template-columns: minmax(0, 1fr);
 }
+
+.topbar:has(.topbar-feed) + .workspace-grid { height: calc(100vh - 60px); }
 
 .main-content {
   width: 100%;
@@ -1744,12 +1853,23 @@ p {
 .feed-toolbar { position: sticky; top: 0; z-index: 5; padding: var(--sp-1) 0 var(--sp-2); background: var(--canvas); }
 
 .feed-post {
+  /* 아바타(51) + 이름과의 간격(8). 머리줄 뒤의 모든 것을 이만큼 들여써서
+     본문·태그·액션이 아바타 밑이 아니라 이름 밑에서 시작하게 합니다. */
+  --post-indent: calc(51px + var(--sp-2));
   margin-bottom: var(--sp-3);
   padding: var(--sp-4) var(--sp-4) 0;
   border: var(--bw-hair) solid var(--line);
   border-radius: var(--r-lg);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
+}
+
+/* 머리줄만 아바타를 포함하고, 나머지는 이름 열에 맞춥니다.
+   max-width 가 함께 있어야 합니다 — 본문·사진처럼 width:100% 인 것은 들여쓰기만
+   주면 그만큼 오른쪽으로 넘칩니다(실측 59px). */
+.feed-post > *:not(.post-header) {
+  margin-left: var(--post-indent);
+  max-width: calc(100% - var(--post-indent));
 }
 
 .post-header {
@@ -1987,9 +2107,11 @@ p {
 }
 
 .community-view {
-  /* 커뮤니티는 상하좌우 16px 로 맞춥니다. 글 카드도 구분선도 이 값을 따라가서
-     한 곳만 바꾸면 됩니다(카드는 --view-pad-x 만큼 밖으로 뺐다가 안에서 채웁니다). */
-  --view-pad-x: var(--sp-4);
+  /* 좌우 24px. 글 카드도 구분선도 이 값을 따라가서 한 곳만 바꾸면 됩니다
+     (카드는 --view-pad-x 만큼 밖으로 뺐다가 안에서 채웁니다).
+     위 줄(.topbar-feed)의 여백과 같은 값이라 "최신" 과 글쓴이 이름이 같은
+     세로선에서 시작합니다. */
+  --view-pad-x: var(--sp-5);
   padding-top: var(--sp-4);
 }
 
@@ -2550,31 +2672,54 @@ p {
 
 .writing-language { display: flex; align-items: center; gap: var(--sp-1); margin: 0 0 6px 88px; color: var(--muted); font-size: 12px; }
 .writing-language span { padding: 2px var(--sp-1); border-radius: 4px; background: var(--sunken); color: var(--ink); font-size: 12px; font-weight: 700; }
-.composer-row { display: flex; align-items: flex-end; gap: var(--sp-1); }
+/* 컴포저 한 줄 높이. ＋·입력칸·보내기가 모두 이 높이라야 바닥 정렬이 곧
+   중앙 정렬이 됩니다. 높이가 다르면 바닥만 맞고 중심은 몇 px 씩 어긋납니다
+   (실측: ＋ 5px 아래, 보내기 4px 아래). */
+/* 50px 인 이유: 칸 높이는 안쪽 아이콘 버튼(30) + 위아래 여백(9+9) + 테두리(2)
+   로 정해집니다. 글자 줄(26)보다 버튼이 커서 그쪽이 높이를 잡습니다. */
+.composer-row { --composer-h: 50px; display: flex; align-items: flex-end; gap: var(--sp-2); }
 /* 입력이 여러 줄이 되면 칸이 아래로 자랍니다 — 버튼은 아래에 붙어 있습니다. */
 .composer-row > .icon-button { width: 35px; height: 35px; }
 
 .message-input {
   display: flex;
-  min-height: 44px;
+  box-sizing: border-box;
+  min-height: var(--composer-h);
   flex: 1;
   /* 여러 줄이 되면 칸이 아래로 자랍니다. 안쪽 버튼은 마지막 줄 옆(바닥)에 섭니다 —
      가운데 두면 긴 글에서 글자 한가운데에 떠 있습니다. */
   align-items: flex-end;
   gap: var(--sp-1);
-  padding: var(--sp-2) var(--sp-1) var(--sp-2) var(--sp-2);
-  border: var(--bw-thin) solid var(--line-strong);
-  border-radius: var(--r-btn);
-  background: var(--surface);
+  /* 안쪽 보내기(34) + 위아래 여백(7+7) + 테두리(2) = 50 — --composer-h 와 같습니다. */
+  padding: 7px 7px 7px var(--sp-2);
+  border: var(--bw-thin) solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--sunken);
 }
 
-.message-input:focus-within { border-color: var(--line-structure); box-shadow: 0 0 0 3px rgba(161, 161, 161, .08); }
-.message-input textarea { display: block; width: 100%; min-height: 24px; max-height: 132px; padding: 0; overflow-y: auto; resize: none; border: 0; outline: 0; background: transparent; font-size: 13px; line-height: 24px; }
+.message-input:focus-within { border-color: var(--line-structure); background: var(--surface); }
+.message-input textarea { display: block; width: 100%; min-height: 34px; max-height: 132px; padding: 4px 0; overflow-y: auto; resize: none; border: 0; outline: 0; background: transparent; font-size: 14px; line-height: 26px; }
 /* 칸 안쪽 버튼들 — 이모지는 왼쪽, 첨부·코치는 오른쪽. 글자와 같은 줄 바닥에 섭니다. */
-.message-input button { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--muted); }
+.message-input button { display: inline-flex; width: 34px; height: 34px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--muted); }
 .message-input button:hover { background: var(--hover-bg); color: var(--ink); }
-.composer-emoji { margin-right: 2px; }
-.composer-inline-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; }
+/* 첨부는 칸 밖 왼쪽에 섭니다. 칸이 여러 줄로 자라도 바닥에 붙어 있습니다. */
+.composer-row > .menu-wrap { flex: 0 0 auto; align-self: flex-end; }
+
+.menu-trigger.composer-attach {
+  display: inline-flex;
+  box-sizing: border-box;
+  width: var(--composer-h);
+  height: var(--composer-h);
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-pill);
+  /* 채워진 원. 배경이 없으면 아이콘만 떠 있어 입력칸과 한 벌로 보이지 않습니다. */
+  background: var(--sunken);
+  color: var(--ink);
+}
+.menu-trigger.composer-attach:hover { background: var(--hover-bg); }
+.menu-trigger.composer-attach[aria-expanded="true"] { background: var(--primary); color: var(--primary-text); }
 .composer-attach.active,
 .composer-coach.active { color: var(--primary); }
 
@@ -2595,9 +2740,15 @@ p {
   background: var(--surface);
   box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,.28));
 }
+/* 폭·flex 를 되돌립니다.
+   이 메뉴는 .room-composer 안에 있어서 `.room-composer button { width: 32px }` 에
+   같이 걸립니다. 그 규칙에만 width 가 있어 32px 가 그대로 먹었고, 글자가
+   "사 / 진" 처럼 한 글자씩 세로로 쪼개졌습니다. */
 .composer-attach-menu button {
   display: flex;
+  width: 100%;
   min-height: 38px;
+  flex: 0 0 auto;
   align-items: center;
   gap: var(--sp-2);
   padding: 0 var(--sp-2);
@@ -2607,7 +2758,10 @@ p {
   color: var(--ink);
   font-size: 14px;
   text-align: left;
+  white-space: nowrap;
 }
+
+.composer-attach-menu button > svg { flex: 0 0 auto; }
 .composer-attach-menu button:hover { background: var(--hover-bg); }
 .composer-attach-menu button.recording { color: var(--danger, #e5484d); }
 
@@ -2644,8 +2798,28 @@ p {
 .message-media { display: block; width: 260px; max-width: 100%; aspect-ratio: 4 / 3; border-radius: var(--r-btn); background: var(--sunken); object-fit: cover; }
 .message-audio { width: 240px; margin-top: var(--sp-1); }
 
-.send-button { display: inline-flex; width: 44px; height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; border: 0; border-radius: var(--r-btn); background: var(--primary); color: var(--primary-text); }
-.send-button:disabled { background: var(--line-structure); color: var(--muted); }
+/* 보내기는 쓸 것이 있을 때만 나타납니다(마크업에서 조건부). 늘 떠 있으면
+   눌러도 아무 일이 없는 버튼이 계속 자리를 차지합니다. */
+/* 칸 안 오른쪽. 다른 안쪽 버튼과 같은 크기라 줄이 흔들리지 않습니다. */
+.message-input .send-button {
+  width: 34px;
+  height: 34px;
+  margin-left: 2px;
+  border-radius: var(--r-pill);
+  background: var(--primary);
+  color: var(--primary-text);
+  animation: send-appear .14s ease-out;
+}
+.message-input .send-button:hover { background: var(--primary-strong); color: var(--primary-text); }
+
+@keyframes send-appear {
+  from { opacity: 0; transform: scale(.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .send-button { animation: none; }
+}
 .composer-hint { display: flex; align-items: center; gap: var(--sp-1); margin: var(--sp-1) 0 0 88px; color: var(--subtle); font-size: 12px; }
 
 /* Practice */
@@ -3639,31 +3813,6 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 .search-result > svg { color: var(--subtle); }
 /* 목록이 빈 화면 — 아이콘·제목·설명을 가운데로 모읍니다. */
 /* 상대 프로필에 붙는 그 사람의 글 목록. */
-.partner-post-list { display: flex; flex-direction: column; gap: var(--sp-2); }
-.partner-post-list > button {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  padding: var(--sp-3);
-  border: var(--bw-hair) solid var(--line);
-  border-radius: var(--r-btn);
-  background: var(--surface);
-  color: var(--ink);
-  text-align: left;
-}
-.partner-post-list > button:hover { background: var(--hover-bg); }
-.partner-post-meta { color: var(--subtle); font-size: 12px; }
-.partner-post-text {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  font-size: 14px;
-  line-height: 1.5;
-  white-space: pre-line;
-}
-.partner-post-stats { display: flex; gap: var(--sp-3); color: var(--subtle); font-size: 12px; }
-.partner-post-stats > span { display: inline-flex; align-items: center; gap: 3px; }
 
 .empty-state { display: flex; align-items: center; justify-content: center; flex-direction: column; min-height: 240px; padding: var(--sp-6) var(--sp-4); color: var(--subtle); text-align: center; }
 .empty-state > svg { color: var(--line-structure); }
@@ -3675,17 +3824,11 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 .empty-search p { margin-top: var(--sp-1); font-size: 13px; }
 
 .modal-notifications { width: min(460px,100%); }
-.notifications-content { padding: var(--sp-5); }
-.notifications-content > header { display: flex; align-items: flex-start; justify-content: space-between; }
-.notifications-content h2 { margin-top: var(--sp-2); font-size: 24px; }
-.notifications-content > header p { margin-top: var(--sp-1); padding-right: var(--sp-3); color: var(--muted); font-size: 13px; line-height: 1.45; }
-.notifications-content > header > button { margin: var(--sp-2) var(--sp-6) 0 0; border: 0; background: transparent; color: var(--ink); font-size: 13px; }
+/* 모달이 아니라 화면입니다 — 제목은 DetailHeader 가 그리므로 여기서는
+   설명과 "모두 읽음" 만 남습니다. 목록도 높이를 가두지 않고 화면을 씁니다. */
+.notifications-content { padding: 0; }
 .notifications-content > header > button:disabled { color: var(--subtle); cursor: default; }
-.notification-tabs { display: flex; gap: var(--sp-4); margin-top: var(--sp-4); border-bottom: var(--bw-hair) solid var(--line); }
-.notification-tabs button { padding: 0 1px 9px; border: 0; background: transparent; color: var(--muted); font-size: 13px; }
-.notification-tabs button.active { border-bottom: 2px solid var(--primary); color: var(--ink); font-weight: 600; }
-.notification-tabs span { margin-left: var(--sp-1); color: var(--coral); }
-.notification-list { max-height: min(55vh, 540px); overflow-y: auto; overscroll-behavior: contain; }
+.notification-list { margin-top: var(--sp-2); }
 .notification-list button { position: relative; display: flex; width: 100%; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-1); border: 0; border-bottom: var(--bw-hair) solid var(--line); background: transparent; text-align: left; }
 .notification-list button:hover { background: var(--hover-bg); }
 .notification-list button.unread { background: linear-gradient(90deg,var(--secondary-soft),transparent); }
@@ -4795,7 +4938,9 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   font-weight: 700;
 }
 
-.profile-head-handle { margin: 0; color: var(--ink); font-size: 15px; line-height: 21px; }
+/* 이름보다 한 단계 낮춥니다 — 같은 크기·같은 색이면 둘 중 무엇이 이름인지
+   한눈에 안 들어옵니다. 위아래로도 띄워 이름 줄과 언어 줄에서 떼어냅니다. */
+.profile-head-handle { margin: 5px 0 var(--sp-3); color: var(--subtle); font-size: 13.5px; line-height: 19px; }
 .profile-head-bio { margin: var(--sp-4) 0 0; font-size: 15px; line-height: 21px; white-space: pre-line; }
 
 .profile-head-stats {
@@ -4893,6 +5038,10 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 }
 
 .menu-trigger:hover { background: var(--hover-bg); color: var(--ink); }
+/* 제목처럼 읽히는 자리라 배경을 깔지 않습니다 — 공통 규칙보다 뒤에 둬야 이깁니다.
+   메뉴가 열려 있을 때도 마찬가지입니다. 열린 것은 메뉴 자체가 보여줍니다. */
+.menu-trigger.feed-select-trigger:hover,
+.menu-trigger.feed-select-trigger[aria-expanded="true"] { background: transparent; }
 .menu-trigger[aria-expanded="true"] { background: var(--pressed-bg); color: var(--ink); }
 
 .menu-panel {
@@ -4909,6 +5058,9 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   box-shadow: var(--shadow-lg);
   animation: menu-in 0.12s var(--ease);
 }
+
+.menu-panel button > span { flex: 1; }
+.menu-check { color: var(--primary-ink); }
 
 .menu-end { right: 0; }
 .menu-start { left: 0; }
@@ -5095,10 +5247,6 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 }
 
 /* 프로필 / 글 탭. 둘뿐이라 반씩 나눠 갖게 둡니다 — 왼쪽에 몰아두면 오른쪽이 빈 띠로 남습니다. */
-.profile-detail-tabs { display: grid; grid-template-columns: 1fr 1fr; margin-top: var(--sp-4); }
-.profile-detail-tabs > button { display: flex; align-items: center; justify-content: center; gap: var(--sp-1); }
-.profile-detail-tabs > button > b { margin-left: var(--sp-1); color: var(--subtle); font-weight: 600; }
-.profile-detail-tabs > button.active > b { color: inherit; }
 
 .section-note { margin: calc(var(--sp-2) * -1) 0 var(--sp-3); color: var(--subtle); font-size: 13px; }
 
@@ -6957,96 +7105,151 @@ label > svg { flex: none; }
 /* ─────────────────────────────────────────────
    소셜 로그인 — 앱 안쪽과 같은 토큰을 씁니다.
    ───────────────────────────────────────────── */
+/* ─────────────────────────────────────────────
+   로그인
+
+   가운데 한 칸입니다. 예전에는 좌우 두 칸이었는데, 페이지 최대 너비가 없어서
+   넓은 화면에서 왼쪽 글과 오른쪽 카드 사이가 400px 가까이 벌어졌습니다.
+   카드 안에 버튼이 하나뿐이라 화면 절반을 채울 내용도 아니었습니다.
+   ───────────────────────────────────────────── */
+
 .signin-page {
   display: grid;
   min-height: 100dvh;
-  align-content: center;
-  gap: var(--sp-7);
-  grid-template-columns: minmax(0, 1fr) min(430px, 100%);
+  align-items: center;
+  justify-items: center;
+  /* 가운데 칸과 맨 아래 약관, 두 줄입니다. 첫 줄이 남는 높이를 다 가져가므로
+     내용이 길어져도 약관은 계속 바닥에 있습니다. */
+  grid-template-rows: 1fr auto;
   padding: var(--sp-6) var(--page-pad-x);
   background: var(--canvas);
 }
 
-.signin-intro { max-width: 520px; }
+.signin-panel {
+  display: flex;
+  width: 100%;
+  max-width: 420px;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
 
+/* 브랜드. 이름이 없으면 무엇에 로그인하는지 알 수 없습니다. */
 .signin-brand {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-6);
-  font-size: 19px;
-  font-weight: 700;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-5);
 }
 
-.signin-brand strong { color: var(--primary); }
-
-.signin-intro h1 {
-  margin: 0 0 var(--sp-3);
-  font-size: 38px;
-  line-height: 1.25;
-  letter-spacing: -0.02em;
-}
-
-.signin-intro p { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.65; }
-
-.signin-card {
-  padding: var(--sp-6);
-  border: var(--bw-hair) solid var(--line);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.signin-card h2 { margin: 0 0 6px; font-size: 21px; }
-.signin-lead { margin: 0 0 var(--sp-5); color: var(--muted); font-size: 14px; }
-
-.signin-social {
+/* 초록 원색 위에 어두운 글자 — 대비 8.03. */
+.signin-mark {
   display: grid;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-4);
+  width: 52px;
+  height: 52px;
+  border-radius: 17px;
+  background: var(--primary-gradient);
+  color: var(--primary-text);
+  place-items: center;
 }
+
+.signin-wordmark { font-size: 25px; font-weight: 800; letter-spacing: -0.03em; }
+.signin-wordmark strong { color: var(--primary-ink); font-weight: 800; }
+
+.signin-title {
+  margin: 0 0 var(--sp-3);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+.signin-sub {
+  margin: 0 0 var(--sp-6);
+  max-width: 34ch;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.signin-social { display: grid; width: 100%; gap: var(--sp-3); }
 
 .signin-provider {
   display: grid;
-  min-height: 46px;
-  grid-template-columns: 48px 1fr 48px;
+  width: 100%;
+  min-height: 52px;
+  grid-template-columns: 52px 1fr 52px;
   align-items: center;
   padding: 0;
   border: var(--bw-thin) solid var(--line-structure);
-  border-radius: var(--r-btn);
-  font-size: 14px;
-  font-weight: 650;
+  border-radius: var(--r-pill);
+  font-size: 15px;
+  font-weight: 700;
 }
 
-.signin-provider::after { content: ""; }
-.signin-provider:disabled { cursor: not-allowed; opacity: .46; }
+.signin-provider:disabled { cursor: not-allowed; opacity: .5; }
 .signin-provider-google { background: var(--surface); color: var(--ink); }
-.signin-provider-google:hover:not(:disabled) { background: var(--surface-soft); }
-.signin-provider-apple { border-color: #111; background: #111; color: #fff; }
-.signin-provider-apple:hover:not(:disabled) { background: #292929; }
+.signin-provider-google:hover:not(:disabled) { border-color: var(--ink); background: var(--surface-soft); }
+.signin-provider-apple { border-color: var(--ink); background: var(--ink); color: var(--canvas); }
+.signin-provider-apple:hover:not(:disabled) { opacity: .88; }
 .signin-provider-loading { background: var(--surface-soft); color: var(--muted); }
 
 .signin-provider-mark {
   display: inline-grid;
-  place-items: center;
   justify-self: stretch;
   font-family: Arial, sans-serif;
   font-weight: 800;
+  place-items: center;
 }
 
-.signin-provider-mark-google { color: #4285f4; font-size: 19px; }
-.signin-provider-mark-apple { font-size: 10px; letter-spacing: -.03em; }
+.signin-provider-mark-google { color: #4285f4; font-size: 20px; }
+.signin-provider-mark-apple::before { content: ""; font-size: 21px; }
 
-.signin-error { margin: 0; color: var(--danger); font-size: 13px; }
-.signin-legal { display: block; margin-top: var(--sp-4); color: var(--subtle); font-size: 12px; line-height: 1.5; }
+.signin-error { margin: 0; color: var(--danger); font-size: 13px; line-height: 1.5; }
+
+/* 무엇을 하는 서비스인지. 로그인만 덩그러니 있으면 무엇에 로그인하는지 모릅니다. */
+.signin-points {
+  display: grid;
+  margin: var(--sp-6) 0 0;
+  padding: 0;
+  gap: var(--sp-3);
+  justify-items: start;
+  list-style: none;
+  text-align: left;
+}
+
+.signin-points li {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: start;
+  gap: var(--sp-2);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.signin-points li::before {
+  content: "✓";
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--secondary);
+  color: var(--secondary-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+}
+
+.signin-legal { display: block; padding-top: var(--sp-6); color: var(--subtle); font-size: 12px; line-height: 1.6; text-align: center; }
 .signin-legal a { color: inherit; font-weight: 600; text-underline-offset: 2px; }
 .signin-legal a:hover { color: var(--primary-ink); }
 
-@media (max-width: 940px) {
-  .signin-page { grid-template-columns: minmax(0, 1fr); gap: var(--sp-6); }
-  .signin-intro { max-width: none; text-align: center; }
-  .signin-brand { justify-content: center; }
-  .signin-intro h1 { font-size: 28px; }
+@media (max-width: 640px) {
+  .signin-title { font-size: 27px; }
+  .signin-mark { width: 54px; height: 54px; }
 }
 
 /* 설정의 로그아웃 — 되돌릴 수 있는 행동이라 크게 두지 않습니다. */

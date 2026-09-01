@@ -44,7 +44,12 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
   }, []);
 
   const submitSocial = async (provider: SocialProvider) => {
-    if (!socialConfig) return;
+    // 설정을 아직 못 받아왔으면 조용히 넘어가지 않습니다 — 눌렀는데 아무 일도
+    // 일어나지 않으면 고장인지 느린 건지 알 수 없습니다.
+    if (!socialConfig) {
+      setError(t("로그인 설정을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요."));
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -72,49 +77,58 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
     }
   };
 
-  const providerEnabled = provider ? Boolean(socialConfig?.providers[provider]) : false;
   const providerLabel = provider === "apple"
-    ? providerEnabled ? t("Apple로 계속하기") : t("Apple 로그인 · 설정 필요")
+    ? t("Apple로 계속하기")
     : provider === "google"
-      ? providerEnabled ? t("Google로 계속하기") : t("Google 로그인 · 설정 필요")
+      ? t("Google로 계속하기")
       : t("로그인 준비 중…");
 
   return (
     <main className="signin-page">
-      <section className="signin-intro">
+      <div className="signin-panel">
         <div className="signin-brand">
-          <span className="brand-mark"><Languages size={22} /></span>
-          <span>Timo<strong>Talk</strong></span>
+          <span className="signin-mark" aria-hidden="true"><Languages size={26} /></span>
+          <span className="signin-wordmark">Timo<strong>Talk</strong></span>
         </div>
-        <h1>{t("진짜 사람과 이야기하며 배워요.")}</h1>
-        <p>{t("주고받은 대화와 써둔 글은 계정에 남아요. 폰을 바꿔도 그대로 이어져요.")}</p>
-      </section>
 
-      <section className="signin-card">
-        <h2>{t("다시 만나서 반가워요")}</h2>
-        <p className="signin-lead">{t("하던 대화와 기록을 그대로 가져올게요.")}</p>
+        {/* 한 문장으로 둡니다. 조각으로 쪼개면 영어·일본어에서 어순이 깨집니다. */}
+        <h1 className="signin-title">{t("진짜 사람과 이야기하며 배워요.")}</h1>
+        <p className="signin-sub">
+          {t("주고받은 대화와 써둔 글은 계정에 남아요. 폰을 바꿔도 그대로 이어져요.")}
+        </p>
 
-        <div className="signin-social" aria-label={t("간편 로그인")}>
+        <div className="signin-social">
           <button
             type="button"
             className={`signin-provider ${provider ? `signin-provider-${provider}` : "signin-provider-loading"}`}
             onClick={() => provider && void submitSocial(provider)}
-            disabled={busy || !provider || !providerEnabled}
+            disabled={busy || !provider}
           >
             <span className={`signin-provider-mark ${provider ? `signin-provider-mark-${provider}` : ""}`} aria-hidden="true">
-              {provider === "google" ? "G" : provider === "apple" ? "Apple" : "…"}
+              {provider === "google" ? "G" : provider === "apple" ? "" : "…"}
             </span>
             <span>{busy ? t("처리 중…") : providerLabel}</span>
           </button>
+
+          {/* 설정이 안 끝난 것은 사용자 잘못이 아닙니다. 버튼 이름에 섞지 않고 따로 알립니다. */}
           {error ? <p className="signin-error" role="alert">{error}</p> : null}
         </div>
 
-        <small className="signin-legal">
-          <a href="/terms">{t("이용약관")}</a>
-          <span aria-hidden="true"> · </span>
-          <a href="/privacy">{t("개인정보 처리방침")}</a>
-        </small>
-      </section>
+        <ul className="signin-points">
+          <li>{t("나와 맞는 사람을 매일 골라드려요")}</li>
+          <li>{t("배우는 말로 쓴 글을 원어민이 고쳐줘요")}</li>
+          <li>{t("대화는 계정에 남아 기기를 바꿔도 이어져요")}</li>
+        </ul>
+
+      </div>
+
+      {/* 약관은 화면 맨 아래에 둡니다. 로그인 버튼 바로 밑에 붙어 있으면
+          눌러야 하는 것과 읽어두는 것이 같은 무게로 보입니다. */}
+      <small className="signin-legal">
+        <a href="/terms">{t("이용약관")}</a>
+        <span aria-hidden="true"> · </span>
+        <a href="/privacy">{t("개인정보 처리방침")}</a>
+      </small>
     </main>
   );
 }

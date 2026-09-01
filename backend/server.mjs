@@ -14,6 +14,10 @@ const IDENTITY_WEB_API_KEY = process.env.IDENTITY_WEB_API_KEY || IDENTITY_API_KE
 const FIREBASE_AUTH_DOMAIN = process.env.FIREBASE_AUTH_DOMAIN || `${PROJECT_ID}.firebaseapp.com`;
 const GOOGLE_AUTH_ENABLED = process.env.GOOGLE_AUTH_ENABLED === "true";
 const APPLE_AUTH_ENABLED = process.env.APPLE_AUTH_ENABLED === "true";
+/* 로컬 에뮬레이터로 붙어 있는가. 이 값이 있으면 브라우저도 에뮬레이터를 봐야
+   같은 계정으로 로그인됩니다 — 없으면 브라우저만 진짜 구글로 가서 어긋납니다.
+   운영에는 이 변수가 없으므로 아래 값은 비어 나갑니다. */
+const AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST || "";
 const PROXY_SHARED_SECRET = process.env.PROXY_SHARED_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
@@ -870,6 +874,7 @@ app.get("/api/auth/config", async (req, res) => {
       google: GOOGLE_AUTH_ENABLED,
       apple: APPLE_AUTH_ENABLED,
     },
+    authEmulatorHost: AUTH_EMULATOR_HOST,
   });
 });
 

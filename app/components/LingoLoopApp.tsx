@@ -86,7 +86,7 @@ import { SignIn } from "./SignIn";
 import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, type ApiNotification, type ApiNotificationPage, matchReasonText, type MatchReasonCode } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Section = "discover" | "community" | "chats" | "practice" | "learn";
 
@@ -145,6 +145,7 @@ type DailyMatchRecommendation = {
 /** 탭 위에 얹히는 상세 화면. 모달이 아니라 화면 이동입니다. */
 type DetailRoute =
   | { kind: "post"; post: FeedPost }
+  | { kind: "notifications" }
   | { kind: "profile"; partner: Partner }
   | { kind: "profile-edit" }
   | { kind: "blocked" }
@@ -188,7 +189,6 @@ type ModalState =
   | { type: "exchange" }
   | { type: "partner-list" }
   | { type: "likes" }
-  | { type: "notifications" }
   | { type: "report"; target: string; targetId?: string; targetType?: "user" | "post" | "room" }
   | { type: "onboarding" }
   | { type: "confirm"; title: string; body: string; confirmLabel: string; onConfirm: () => void }
@@ -506,6 +506,9 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [requestConversationIds, setRequestConversationIds] = useState<Set<string>>(() => new Set());
   const [feedTab, setFeedTab] = useState<FeedTab>("latest");
   const [feedFilters, setFeedFilters] = useState<FeedFilters>(emptyFeedFilters);
+  const [notificationTab, setNotificationTab] = useState<NotificationTab>("all");
+  /** 걸린 조건 수. 켜져 있으면 상단 버튼에 숫자로 보입니다. */
+  const feedFilterCount = (feedFilters.nativeCode ? 1 : 0) + (feedFilters.learningCode ? 1 : 0);
   const [translatedPosts, setTranslatedPosts] = useState<Set<string>>(new Set());
   const [postTranslations, setPostTranslations] = useState<Record<string, string>>({});
   const [openCorrections, setOpenCorrections] = useState<Set<string>>(new Set());
@@ -530,7 +533,36 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   /* 차단한 사람은 명부에서 빠집니다. 이름을 보여주려면 따로 들고 있어야 합니다. */
   const [blockedPartners, setBlockedPartners] = useState<Partner[]>([]);
 
-  const [detail, setDetail] = useState<DetailRoute>(null);
+  /**
+   * 상세 화면을 쌓아 둡니다.
+   *
+   * 한 칸만 두면 프로필에서 글을 열 때 프로필이 덮여 사라집니다. 그 상태에서
+   * 뒤로가기를 누르면 돌아갈 곳이 없어 섹션(커뮤니티)으로 떨어졌습니다.
+   * 쌓아두면 한 겹씩 되짚어 올라갑니다.
+   */
+  const [detailStack, setDetailStack] = useState<DetailRoute[]>([]);
+  const detail = detailStack.length ? detailStack[detailStack.length - 1] : null;
+
+  /** 새 상세 화면을 위에 얹습니다. null 이면 전부 닫습니다. */
+  const setDetail = useCallback((next: DetailRoute | ((current: DetailRoute) => DetailRoute)) => {
+    setDetailStack((stack) => {
+      if (typeof next === "function") {
+        // 지금 화면만 고치는 경우(좋아요 반영 등) — 쌓지 않습니다.
+        if (!stack.length) return stack;
+        const updated = next(stack[stack.length - 1]);
+        return updated ? [...stack.slice(0, -1), updated] : stack.slice(0, -1);
+      }
+      return next ? [...stack, next] : [];
+    });
+  }, []);
+  /**
+   * 지금 어느 메뉴에 있는가.
+   *
+   * 알림은 섹션이 아니라 상세 화면이지만 사이드바에서 바로 가는 자리라 메뉴에서는
+   * 섹션과 같은 층입니다. 이 값을 안 쓰면 알림을 열어도 그 아래 섹션이 계속
+   * 눌린 채로 남아 두 개가 동시에 켜집니다.
+   */
+  const activeNav: Section | "notifications" = detail?.kind === "notifications" ? "notifications" : section;
   const [partnerIndex, setPartnerIndex] = useState(0);
   const [signaledPartners, setSignaledPartners] = useState<string[]>([]);
   const [practiceRooms, setPracticeRooms] = useState<PracticeRoom[]>(rooms);
@@ -543,6 +575,11 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [likesReceived, setLikesReceived] = useState<ApiReceivedLike[]>([]);
   const [sentLikes, setSentLikes] = useState<ApiReceivedLike[]>([]);
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  /** 종류별 개수. 상단 선택기에 함께 보여줍니다. */
+  const notificationCounts = useMemo(() => {
+    const community = notifications.filter((item) => notificationCategory(item.type) === "community").length;
+    return { community, people: notifications.length - community };
+  }, [notifications]);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [notificationLoading, setNotificationLoading] = useState(true);
   const [notificationError, setNotificationError] = useState(false);
@@ -1221,13 +1258,27 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     void loadFollowCounts(partner.id);
   };
 
+  /**
+   * 한 겹만 되돌아갑니다. 마지막 겹이면 섹션으로 돌아갑니다.
+   *
+   * history.back() 을 쓰지 않습니다 — 그러면 hashchange 처리와 겹쳐 두 번
+   * 되돌아갑니다. 직접 팝하고 주소만 새 화면에 맞춥니다.
+   */
   const closeDetail = () => {
-    setDetail(null);
-    window.history.replaceState(null, "", `#${section}`);
+    setDetailStack((stack) => {
+      const next = stack.slice(0, -1);
+      const top = next[next.length - 1];
+      const hash =
+        top?.kind === "post" ? `#${section}/post/${top.post.id}`
+        : top?.kind === "profile" ? `#${section}/user/${top.partner.id}`
+        : `#${section}`;
+      window.history.replaceState(null, "", hash);
+      return next;
+    });
   };
 
   const goToSection = (next: Section) => {
-    setDetail(null);
+    setDetailStack([]);
     setSection(next);
     if (next === "chats") setMobileThreadOpen(false);
     window.history.replaceState(null, "", `#${next}`);
@@ -1662,6 +1713,35 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     }
   };
 
+  /**
+   * 글 카드가 쓰는 값 묶음.
+   *
+   * 커뮤니티·내 프로필·상대 프로필이 같은 카드를 그리므로 같은 것을 넘깁니다.
+   * 화면마다 따로 배선하면 한쪽에만 좋아요가 빠지는 식으로 어긋납니다.
+   */
+  const postCardProps = {
+    savedItems,
+    translated: translatedPosts,
+    translations: postTranslations,
+    corrections: openCorrections,
+    onProfile: (id: string) => {
+      if (id === me.id) { goToSection("learn"); return; }
+      const partner = findPartner(id);
+      if (partner) openProfile(partner);
+      else showToast(t("이 작성자의 프로필을 열 수 없어요"));
+    },
+    onToggle: togglePost,
+    onTranslate: translatePost,
+    onCorrection: (id: string) => toggleSetValue(setOpenCorrections, id),
+    onOpenPhoto: setPhotoViewer,
+    onShare: sharePost,
+    onDeletePost: deletePost,
+    onHideAuthor: hideAuthor,
+    onBlockAuthor: blockAuthor,
+    onReport: (target: string, targetId?: string) => setModal({ type: "report", target, targetId }),
+    onTagSelect: setActiveTag,
+  };
+
   return (
     <div className={`app-root section-${section}`}>
       <a className="skip-link" href="#main-content">{t("본문으로 건너뛰기")}</a>
@@ -1680,10 +1760,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 <button
                   type="button"
                   key={item.id}
-                  className={section === item.id ? "active" : ""}
+                  className={activeNav === item.id ? "active" : ""}
                   onClick={() => goToSection(item.id)}
                   aria-label={t(item.label)}
-                  aria-current={section === item.id ? "page" : undefined}
+                  aria-current={activeNav === item.id ? "page" : undefined}
                 >
                   <Icon size={20} />
                   <span>{t(item.label)}</span>
@@ -1703,7 +1783,13 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               <Search size={20} />
               <span>{t("검색")}</span>
             </button>
-            <button type="button" onClick={() => { setModal({ type: "notifications" }); void loadNotifications(true); }}>
+            {/* 알림은 섹션이 아니라 상세 화면이라 section 으로는 눌린 표시가 안 됩니다. */}
+            <button
+              type="button"
+              className={activeNav === "notifications" ? "active" : ""}
+              aria-current={activeNav === "notifications" ? "page" : undefined}
+              onClick={() => { setDetail({ kind: "notifications" }); void loadNotifications(true); }}
+            >
               <Bell size={20} />
               <span>{t("알림")}</span>
               {notificationUnreadCount > 0 ? <span className="nav-count">{notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}</span> : null}
@@ -1718,10 +1804,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 <button
                   type="button"
                   key={item.id}
-                  className={section === item.id ? "active" : ""}
+                  className={activeNav === item.id ? "active" : ""}
                   onClick={() => goToSection(item.id)}
                   aria-label={t(item.label)}
-                  aria-current={section === item.id ? "page" : undefined}
+                  aria-current={activeNav === item.id ? "page" : undefined}
                 >
                   <Icon size={20} />
                   <span>{t(item.label)}</span>
@@ -1751,12 +1837,116 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         <header className="topbar">
           {/* 로고는 뺐습니다. 지금 어느 탭인지는 아래 내비가 알려주고, 로고는 매 화면
               같은 자리를 먹기만 합니다. */}
+          {/* 화면 이름과 그 화면의 주된 동작을 여기 둡니다. 목록 위에 또 한 줄을
+              두면 내용이 시작되기까지 두 번 내려가야 합니다. */}
+          {section === "community" && !detail ? (
+            <div className="topbar-feed">
+              <TopbarSelect
+                label={t("커뮤니티 피드")}
+                value={feedTab}
+                onChange={setFeedTab}
+                options={[
+                  ["latest", t("최신")],
+                  ["recommended", t("추천")],
+                  ["following", t("팔로잉")],
+                ]}
+              />
+              <span className="topbar-spacer" />
+              <button
+                className={feedFilterCount ? "icon-button feed-filter-button is-on" : "icon-button feed-filter-button"}
+                type="button"
+                onClick={() => setModal({ type: "community-filters" })}
+                aria-label={t("언어로 거르기")}
+              >
+                <SlidersHorizontal size={17} />
+                {feedFilterCount ? <b aria-hidden="true">{feedFilterCount}</b> : null}
+              </button>
+            </div>
+          ) : null}
+
+          {/* 상세 화면의 머리줄. 화면마다 안에서 따로 그리면 위치·크기가 어긋납니다. */}
+          {detail?.kind === "post" ? (
+            <div className="topbar-feed">
+              <button type="button" className="topbar-back" onClick={closeDetail} aria-label={t("뒤로")}>
+                <ArrowLeft size={20} />
+              </button>
+              <span className="topbar-title">{t("게시물")}</span>
+            </div>
+          ) : null}
+
+          {detail?.kind === "profile-edit" ? (
+            <div className="topbar-feed">
+              <button type="button" className="topbar-back" onClick={closeDetail} aria-label={t("뒤로")}>
+                <ArrowLeft size={20} />
+              </button>
+              <span className="topbar-title">{t("프로필 편집")}</span>
+            </div>
+          ) : null}
+
+          {detail?.kind === "blocked" ? (
+            <div className="topbar-feed">
+              <button type="button" className="topbar-back" onClick={closeDetail} aria-label={t("뒤로")}>
+                <ArrowLeft size={20} />
+              </button>
+              <span className="topbar-title">{t("신고 및 차단 관리")}</span>
+            </div>
+          ) : null}
+
+          {detail?.kind === "profile" ? (
+            <div className="topbar-feed">
+              <button type="button" className="topbar-back" onClick={closeDetail} aria-label={t("뒤로")}>
+                <ArrowLeft size={20} />
+              </button>
+              <span className="topbar-title">{detail.partner.name}</span>
+              <span className="topbar-spacer" />
+              <MenuPopover
+                label={t("더 보기")}
+                items={[
+                  { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: () => setModal({ type: "report", target: detail.partner.name, targetId: detail.partner.id }) },
+                  { id: "block", label: t("차단하기"), icon: Ban, danger: true, onSelect: () => blockAuthor(detail.partner.id, detail.partner.name) },
+                ]}
+              />
+            </div>
+          ) : null}
+
+          {detail?.kind === "notifications" ? (
+            <div className="topbar-feed">
+              <span className="topbar-title">{t("알림")}</span>
+              <TopbarSelect
+                label={t("알림 종류")}
+                value={notificationTab}
+                onChange={setNotificationTab}
+                options={[
+                  ["all", t("전체"), notifications.length],
+                  ["community", t("커뮤니티"), notificationCounts.community],
+                  ["people", t("파트너"), notificationCounts.people],
+                ]}
+              />
+              <span className="topbar-spacer" />
+              <button
+                className="topbar-action"
+                type="button"
+                disabled={!notificationUnreadCount}
+                onClick={() => void markAllNotificationsRead()}
+              >
+                {t("모두 읽음")}
+              </button>
+            </div>
+          ) : null}
+
+          {/* 편집·설정은 카드 안에 이미 있습니다. 여기 또 두면 같은 버튼이 둘입니다. */}
+          {section === "learn" && !detail ? (
+            <div className="topbar-feed">
+              <span className="topbar-title">{t("프로필")}</span>
+            </div>
+          ) : null}
+
           <div className="topbar-actions">
             <IconButton
               label={t("알림")}
               icon={Bell}
               badge={notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}
-              onClick={() => { setModal({ type: "notifications" }); void loadNotifications(true); }}
+              onClick={() => { setDetail({ kind: "notifications" }); void loadNotifications(true); }}
             />
             <IconButton label={t("검색")} icon={Search} onClick={() => setModal({ type: "search" })} />
             {section === "community" ? <IconButton label={t("글쓰기")} icon={PenLine} className="top-compose-button" onClick={() => setModal({ type: "compose" })} /> : null}
@@ -1769,7 +1959,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               <PostDetailView
                 post={detail.post}
                 me={me}
-                onBack={closeDetail}
                 onProfile={(authorId) => {
                   if (authorId === me.id) { closeDetail(); goToSection("learn"); return; }
                   const partner = findPartner(authorId);
@@ -1794,8 +1983,19 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
             {detail?.kind === "profile-edit" ? (
               <ProfileEditView
                 value={profile}
-                onBack={closeDetail}
                 onSave={(next) => { closeDetail(); void saveProfile(next); }}
+              />
+            ) : null}
+
+            {detail?.kind === "notifications" ? (
+              <NotificationsView
+                items={notifications}
+                tab={notificationTab}
+                loading={notificationLoading}
+                failed={notificationError}
+                onRetry={() => void loadNotifications()}
+                onRead={(item) => void markNotificationRead(item)}
+                onOpen={(item) => void openNotification(item)}
               />
             ) : null}
 
@@ -1804,7 +2004,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 hidden={[...hiddenAuthorIds]}
                 blocked={[...blockedAuthorIds]}
                 directory={[...directory, ...blockedPartners]}
-                onBack={closeDetail}
                 onUnhide={(id) => { setHiddenAuthorIds((c) => { const n = new Set(c); n.delete(id); return n; }); }}
                 onUnblock={(id) => { void unblockAuthor(id); showToast(t("차단을 해제했어요")); }}
               />
@@ -1813,14 +2012,14 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
             {detail?.kind === "profile" ? (
               <ProfileDetailView
                 partner={detail.partner}
-                onBack={closeDetail}
                 onStartChat={(partner) => { closeDetail(); startChat(partner); }}
-                onReport={() => setModal({ type: "report", target: detail.partner.name, targetId: detail.partner.id })}
                 following={followingIds.includes(detail.partner.id)}
                 onToggleFollow={(partner) => void toggleFollow(partner)}
                 posts={posts.filter((post) => post.authorId === detail.partner.id)}
                 onOpenPost={openPost}
-                onBlock={() => blockAuthor(detail.partner.id, detail.partner.name)}
+                onCopyLink={copyLink}
+                onSavePhrase={savePhrase}
+                card={postCardProps}
                 counts={followCounts[detail.partner.id]}
                 directory={directory}
                 onOpenProfile={openProfile}
@@ -1847,7 +2046,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               <CommunityView
                 posts={posts}
                 tab={feedTab}
-                setTab={setFeedTab}
                 translated={translatedPosts}
                 translations={postTranslations}
                 corrections={openCorrections}
@@ -1951,6 +2149,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onOpenTag={(tag) => { setActiveTag(tag); goToSection("community"); }}
                 onToggleLike={(id) => togglePost(id, "liked")}
                 myPostList={myPostList}
+                card={postCardProps}
                 onCopyLink={copyLink}
                 onDeletePost={deletePost}
               />
@@ -2022,14 +2221,6 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           savedItems={savedItems}
           likesReceived={likesReceived}
           sentLikes={sentLikes}
-          notifications={notifications}
-          notificationUnreadCount={notificationUnreadCount}
-          notificationLoading={notificationLoading}
-          notificationError={notificationError}
-          onRetryNotifications={() => void loadNotifications()}
-          onReadNotification={(notification) => void markNotificationRead(notification)}
-          onReadAllNotifications={() => void markAllNotificationsRead()}
-          onOpenNotification={(notification) => void openNotification(notification)}
           followingIds={followingIds}
           onToggleFollow={(partner) => void toggleFollow(partner)}
           onOpenPost={(post) => { setModal(null); openPost(post); }}
@@ -2265,14 +2456,74 @@ function postMenuItems(
 /**
  * 드롭다운 메뉴. 바깥 클릭·ESC로 닫히고, 항목 선택 시 자동으로 닫힙니다.
  */
+/**
+ * 상단 줄의 고르기 — "최신 ⌄" 처럼 지금 보고 있는 것만 남긴 선택기.
+ *
+ * 여러 탭을 늘어놓으면 줄이 자리를 많이 먹습니다. 커뮤니티 피드와 알림 종류가
+ * 같은 컴포넌트를 써서 두 화면의 생김새와 동작이 어긋나지 않습니다.
+ * 메뉴 몸통은 ··· 메뉴와도 같은 MenuPopover 입니다.
+ */
+function TopbarSelect<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  /** [값, 이름, 개수]. 개수는 없으면 생략합니다. */
+  options: Array<[T, string, number?]>;
+  onChange: (next: T) => void;
+}) {
+  const current = options.find(([id]) => id === value) ?? options[0];
+
+  return (
+    <MenuPopover
+      label={label}
+      align="start"
+      className="feed-select-trigger"
+      trigger={() => (
+        <>
+          <span>{current[1]}</span>
+          {typeof current[2] === "number" ? <b className="topbar-select-count">{current[2]}</b> : null}
+          <ChevronDown size={17} />
+        </>
+      )}
+      items={options.map(([id, name, count]) => ({
+        id,
+        label: typeof count === "number" ? `${name}  ${count}` : name,
+        selected: id === value,
+        onSelect: () => onChange(id),
+      }))}
+    />
+  );
+}
+
+type MenuItem = { id: string; label: string; icon?: LucideIcon; danger?: boolean; selected?: boolean; onSelect: () => void };
+
+/**
+ * 눌러서 여는 메뉴 — 앱에서 쓰는 유일한 팝오버입니다.
+ *
+ * 예전에는 ··· 메뉴, 피드 고르기, DM 첨부가 각자 다른 방식으로 열렸습니다.
+ * 생김새만 다른 게 아니라 바깥을 눌러 닫기·Escape·아래 공간이 부족할 때 위로
+ * 열기가 ··· 메뉴에만 있었습니다. 하나로 합쳐 셋 다 같게 동작합니다.
+ *
+ * trigger 를 주면 그 모양으로, 없으면 ··· 버튼으로 그립니다.
+ */
 function MenuPopover({
   label,
   items,
   align = "end",
+  trigger,
+  className,
 }: {
   label: string;
-  items: Array<{ id: string; label: string; icon: LucideIcon; danger?: boolean; onSelect: () => void }>;
+  items: MenuItem[];
   align?: "start" | "end";
+  /** 버튼 안에 그릴 것. 없으면 ··· 아이콘입니다. */
+  trigger?: (open: boolean) => React.ReactNode;
+  /** 트리거 버튼에 더할 클래스. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false);
@@ -2309,13 +2560,13 @@ function MenuPopover({
     <div className="menu-wrap" ref={wrap}>
       <button
         type="button"
-        className="menu-trigger"
+        className={className ? `menu-trigger ${className}` : "menu-trigger"}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={toggle}
       >
-        <Ellipsis size={19} />
+        {trigger ? trigger(open) : <Ellipsis size={19} />}
       </button>
       {open ? (
         <div className={`menu-panel menu-${align} ${dropUp ? "menu-up" : ""}`.trim()} role="menu">
@@ -2330,8 +2581,10 @@ function MenuPopover({
                 item.onSelect();
               }}
             >
-              <item.icon size={17} />
-              {item.label}
+              {item.icon ? <item.icon size={17} /> : null}
+              <span>{item.label}</span>
+              {/* 고른 것에 표시. 선택형 메뉴(피드 고르기)에서만 씁니다. */}
+              {item.selected ? <Check size={16} className="menu-check" /> : null}
             </button>
           ))}
         </div>
@@ -2341,33 +2594,11 @@ function MenuPopover({
 }
 
 
-/** 상세 화면 공통 헤더. 뒤로가기 + 제목. */
-function DetailHeader({
-  title,
-  onBack,
-  menu,
-}: {
-  title: string;
-  onBack: () => void;
-  /** 헤더 오른쪽 ··· 메뉴. 신고·차단처럼 자주 쓰지 않는 것을 여기 담습니다. */
-  menu?: Array<{ id: string; label: string; icon: LucideIcon; danger?: boolean; onSelect: () => void }>;
-}) {
-  return (
-    <header className="detail-header">
-      <button type="button" className="detail-back" onClick={onBack} aria-label={t("뒤로")}>
-        <ArrowLeft size={20} />
-      </button>
-      <span className="detail-title">{title}</span>
-      {menu?.length ? <MenuPopover label={t("더 보기")} items={menu} /> : null}
-    </header>
-  );
-}
 
 /** 게시물 상세 화면 — 원글(48px 그리드) → 액션 → 구분선 → 답글 → 답글 입력. */
 function PostDetailView({
   post,
   me,
-  onBack,
   onProfile,
   onReport,
   onToast,
@@ -2377,14 +2608,13 @@ function PostDetailView({
   onBlockAuthor,
   onCopyLink,
   onTagSelect,
-  onToggleLike,
-  onDeletePost,
   sort,
   onSortChange,
+  onDeletePost,
+  onToggleLike,
 }: {
   post: FeedPost;
   me: ApiProfile;
-  onBack: () => void;
   onProfile: (authorId: string) => void;
   onReport: () => void;
   onToast: (message: string) => void;
@@ -2547,7 +2777,6 @@ function PostDetailView({
 
   return (
     <div className="view detail-view">
-      <DetailHeader title={t("게시물")} onBack={onBack} />
 
       <article className="thread-item">
         <div className="thread-gutter">
@@ -2677,22 +2906,21 @@ function PostDetailView({
 /** 파트너 프로필 상세 화면. */
 function ProfileDetailView({
   partner,
-  onBack,
   onStartChat,
-  onReport,
   following,
   onToggleFollow,
   posts,
   onOpenPost,
-  onBlock,
+  onCopyLink,
+  onSavePhrase,
   counts,
   directory,
   onOpenProfile,
+  card,
 }: {
   partner: Partner;
-  onBack: () => void;
+  /* 뒤로가기·이름·신고/차단 메뉴는 상단 줄이 그립니다 — 다른 화면과 같은 자리입니다. */
   onStartChat: (partner: Partner) => void;
-  onReport: () => void;
   /* 예전에는 "관심 파트너 저장" 이 따로 있었는데 어디에도 남지 않았습니다.
      같은 뜻이면서 서버에 남는 팔로우로 합쳤습니다. */
   following: boolean;
@@ -2700,8 +2928,27 @@ function ProfileDetailView({
   /** 이 사람이 쓴 글. 프로필에서 바로 볼 수 있어야 어떤 사람인지 알 수 있습니다. */
   posts: FeedPost[];
   onOpenPost: (post: FeedPost) => void;
-  onBlock: () => void;
+  onCopyLink: (url: string) => void;
+  onSavePhrase: (item: SavedPhrase) => void;
   counts?: { following: number; followers: number; posts: number };
+  /** 글 카드가 쓰는 값들. 커뮤니티와 같은 카드를 그리기 위해 그대로 넘깁니다. */
+  card: {
+    savedItems: SavedPhrase[];
+    translated: Set<string>;
+    translations: Record<string, string>;
+    corrections: Set<string>;
+    onProfile: (id: string) => void;
+    onToggle: (id: string, key: "liked" | "saved") => void;
+    onTranslate: (post: FeedPost) => void;
+    onCorrection: (id: string) => void;
+    onOpenPhoto: (src: string) => void;
+    onShare: (post: FeedPost) => Promise<void>;
+    onDeletePost: (post: FeedPost) => void;
+    onHideAuthor: (id: string, name: string) => void;
+    onBlockAuthor: (id: string, name: string) => void;
+    onReport: (target: string, targetId?: string) => void;
+    onTagSelect: (tag: string | null) => void;
+  };
   /** 비슷한 사람을 뽑아 올 명부. */
   directory: Partner[];
   onOpenProfile: (partner: Partner) => void;
@@ -2723,15 +2970,6 @@ function ProfileDetailView({
 
   return (
     <div className="view detail-view">
-      <DetailHeader
-        title={partner.name}
-        onBack={onBack}
-        menu={[
-          { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: onReport },
-          { id: "block", label: t("차단하기"), icon: Ban, danger: true, onSelect: onBlock },
-        ]}
-      />
-
       <header className="profile-head">
         <div className="profile-head-id">
           <span className="profile-head-name">
@@ -2765,13 +3003,16 @@ function ProfileDetailView({
       </div>
 
       {/* 등록한 정보와 쓴 글은 성격이 다릅니다. 한 줄로 이어 붙이면 아래 것을
-          보려고 위 것을 계속 스크롤해서 지나가야 합니다. */}
-      <div className="segmented-tabs profile-detail-tabs" role="tablist" aria-label={t("프로필")}>
-        <button type="button" role="tab" aria-selected={tab === "profile"} className={tab === "profile" ? "active" : ""} onClick={() => setTab("profile")}>{t("프로필")}</button>
-        <button type="button" role="tab" aria-selected={tab === "posts"} className={tab === "posts" ? "active" : ""} onClick={() => setTab("posts")}>
-          {t("글")} <b>{counts ? counts.posts : posts.length}</b>
-        </button>
-      </div>
+          보려고 위 것을 계속 스크롤해서 지나가야 합니다.
+          내 프로필의 "내 글 / 학습" 과 같은 컴포넌트를 씁니다. */}
+      <Tabs
+        tabs={[
+          { id: "profile", label: t("프로필") },
+          { id: "posts", label: `${t("글")} ${counts ? counts.posts : posts.length}` },
+        ]}
+        active={tab}
+        onSelect={(id) => setTab(id as "profile" | "posts")}
+      />
 
       {tab === "profile" ? (
         <>
@@ -2836,17 +3077,18 @@ function ProfileDetailView({
               <p>{t("이 사람이 글을 올리면 여기에 모여요.")}</p>
             </div>
           ) : (
-            <div className="partner-post-list">
+            /* 커뮤니티·내 프로필과 같은 카드입니다. 같은 글이 어디서 보느냐에
+               따라 다르게 생길 이유가 없습니다. */
+            <div className="feed-grid">
               {posts.map((post) => (
-                <button type="button" key={post.id} onClick={() => onOpenPost(post)}>
-                  <span className="partner-post-meta">{tx(post.time)} · {tx(post.language)}</span>
-                  <span className="partner-post-text">{post.text}</span>
-                  <span className="partner-post-stats">
-                    <span><Heart size={13} /> {post.likes}</span>
-                    <span><MessageCircle size={13} /> {post.comments}</span>
-                    <span><PenLine size={13} /> {post.corrections}</span>
-                  </span>
-                </button>
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onOpen={onOpenPost}
+                  onCopyLink={onCopyLink}
+                  onSavePhrase={onSavePhrase}
+                  {...card}
+                />
               ))}
             </div>
           )}
@@ -2895,11 +3137,9 @@ function similarPartners(partner: Partner, directory: Partner[], limit = 6): Par
  */
 function ProfileEditView({
   value,
-  onBack,
   onSave,
 }: {
   value: ProfileDraft;
-  onBack: () => void;
   onSave: (next: ProfileDraft) => void;
 }) {
   const [draft, setDraft] = useState<ProfileDraft>(value);
@@ -2907,7 +3147,6 @@ function ProfileEditView({
 
   return (
     <div className="view detail-view">
-      <DetailHeader title={t("프로필 편집")} onBack={onBack} />
       <div className="form-section">
         <label className="field-label" htmlFor="profile-name">{t("이름")}</label>
         <input
@@ -3062,14 +3301,12 @@ function BlockedListView({
   hidden,
   blocked,
   directory,
-  onBack,
   onUnhide,
   onUnblock,
 }: {
   hidden: string[];
   blocked: string[];
   directory: Partner[];
-  onBack: () => void;
   onUnhide: (id: string) => void;
   onUnblock: (id: string) => void;
 }) {
@@ -3082,7 +3319,6 @@ function BlockedListView({
 
   return (
     <div className="view detail-view">
-      <DetailHeader title={t("신고 및 차단 관리")} onBack={onBack} />
       <Tabs
         tabs={[
           { id: "blocked", label: `${t("차단한 사람")} ${blocked.length}` },
@@ -3298,10 +3534,136 @@ function DiscoverView({
   );
 }
 
+/**
+ * 글 카드 — 커뮤니티·내 프로필·상대 프로필이 모두 이 하나를 씁니다.
+ *
+ * 예전에는 화면마다 다른 카드였습니다(피드는 아바타+액션, 프로필은 시각+본문만).
+ * 같은 글이 어디서 보느냐에 따라 다르게 생길 이유가 없고, 프로필 카드에서는
+ * 좋아요·번역 같은 것이 아예 빠져 있었습니다.
+ */
+function PostCard({
+  post,
+  savedItems,
+  translated,
+  translations,
+  corrections,
+  onOpen,
+  onProfile,
+  onToggle,
+  onTranslate,
+  onCorrection,
+  onOpenPhoto,
+  onShare,
+  onSavePhrase,
+  onCopyLink,
+  onDeletePost,
+  onHideAuthor,
+  onBlockAuthor,
+  onReport,
+  onTagSelect,
+  activeTag = null,
+}: {
+  post: FeedPost;
+  savedItems: SavedPhrase[];
+  translated: Set<string>;
+  translations: Record<string, string>;
+  corrections: Set<string>;
+  onOpen: (post: FeedPost) => void;
+  onProfile: (id: string) => void;
+  onToggle: (id: string, key: "liked" | "saved") => void;
+  onTranslate: (post: FeedPost) => void;
+  onCorrection: (id: string) => void;
+  onOpenPhoto: (src: string) => void;
+  onShare: (post: FeedPost) => Promise<void>;
+  onSavePhrase: (item: SavedPhrase) => void;
+  onCopyLink: (url: string) => void;
+  onDeletePost: (post: FeedPost) => void;
+  onHideAuthor: (id: string, name: string) => void;
+  onBlockAuthor: (id: string, name: string) => void;
+  onReport: (target: string, targetId?: string) => void;
+  onTagSelect: (tag: string | null) => void;
+  /** 지금 고른 주제. 프로필처럼 주제 거르기가 없는 화면에서는 넘기지 않습니다. */
+  activeTag?: string | null;
+}) {
+  return (
+        <article className="feed-post">
+          <header className="post-header">
+            <button className="post-author" type="button" onClick={() => onProfile(post.authorId)}>
+              <Avatar name={post.author} accent={post.accent} size="md" photo={post.photo} countryCode={post.countryCode} />
+              <span>
+                <strong>{post.author}<AgeGender age={post.age} gender={post.gender} /></strong>
+                <LanguageExchange native={post.nativeCode} learning={post.learningCode} level={post.learningLevel} />
+              </span>
+            </button>
+            <div className="post-meta">
+              <div className="post-meta-row">
+              {post.requestCorrection ? <Pill tone="soft"><WandSparkles size={12} /> {t("교정 부탁해요")}</Pill> : null}
+              {post.visibility === "partners" ? <Pill tone="neutral">{t("파트너 공개")}</Pill> : null}
+              <MenuPopover
+                label={t("게시물 메뉴")}
+                items={postMenuItems(post, {
+                  saved: savedItems.some((saved) => saved.id === post.id),
+                  onCopyLink: () => onCopyLink(`${window.location.origin}/#community/post/${post.id}`),
+                  onSavePhrase: () => onSavePhrase(savedFromPost(post)),
+                  onDelete: () => onDeletePost(post),
+                  onHideAuthor: () => onHideAuthor(post.authorId, post.author),
+                  onBlockAuthor: () => onBlockAuthor(post.authorId, post.author),
+                  onReport: () => onReport(post.author, post.authorId),
+                })}
+              />
+              </div>
+              {/* 시각은 메뉴 아래에. 이름 옆에 두면 언어 교환 줄과 자리를 다툽니다. */}
+              <time className="post-time">{tx(post.time)}</time>
+            </div>
+          </header>
+          <button className="post-copy-open" type="button" onClick={() => onOpen(post)} aria-label={t("{author}님의 게시물 열기", { author: post.author })}>
+            <span className="post-copy">{post.text}</span>
+          </button>
+          {translated.has(post.id) ? <div className="translation-box"><Languages size={16} /><p><span>{t("번역")}</span>{translations[post.id] ?? post.translation}</p></div> : null}
+          {post.image ? (
+            <button type="button" className="post-image-open" onClick={() => onOpenPhoto(post.image!)} aria-label={t("사진 크게 보기")}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="post-image" src={post.image} alt="" loading="lazy" />
+            </button>
+          ) : null}
+          {post.audio ? (
+            // eslint-disable-next-line jsx-a11y/media-has-caption
+            <audio className="post-audio" src={post.audio} controls preload="none" />
+          ) : null}
+          <div className="post-tags">{post.tags.map((tag) => <button type="button" key={tag} className={activeTag === tag ? "active" : ""} onClick={() => onTagSelect(activeTag === tag ? null : tag)}>{tag}</button>)}</div>
+          {post.visual ? (
+            <div className={`post-visual visual-${post.accent}`}>
+              <span className="visual-grid" />
+              <span className="visual-emoji">{post.visual.emoji}</span>
+              <span className="visual-copy"><small>{post.visual.eyebrow}</small><strong>{post.visual.title}</strong><em>{post.visual.caption}</em></span>
+            </div>
+          ) : null}
+          {post.correction && corrections.has(post.id) ? (
+            <div className="correction-card">
+              <header><span><WandSparkles size={16} /> {t("문장 교정")}</span><small>{t("Jisoo 🇰🇷 · 2분 전")}</small></header>
+              <p className="before"><span>–</span>{post.correction.original}</p>
+              <p className="after"><span>+</span>{post.correction.fixed}</p>
+              <div className="correction-note"><BookOpenCheck size={15} /> {post.correction.note}</div>
+              <button type="button" className={savedItems.some((saved) => saved.id === post.id) ? "active" : ""} aria-pressed={savedItems.some((saved) => saved.id === post.id)} aria-label={t("복습에 저장")} onClick={() => onSavePhrase(savedFromPost(post))}><Bookmark size={16} /></button>
+            </div>
+          ) : null}
+          <footer className="post-actions">
+            <button className={post.liked ? "active like" : ""} type="button" onClick={() => onToggle(post.id, "liked")}><Heart size={18} fill={post.liked ? "currentColor" : "none"} /> {post.likes}</button>
+            <button type="button" onClick={() => onOpen(post)}><MessageCircle size={18} /> {post.comments}</button>
+            {/* 낱말을 빼고 아이콘과 숫자만 남깁니다 — 줄이 짧아야 글이 먼저 읽힙니다.
+                무엇인지는 aria-label 과 title 로 알려줍니다. */}
+            <button className={corrections.has(post.id) ? "active correct" : ""} type="button" aria-label={t("교정")} title={t("교정")} onClick={() => (post.correction ? onCorrection(post.id) : onOpen(post))}><PenLine size={18} /> {post.corrections}</button>
+            <button className={translated.has(post.id) ? "active" : ""} type="button" aria-label={t("번역")} title={t("번역")} onClick={() => onTranslate(post)}><Languages size={18} /></button>
+            <button type="button" aria-label={t("공유")} title={t("공유")} onClick={() => void onShare(post)}><Share2 size={18} /></button>
+            <button className={post.saved ? "active save" : "post-save"} type="button" aria-label={t("저장")} title={t("저장")} onClick={() => onToggle(post.id, "saved")}><Bookmark size={18} fill={post.saved ? "currentColor" : "none"} /></button>
+          </footer>
+      </article>
+  );
+}
+
 function CommunityView({
   posts,
   tab,
-  setTab,
   translated,
   translations,
   corrections,
@@ -3320,7 +3682,6 @@ function CommunityView({
   savedItems,
   onSavePhrase,
   onCopyLink,
-  onDeletePost,
   myLearningCode,
   myNativeCode,
   filters,
@@ -3328,10 +3689,10 @@ function CommunityView({
   followingIds,
   onOpenPhoto,
   onShare,
+  onDeletePost,
 }: {
   posts: FeedPost[];
   tab: FeedTab;
-  setTab: (value: FeedTab) => void;
   hiddenAuthorIds: Set<string>;
   blockedAuthorIds: Set<string>;
   onHideAuthor: (authorId: string, name: string) => void;
@@ -3416,23 +3777,6 @@ function CommunityView({
 
   return (
     <div className="view community-view">
-      <div className="community-toolbar">
-        <div className="segmented-tabs" role="tablist" aria-label={t("커뮤니티 피드")}>
-          <button type="button" role="tab" aria-selected={tab === "latest"} className={tab === "latest" ? "active" : ""} onClick={() => setTab("latest")}>{t("최신")}</button>
-          <button type="button" role="tab" aria-selected={tab === "recommended"} className={tab === "recommended" ? "active" : ""} onClick={() => setTab("recommended")}>{t("추천")}</button>
-          <button type="button" role="tab" aria-selected={tab === "following"} className={tab === "following" ? "active" : ""} onClick={() => setTab("following")}>{t("팔로잉")}</button>
-        </div>
-        <button
-          className={activeFilterCount ? "icon-button feed-filter-button is-on" : "icon-button feed-filter-button"}
-          type="button"
-          onClick={onOpenFilters}
-          aria-label={t("언어로 거르기")}
-        >
-          <SlidersHorizontal size={17} />
-          {activeFilterCount ? <b aria-hidden="true">{activeFilterCount}</b> : null}
-        </button>
-      </div>
-
       {activeTag ? (
         <div className="tag-filter-bar">
           <span><Hash size={14} />{activeTag.replace("#", "")}</span>
@@ -3443,76 +3787,29 @@ function CommunityView({
 
       <div className="feed-grid">
         {visible.map((post) => (
-            <article className="feed-post" key={post.id}>
-              <header className="post-header">
-                <button className="post-author" type="button" onClick={() => onProfile(post.authorId)}>
-                  <Avatar name={post.author} accent={post.accent} size="md" photo={post.photo} countryCode={post.countryCode} />
-                  <span>
-                    <strong>{post.author}<AgeGender age={post.age} gender={post.gender} /></strong>
-                    <LanguageExchange native={post.nativeCode} learning={post.learningCode} level={post.learningLevel} />
-                  </span>
-                </button>
-                <div className="post-meta">
-                  <div className="post-meta-row">
-                  {post.requestCorrection ? <Pill tone="soft"><WandSparkles size={12} /> {t("교정 부탁해요")}</Pill> : null}
-                  {post.visibility === "partners" ? <Pill tone="neutral">{t("파트너 공개")}</Pill> : null}
-                  <MenuPopover
-                    label={t("게시물 메뉴")}
-                    items={postMenuItems(post, {
-                      saved: savedItems.some((saved) => saved.id === post.id),
-                      onCopyLink: () => onCopyLink(`${window.location.origin}/#community/post/${post.id}`),
-                      onSavePhrase: () => onSavePhrase(savedFromPost(post)),
-                      onDelete: () => onDeletePost(post),
-                      onHideAuthor: () => onHideAuthor(post.authorId, post.author),
-                      onBlockAuthor: () => onBlockAuthor(post.authorId, post.author),
-                      onReport: () => onReport(post.author, post.authorId),
-                    })}
-                  />
-                  </div>
-                  {/* 시각은 메뉴 아래에. 이름 옆에 두면 언어 교환 줄과 자리를 다툽니다. */}
-                  <time className="post-time">{tx(post.time)}</time>
-                </div>
-              </header>
-              <button className="post-copy-open" type="button" onClick={() => onOpen(post)} aria-label={t("{author}님의 게시물 열기", { author: post.author })}>
-                <span className="post-copy">{post.text}</span>
-              </button>
-              {translated.has(post.id) ? <div className="translation-box"><Languages size={16} /><p><span>{t("번역")}</span>{translations[post.id] ?? post.translation}</p></div> : null}
-              {post.image ? (
-                <button type="button" className="post-image-open" onClick={() => onOpenPhoto(post.image!)} aria-label={t("사진 크게 보기")}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img className="post-image" src={post.image} alt="" loading="lazy" />
-                </button>
-              ) : null}
-              {post.audio ? (
-                // eslint-disable-next-line jsx-a11y/media-has-caption
-                <audio className="post-audio" src={post.audio} controls preload="none" />
-              ) : null}
-              <div className="post-tags">{post.tags.map((tag) => <button type="button" key={tag} className={activeTag === tag ? "active" : ""} onClick={() => onTagSelect(activeTag === tag ? null : tag)}>{tag}</button>)}</div>
-              {post.visual ? (
-                <div className={`post-visual visual-${post.accent}`}>
-                  <span className="visual-grid" />
-                  <span className="visual-emoji">{post.visual.emoji}</span>
-                  <span className="visual-copy"><small>{post.visual.eyebrow}</small><strong>{post.visual.title}</strong><em>{post.visual.caption}</em></span>
-                </div>
-              ) : null}
-              {post.correction && corrections.has(post.id) ? (
-                <div className="correction-card">
-                  <header><span><WandSparkles size={16} /> {t("문장 교정")}</span><small>{t("Jisoo 🇰🇷 · 2분 전")}</small></header>
-                  <p className="before"><span>–</span>{post.correction.original}</p>
-                  <p className="after"><span>+</span>{post.correction.fixed}</p>
-                  <div className="correction-note"><BookOpenCheck size={15} /> {post.correction.note}</div>
-                  <button type="button" className={savedItems.some((saved) => saved.id === post.id) ? "active" : ""} aria-pressed={savedItems.some((saved) => saved.id === post.id)} aria-label={t("복습에 저장")} onClick={() => onSavePhrase(savedFromPost(post))}><Bookmark size={16} /></button>
-                </div>
-              ) : null}
-              <footer className="post-actions">
-                <button className={post.liked ? "active like" : ""} type="button" onClick={() => onToggle(post.id, "liked")}><Heart size={18} fill={post.liked ? "currentColor" : "none"} /> {post.likes}</button>
-                <button type="button" onClick={() => onOpen(post)}><MessageCircle size={18} /> {post.comments}</button>
-                <button className={corrections.has(post.id) ? "active correct" : ""} type="button" onClick={() => (post.correction ? onCorrection(post.id) : onOpen(post))}><PenLine size={18} /> {t("교정 {n}", { n: post.corrections })}</button>
-                <button className={translated.has(post.id) ? "active" : ""} type="button" onClick={() => onTranslate(post)}><Languages size={18} /> {t("번역")}</button>
-                <button type="button" aria-label={t("공유")} onClick={() => void onShare(post)}><Share2 size={18} /></button>
-                <button className={post.saved ? "active save" : "post-save"} type="button" aria-label={t("저장")} onClick={() => onToggle(post.id, "saved")}><Bookmark size={18} fill={post.saved ? "currentColor" : "none"} /></button>
-              </footer>
-          </article>
+            <PostCard
+              key={post.id}
+              post={post}
+              savedItems={savedItems}
+              translated={translated}
+              translations={translations}
+              corrections={corrections}
+              onOpen={onOpen}
+              onProfile={onProfile}
+              onToggle={onToggle}
+              onTranslate={onTranslate}
+              onCorrection={onCorrection}
+              onOpenPhoto={onOpenPhoto}
+              onShare={onShare}
+              onSavePhrase={onSavePhrase}
+              onCopyLink={onCopyLink}
+              onDeletePost={onDeletePost}
+              onHideAuthor={onHideAuthor}
+              onBlockAuthor={onBlockAuthor}
+              onReport={onReport}
+              onTagSelect={onTagSelect}
+              activeTag={activeTag}
+            />
         ))}
       </div>
 
@@ -3603,7 +3900,6 @@ function ChatsView({
   const [translatedMessages, setTranslatedMessages] = useState<Set<string>>(new Set(["m1"]));
   const [messageTranslations, setMessageTranslations] = useState<Record<string, string>>({});
   const [coachOpen, setCoachOpen] = useState(false);
-  const [attachOpen, setAttachOpen] = useState(false);
   const messageAreaRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [recording, setRecording] = useState(false);
@@ -3993,9 +4289,40 @@ function ChatsView({
             />
             {/* 첨부·코치는 입력 칸 안에 둡니다. 칸 밖에 늘어놓으면 글 쓸 자리가 좁아지고
                 줄이 버튼으로 꽉 찹니다. 보내기만 칸 밖에 남깁니다. */}
+            {/* 첨부는 칸 왼쪽 — 메신저에서 관습적으로 그 자리입니다.
+                이모지·코치는 오른쪽, 보내기만 칸 밖에 둡니다. */}
+            <MenuPopover
+              label={t("첨부")}
+              align="start"
+              className="composer-attach"
+              trigger={() => <Plus size={21} />}
+              items={[
+                { id: "photo", label: t("사진"), icon: ImageIcon, onSelect: () => photoInputRef.current?.click() },
+                {
+                  id: "voice",
+                  label: recording ? t("녹음 멈추기") : t("음성"),
+                  icon: Mic,
+                  danger: recording,
+                  onSelect: () => void toggleRecording(),
+                },
+              ]}
+            />
+
             <label className="message-input">
               <span className="sr-only">{t("메시지 입력")}</span>
-              <button type="button" className="composer-emoji" aria-label={t("이모지")} onClick={() => setDraft(`${draft} 😊`)}><Smile size={19} /></button>
+              {/* 이모지·대화 코치는 칸 안 왼쪽. 글자와 같은 줄 바닥에 섭니다. */}
+              <span className="composer-inline-actions">
+                <button type="button" className="composer-emoji" aria-label={t("이모지")} onClick={() => setDraft(`${draft} 😊`)}><Smile size={19} /></button>
+                <button
+                  type="button"
+                  className={coachOpen ? "composer-coach active" : "composer-coach"}
+                  aria-label={t("대화 코치")}
+                  aria-pressed={coachOpen}
+                  onClick={() => { const next = !coachOpen; setCoachOpen(next); if (next && !supportResult) void requestConversationSupport(false); }}
+                >
+                  <WandSparkles size={19} />
+                </button>
+              </span>
               <textarea
                 ref={composerRef}
                 value={draft}
@@ -4012,44 +4339,12 @@ function ChatsView({
                 rows={1}
                 maxLength={LIMITS.message}
               />
-              <span className="composer-inline-actions">
-                <span className="composer-attach-wrap">
-                  <button
-                    type="button"
-                    className={attachOpen ? "composer-attach active" : "composer-attach"}
-                    aria-label={t("첨부")}
-                    aria-haspopup="menu"
-                    aria-expanded={attachOpen}
-                    onClick={() => setAttachOpen(!attachOpen)}
-                  >
-                    <Plus size={19} />
-                  </button>
-                  {attachOpen ? (
-                    <>
-                      <button type="button" className="menu-scrim" aria-label={t("닫기")} onClick={() => setAttachOpen(false)} />
-                      <span className="composer-attach-menu" role="menu">
-                        <button type="button" role="menuitem" onClick={() => { setAttachOpen(false); photoInputRef.current?.click(); }}>
-                          <ImageIcon size={17} /> {t("사진")}
-                        </button>
-                        <button type="button" role="menuitem" className={recording ? "recording" : ""} onClick={() => { setAttachOpen(false); void toggleRecording(); }}>
-                          <Mic size={17} /> {recording ? t("녹음 멈추기") : t("음성")}
-                        </button>
-                      </span>
-                    </>
-                  ) : null}
-                </span>
-                <button
-                  type="button"
-                  className={coachOpen ? "composer-coach active" : "composer-coach"}
-                  aria-label={t("대화 코치")}
-                  aria-pressed={coachOpen}
-                  onClick={() => { const next = !coachOpen; setCoachOpen(next); if (next && !supportResult) void requestConversationSupport(false); }}
-                >
-                  <WandSparkles size={19} />
-                </button>
-              </span>
+              {/* 보내기는 칸 안 오른쪽. 쓸 것이 있을 때만 나옵니다 — 빈 채로 늘 떠
+                  있으면 눌러도 아무 일이 없는 버튼이 자리를 차지합니다. */}
+              {draft.trim() ? (
+                <button className="send-button" type="submit" aria-label={t("메시지 보내기")}><Send size={17} /></button>
+              ) : null}
             </label>
-            <button className="send-button" type="submit" disabled={!draft.trim()} aria-label={t("메시지 보내기")}><Send size={18} /></button>
           </div>
         </form>}
       </section>
@@ -4264,15 +4559,6 @@ function SettingsModal({
                     </>
                   ) : null}
 
-                  {/* 앱 안 알림은 항상 켜져 있습니다. 휴대폰 푸시는 아직 연결하지 않았으므로
-                      실제로 동작하지 않는 스위치 대신 현재 범위를 사실대로 안내합니다. */}
-                  {settingsPane === "notifications" ? (
-                    <>
-                      <div className="data-sync-status"><Bell size={17} /><span><strong>{t("앱 안에서 알려드려요")}</strong><small>{t("좋아요·댓글·교정·팔로우는 상단 알림함에서 확인할 수 있어요.")}</small></span></div>
-                      <div className="settings-subhead"><strong>{t("푸시 알림")}</strong><small>{t("휴대폰 알림은 아직 준비 중이에요. 준비되면 여기서 켜고 끌 수 있어요.")}</small></div>
-                    </>
-                  ) : null}
-
                   {settingsPane === "data" ? (
                     <>
                       {/* 스위치가 아니었습니다 — 대화는 언제나 서버에 남습니다. 끌 수 있는 척하면
@@ -4339,11 +4625,9 @@ function LearnView({
   profileName,
   profileBio,
   me,
-  onOpenTag,
-  onToggleLike,
   myPostList,
+  card,
   onCopyLink,
-  onDeletePost,
   corrections,
 }: {
   /** 팔로잉·팔로워 수. 못 받아왔으면 숫자를 감춥니다. */
@@ -4361,6 +4645,8 @@ function LearnView({
   onOpenTag: (tag: string) => void;
   onToggleLike: (id: string) => void;
   myPostList: FeedPost[];
+  /** 글 카드가 쓰는 값들. 커뮤니티·상대 프로필과 같은 카드를 그립니다. */
+  card: React.ComponentProps<typeof ProfileDetailView>["card"];
   onCopyLink: (url: string) => void;
   onDeletePost: (post: FeedPost) => void;
   /** 로그인한 사람. 핸들·국기처럼 서버가 주는 값을 그립니다. */
@@ -4419,51 +4705,16 @@ function LearnView({
       ) : null}
 
       {profileTab === "posts" ? (
-        <div className="profile-posts">
+        <div className="feed-grid">
           {myPostList.map((post) => (
-            <article className="my-post" key={post.id}>
-              <div className="my-post-head">
-                <span className="my-post-time">{tx(post.time)}</span>
-                <span className="my-post-lang">{tx(post.language)} · {post.level}</span>
-                <span className="my-post-spacer" />
-                <MenuPopover
-                  label={t("게시물 메뉴")}
-                  items={postMenuItems(post, {
-                    saved: savedItems.some((saved) => saved.id === post.id),
-                    onCopyLink: () => onCopyLink(`${window.location.origin}/#community/post/${post.id}`),
-                    onSavePhrase: () => onSavePhrase(savedFromPost(post)),
-                    onDelete: () => onDeletePost(post),
-                    onHideAuthor: () => {},
-                    onBlockAuthor: () => {},
-                    onReport: () => {},
-                  })}
-                />
-              </div>
-              {/* 커뮤니티 피드와 같이, 본문을 누르면 상세로 갑니다. */}
-              <button className="my-post-text post-copy-open" type="button" onClick={() => onOpenPost(post)}>{post.text}</button>
-              <div className="post-tags">
-                {post.tags.map((tag) => <button type="button" key={tag} onClick={() => onOpenTag(tag)}>{tag}</button>)}
-              </div>
-              {/* 예전에는 그냥 글자였습니다. 카드 전체가 상세로 가는 자리라 눌러도
-                  상세만 열렸고, 좋아요는 누를 수가 없었습니다. */}
-              <div className="my-post-stats">
-                <button
-                  type="button"
-                  className={post.liked ? "active like" : ""}
-                  aria-pressed={post.liked}
-                  aria-label={t("좋아요")}
-                  onClick={() => onToggleLike(post.id)}
-                >
-                  <Heart size={15} fill={post.liked ? "currentColor" : "none"} /> {post.likes}
-                </button>
-                <button type="button" aria-label={t("댓글")} onClick={() => onOpenPost(post)}>
-                  <MessageCircle size={15} /> {post.comments}
-                </button>
-                <button type="button" aria-label={t("교정")} onClick={() => onOpenPost(post)}>
-                  <PenLine size={15} /> {t("교정 {n}", { n: post.corrections })}
-                </button>
-              </div>
-            </article>
+            <PostCard
+              key={post.id}
+              post={post}
+              onOpen={onOpenPost}
+              onCopyLink={onCopyLink}
+              onSavePhrase={onSavePhrase}
+              {...card}
+            />
           ))}
         </div>
       ) : null}
@@ -4586,7 +4837,6 @@ type SettingsPaneId = "learning" | "privacy" | "notifications" | "data" | "verif
 const SETTINGS_SECTIONS: Array<{ id: SettingsPaneId; label: string; icon: LucideIcon }> = [
   { id: "learning", label: msg("학습"), icon: Target },
   { id: "privacy", label: msg("개인정보"), icon: LockKeyhole },
-  { id: "notifications", label: msg("알림"), icon: Bell },
   { id: "data", label: msg("대화 데이터"), icon: Cloud },
   { id: "verification", label: msg("계정 인증"), icon: BadgeCheck },
   { id: "safety", label: msg("신고 및 안전"), icon: ShieldCheck },
@@ -4619,14 +4869,6 @@ function ModalLayer({
   savedItems,
   likesReceived,
   sentLikes,
-  notifications,
-  notificationUnreadCount,
-  notificationLoading,
-  notificationError,
-  onRetryNotifications,
-  onReadNotification,
-  onReadAllNotifications,
-  onOpenNotification,
   followingIds,
   onToggleFollow,
   onOpenPost,
@@ -4673,14 +4915,6 @@ function ModalLayer({
   savedItems: SavedPhrase[];
   likesReceived: ApiReceivedLike[];
   sentLikes: ApiReceivedLike[];
-  notifications: ApiNotification[];
-  notificationUnreadCount: number;
-  notificationLoading: boolean;
-  notificationError: boolean;
-  onRetryNotifications: () => void;
-  onReadNotification: (notification: ApiNotification) => void;
-  onReadAllNotifications: () => void;
-  onOpenNotification: (notification: ApiNotification) => void;
   followingIds: string[];
   onToggleFollow: (partner: Partner) => void;
   onOpenPost: (post: FeedPost) => void;
@@ -4744,18 +4978,6 @@ function ModalLayer({
           />
         ) : null}
         {modal.type === "partner-list" ? <PartnerListModal queue={dailyQueue} index={partnerIndex} signaled={signaledPartners} onJump={onJumpPartner} onProfile={onOpenPartnerProfile} /> : null}
-        {modal.type === "notifications" ? (
-          <NotificationsModal
-            items={notifications}
-            unreadCount={notificationUnreadCount}
-            loading={notificationLoading}
-            failed={notificationError}
-            onRetry={onRetryNotifications}
-            onRead={onReadNotification}
-            onReadAll={onReadAllNotifications}
-            onOpen={onOpenNotification}
-          />
-        ) : null}
         {modal.type === "likes" ? (
           <LikesModal
             received={likesReceived.map((item) => ({
@@ -4812,7 +5034,7 @@ function matchReasonList(match: { matchReasons: string[]; matchReasonCodes?: Mat
 }
 
 function modalLabel(type: Exclude<ModalState, null>["type"]) {
-  const labels: Record<Exclude<ModalState, null>["type"], string> = { review: t("4분 복습 시작"), "new-chat": t("새 대화"), profile: t("파트너 프로필"), filters: t("매칭 설정"), "community-filters": t("커뮤니티 필터"), compose: t("새 게시물"), search: t("통합 검색"), "create-room": t("보이스룸 만들기"), room: t("보이스룸"), exchange: t("언어 교환 세션"), "partner-list": t("오늘의 파트너 목록"), likes: t("주고받은 마음"), notifications: t("알림"), report: t("신고 및 차단"), onboarding: t("학습 목표 설정"), confirm: t("확인") };
+  const labels: Record<Exclude<ModalState, null>["type"], string> = { review: t("4분 복습 시작"), "new-chat": t("새 대화"), profile: t("파트너 프로필"), filters: t("매칭 설정"), "community-filters": t("커뮤니티 필터"), compose: t("새 게시물"), search: t("통합 검색"), "create-room": t("보이스룸 만들기"), room: t("보이스룸"), exchange: t("언어 교환 세션"), "partner-list": t("오늘의 파트너 목록"), likes: t("주고받은 마음"), report: t("신고 및 차단"), onboarding: t("학습 목표 설정"), confirm: t("확인") };
   return labels[type];
 }
 
@@ -4844,51 +5066,36 @@ function notificationPresentation(notification: ApiNotification): { icon: Lucide
   }
 }
 
-function NotificationsModal({
+/**
+ * 알림.
+ *
+ * 모달이 아니라 화면입니다 — 목록을 훑다가 하나를 열면 그 글·프로필로 넘어가야
+ * 하는데, 모달 위에서 열면 모달을 닫고 다시 여는 셈이 됩니다. 화면이면 뒤로
+ * 가기로 제자리에 돌아옵니다.
+ */
+function NotificationsView({
   items,
-  unreadCount,
+  tab,
   loading,
   failed,
   onRetry,
   onRead,
-  onReadAll,
   onOpen,
 }: {
   items: ApiNotification[];
-  unreadCount: number;
+  /** 어떤 종류를 볼지. 상단 줄의 선택기가 정합니다. */
+  tab: NotificationTab;
   loading: boolean;
   failed: boolean;
   onRetry: () => void;
   onRead: (notification: ApiNotification) => void;
-  onReadAll: () => void;
   onOpen: (notification: ApiNotification) => void;
 }) {
-  const [tab, setTab] = useState<NotificationTab>("all");
   const filtered = tab === "all" ? items : items.filter((item) => notificationCategory(item.type) === tab);
-  const communityCount = items.filter((item) => notificationCategory(item.type) === "community").length;
-  const peopleCount = items.length - communityCount;
 
   return (
-    <div className="notifications-content">
-      <header>
-        <div>
-          <h2>{t("알림")}</h2>
-          <p>{t("내 활동에 생긴 새 소식을 한곳에서 확인하세요.")}</p>
-        </div>
-        <button type="button" disabled={!unreadCount} onClick={onReadAll}>{t("모두 읽음")}</button>
-      </header>
-
-      <div className="notification-tabs" role="tablist" aria-label={t("알림 종류")}>
-        {([
-          ["all", t("전체"), items.length],
-          ["community", t("커뮤니티"), communityCount],
-          ["people", t("파트너"), peopleCount],
-        ] as Array<[NotificationTab, string, number]>).map(([id, label, count]) => (
-          <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
-            {label} <span>{count}</span>
-          </button>
-        ))}
-      </div>
+    <div className="view detail-view notifications-view">
+      <div className="notifications-content">
 
       {loading && !items.length ? (
         <div className="notification-state" role="status"><RefreshCw className="spinning" size={22} /><strong>{t("알림을 불러오는 중이에요.")}</strong></div>
@@ -4925,7 +5132,8 @@ function NotificationsModal({
         </div>
       )}
 
-      {failed && items.length ? <footer><button type="button" onClick={onRetry}><RefreshCw size={14} /> {t("새로고침")}</button></footer> : null}
+        {failed && items.length ? <footer><button type="button" onClick={onRetry}><RefreshCw size={14} /> {t("새로고침")}</button></footer> : null}
+      </div>
     </div>
   );
 }
@@ -5065,18 +5273,17 @@ function NewChatModal({
                 <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
                 <span>
                   <strong>{partner.name}</strong>
-                  <small>{tx(partner.native)} ⇄ {tx(partner.learning)} · {partner.interests.slice(0, 2).join(" · ")}</small>
+                  {/* 관심사는 코드가 아니라 지금 언어의 이름으로 보여줍니다. */}
+                  <small>{tx(partner.native)} ⇄ {tx(partner.learning)} · {partner.interests.slice(0, 2).map((item) => labelOf(interestLabels, item)).join(" · ")}</small>
                 </span>
-                <Pill tone="success">{partner.compatibility}%</Pill>
+                {/* 교환 궁합은 오늘의 추천에서만 계산됩니다. 이 목록은 명부에서 와서
+                    점수가 없어 전원 0% 로 나왔습니다 — 뜻 없는 값이라 뺐습니다. */}
                 <ChevronRight size={16} />
               </button>
             </li>
           ))}
         </ul>
       )}
-      <footer>
-        <small>{t("고르면 바로 대화방이 열려요")}</small>
-      </footer>
     </div>
   );
 }

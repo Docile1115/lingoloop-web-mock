@@ -24,7 +24,7 @@ import { t } from "../lib/i18n";
 import { useApi } from "../lib/useApi";
 import { useSession } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
-import { radius, space, tapSize } from "../lib/theme";
+import { radius, space, type } from "../lib/theme";
 import { EmptyState, Loading } from "../ui";
 
 export function ThreadScreen({ conversation }: { conversation: Conversation }) {
@@ -33,6 +33,8 @@ export function ThreadScreen({ conversation }: { conversation: Conversation }) {
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
   const [error, setError] = useState("");
 
   const messages = useApi<ChatMessage[]>(
@@ -135,30 +137,94 @@ export function ThreadScreen({ conversation }: { conversation: Conversation }) {
 
       {error ? <Text style={[styles.error, { color: c.danger }]}>{error}</Text> : null}
 
+      {attachOpen ? (
+        <>
+          <Pressable style={styles.scrim} onPress={() => setAttachOpen(false)} accessibilityLabel={t("닫기")} />
+          <View style={[styles.attachMenu, { backgroundColor: c.surface, borderColor: c.line }]}>
+            <Pressable style={styles.attachItem} onPress={() => setAttachOpen(false)} accessibilityRole="menuitem">
+              <Ionicons name="image-outline" size={18} color={c.ink} />
+              <Text style={[type.body, { color: c.ink }]}>{t("사진")}</Text>
+            </Pressable>
+            <Pressable style={styles.attachItem} onPress={() => setAttachOpen(false)} accessibilityRole="menuitem">
+              <Ionicons name="mic-outline" size={18} color={c.ink} />
+              <Text style={[type.body, { color: c.ink }]}>{t("음성")}</Text>
+            </Pressable>
+          </View>
+        </>
+      ) : null}
+
+      {/* 웹과 같은 배치입니다 — 첨부는 칸 밖 왼쪽, 이모지·코치는 칸 안 왼쪽,
+          보내기는 칸 안 오른쪽에 쓸 것이 있을 때만.
+          ＋ 와 칸의 한 줄 높이를 COMPOSER_H 하나로 묶습니다. 높이가 다르면
+          바닥만 맞고 중심이 몇 px 어긋납니다. */}
       <View style={[styles.composer, { borderTopColor: c.line, backgroundColor: c.surface }]}>
-        <TextInput
-          style={[styles.input, { backgroundColor: c.sunken, color: c.ink }]}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={t("메시지 보내기")}
-          placeholderTextColor={c.subtle}
-          multiline
-          maxLength={2000}
-          editable={!sending}
-        />
         <Pressable
-          onPress={() => void send()}
-          disabled={!draft.trim() || sending}
+          onPress={() => setAttachOpen((open) => !open)}
           accessibilityRole="button"
-          accessibilityLabel={t("보내기")}
-          style={[styles.send, { backgroundColor: draft.trim() && !sending ? c.primary : c.sunken }]}
+          accessibilityLabel={t("첨부")}
+          style={({ pressed }) => [
+            styles.round,
+            { backgroundColor: attachOpen ? c.primary : c.sunken, opacity: pressed ? 0.8 : 1 },
+          ]}
         >
-          <Ionicons name="arrow-up" size={20} color={draft.trim() && !sending ? c.onPrimary : c.subtle} />
+          <Ionicons name="add" size={24} color={attachOpen ? c.onPrimary : c.ink} />
         </Pressable>
+
+        <View style={[styles.field, { backgroundColor: c.sunken, borderColor: c.line }]}>
+          <Pressable
+            onPress={() => setDraft((text) => `${text} 😊`)}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={t("이모지")}
+            style={styles.inlineAction}
+          >
+            <Ionicons name="happy-outline" size={20} color={c.muted} />
+          </Pressable>
+          <Pressable
+            onPress={() => setCoachOpen((open) => !open)}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={t("대화 코치")}
+            style={styles.inlineAction}
+          >
+            <Ionicons name="sparkles-outline" size={19} color={coachOpen ? c.primaryStrong : c.muted} />
+          </Pressable>
+
+          <TextInput
+            style={[styles.input, { color: c.ink }]}
+            value={draft}
+            onChangeText={setDraft}
+            placeholder={t("메시지 보내기")}
+            placeholderTextColor={c.subtle}
+            multiline
+            maxLength={2000}
+            editable={!sending}
+          />
+
+          {/* 쓸 것이 있을 때만. 다른 안쪽 버튼과 같은 크기라 줄이 흔들리지 않습니다. */}
+          {draft.trim() ? (
+            <Pressable
+              onPress={() => void send()}
+              disabled={sending}
+              accessibilityRole="button"
+              accessibilityLabel={t("보내기")}
+              style={({ pressed }) => [
+                styles.inlineSend,
+                { backgroundColor: c.primary, opacity: pressed ? 0.85 : 1 },
+              ]}
+            >
+              <Ionicons name="arrow-up" size={20} color={c.onPrimary} />
+            </Pressable>
+          ) : null}
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
 }
+
+/* 컴포저 한 줄 높이. 안쪽 아이콘(30) + 위아래 여백(9+9) + 테두리 = 50.
+   웹의 --composer-h 와 같은 값입니다. */
+const COMPOSER_H = 50;
 
 const styles = StyleSheet.create({
   list: { padding: space.lg, gap: 3 },
@@ -185,15 +251,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  input: {
-    flex: 1,
-    minHeight: tapSize,
-    maxHeight: 120,
-    paddingHorizontal: space.md,
-    paddingTop: 11,
-    paddingBottom: 11,
-    borderRadius: radius.lg,
-    fontSize: 15,
+  /* ＋·보내기. 칸의 한 줄 높이와 같아야 바닥 정렬이 곧 중앙 정렬이 됩니다. */
+  round: {
+    width: COMPOSER_H,
+    height: COMPOSER_H,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.pill,
   },
-  send: { width: tapSize, height: tapSize, alignItems: "center", justifyContent: "center", borderRadius: radius.pill },
+  field: {
+    flex: 1,
+    minHeight: COMPOSER_H,
+    maxHeight: 132,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.pill,
+  },
+  input: { flex: 1, minHeight: 34, paddingTop: 6, paddingBottom: 6, paddingHorizontal: space.xs, fontSize: 15, lineHeight: 22 },
+  inlineAction: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
+  /* 다른 안쪽 버튼과 같은 크기라 글을 쓰기 시작해도 줄이 흔들리지 않습니다. */
+  inlineSend: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: radius.pill, marginLeft: 2 },
+  scrim: { ...StyleSheet.absoluteFillObject },
+  attachMenu: {
+    position: "absolute",
+    left: space.md,
+    bottom: COMPOSER_H + space.md + 6,
+    minWidth: 148,
+    padding: space.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+  },
+  attachItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    minHeight: 40,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
+  },
 });
