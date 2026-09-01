@@ -72,6 +72,7 @@ export const ja: Record<MessageKey, string> = {
   "{name}님이 마음을 보냈어요": "{name}さんがハートを送りました",
   "{name}님이 메시지 요청을 보냈어요": "{name}さんがメッセージリクエストを送りました",
   "{name}님이 메시지 요청을 수락했어요": "{name}さんがメッセージリクエストを承認しました",
+  "{name}님이 메시지를 보냈어요": "{name}さんからメッセージが届きました",
   "{name}님이 문장을 고쳤어요": "{name}さんが文を直しました",
   "{name}님이 입력 중": "{name}さんが入力中",
   "{name}의 {language}": "{name}の{language}",

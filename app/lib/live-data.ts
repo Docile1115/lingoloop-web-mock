@@ -448,7 +448,9 @@ export type ApiNotificationType =
   | "partner_like"
   | "follow"
   | "message_request"
-  | "request_accepted";
+  | "request_accepted"
+  /** 이미 열린 대화의 새 메시지. 대화당 한 줄로 모입니다. */
+  | "message";
 
 export interface ApiNotification {
   id: string;

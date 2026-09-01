@@ -69,6 +69,7 @@ export const MESSAGE_KEYS = [
   "{name}님이 마음을 보냈어요",
   "{name}님이 메시지 요청을 보냈어요",
   "{name}님이 메시지 요청을 수락했어요",
+  "{name}님이 메시지를 보냈어요",
   "{name}님이 문장을 고쳤어요",
   "{name}님이 입력 중",
   "{name}의 {language}",
