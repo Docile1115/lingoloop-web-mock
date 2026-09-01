@@ -1346,6 +1346,11 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
 
     if (notification.conversationId) {
       await reload();
+      /* 알림 화면을 걷어냅니다. 예전에는 알림이 모달이라 위의 setModal(null) 로
+         닫혔는데, 화면으로 바꾼 뒤로는 그대로 위에 남아 대화가 안 보였습니다.
+         글 알림은 그 위에 쌓아 올려 뒤로가기로 알림함에 돌아오게 두지만,
+         대화는 섹션이라 겹칠 자리가 없습니다. */
+      setDetailStack([]);
       setSelectedChatId(notification.conversationId);
       setSection("chats");
       setMobileThreadOpen(true);
@@ -5063,6 +5068,8 @@ function notificationPresentation(notification: ApiNotification): { icon: Lucide
       return { icon: MessageCircle, accent: "amber", title: t("{name}님이 메시지 요청을 보냈어요", { name }) };
     case "request_accepted":
       return { icon: CheckCircle2, accent: "mint", title: t("{name}님이 메시지 요청을 수락했어요", { name }) };
+    case "message":
+      return { icon: MessageCircle, accent: "violet", title: t("{name}님이 메시지를 보냈어요", { name }) };
   }
 }
 

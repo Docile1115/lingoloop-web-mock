@@ -652,6 +652,20 @@ function removeNotification(transaction, event) {
   transaction.delete(notificationRef(event));
 }
 
+/** 이 대화에서 온 알림을 읽음으로 바꿉니다(새 메시지·대화 요청). */
+async function markConversationNotificationsRead(uid, conversationId) {
+  const snapshot = await notificationItems(uid)
+    .where("conversationId", "==", conversationId)
+    .where("readAt", "==", null)
+    .limit(50)
+    .get();
+  if (snapshot.empty) return;
+  const readAt = nowIso();
+  const batch = db.batch();
+  for (const document of snapshot.docs) batch.update(document.ref, { readAt });
+  await batch.commit();
+}
+
 async function unreadNotificationCount(uid) {
   const [snapshot, blocked] = await Promise.all([
     notificationItems(uid).where("readAt", "==", null).limit(500).get(),
@@ -1851,6 +1865,9 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
       ...(latest ? { [`readAt.${req.auth.uid}`]: latest } : {}),
       [`unread.${req.auth.uid}`]: 0,
     });
+    /* 대화를 열었으면 그 대화의 알림도 읽은 것입니다. 안 지우면 이미 다 읽은
+       대화의 알림이 알림함에 계속 안읽음으로 남습니다. */
+    await markConversationNotificationsRead(req.auth.uid, id);
   }
 
   // 내가 보낸 메시지에만 읽음 여부를 붙입니다 — 남이 내 걸 언제 읽었는지가 궁금한 것이지,
@@ -1950,9 +1967,13 @@ async function createMessage(req, res, conversationId) {
     if (recipientId) unread[recipientId] = (unread[recipientId] || 0) + 1;
     unread[req.auth.uid] = 0;
 
-    if (recipientId && conversationStatus(conversation) === "pending") {
+    if (recipientId) {
+      /* 처음 말을 걸 때는 "요청", 이미 열린 대화면 "새 메시지".
+         sourceId 를 대화 id 로 둡니다 — 문서 id 가 type+수신자+보낸이+sourceId 라
+         같은 대화의 메시지가 한 줄로 모입니다. 20통을 보내도 알림은 하나이고
+         가장 최근 내용으로 갱신됩니다. */
       putNotification(transaction, {
-        type: "message_request",
+        type: conversationStatus(conversation) === "pending" ? "message_request" : "message",
         recipientId,
         actorId: req.auth.uid,
         sourceId: id,

@@ -9,6 +9,7 @@ export const NOTIFICATION_TYPES = new Set([
   "follow",
   "message_request",
   "request_accepted",
+  "message",
 ]);
 
 const EXCERPT_LIMIT = 160;
