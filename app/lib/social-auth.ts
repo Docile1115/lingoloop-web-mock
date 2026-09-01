@@ -2,6 +2,7 @@
 
 import { getApp, getApps, initializeApp, type FirebaseOptions } from "firebase/app";
 import {
+  connectAuthEmulator,
   getAuth,
   GoogleAuthProvider,
   inMemoryPersistence,
@@ -29,9 +30,14 @@ export class SocialAuthError extends Error {
 export type SocialAuthConfig = {
   firebase: Pick<FirebaseOptions, "apiKey" | "authDomain" | "projectId">;
   providers: Record<SocialProvider, boolean>;
+  /** 로컬 에뮬레이터 주소. 운영에서는 비어 있습니다. */
+  authEmulatorHost?: string;
 };
 
 const FIREBASE_APP_NAME = "lingoloop-browser-auth";
+
+/** connectAuthEmulator 는 같은 auth 에 두 번 부르면 던집니다. */
+let emulatorConnected = false;
 
 function providerFor(provider: SocialProvider) {
   if (provider === "google") {
@@ -55,6 +61,15 @@ export async function getSocialIdToken(config: SocialAuthConfig, provider: Socia
     ? getApp(FIREBASE_APP_NAME)
     : initializeApp(config.firebase, FIREBASE_APP_NAME);
   const auth = getAuth(firebaseApp);
+  /* 서버가 에뮬레이터를 쓰고 있으면 브라우저도 같은 곳을 봐야 합니다.
+     안 그러면 서버는 에뮬레이터의 계정을 찾는데 브라우저는 진짜 구글에
+     로그인해서, 만든 토큰을 서버가 알아보지 못합니다.
+     에뮬레이터는 가짜 계정 선택 화면을 띄우므로 실제 구글 설정 없이도
+     운영과 같은 경로로 로그인 흐름을 확인할 수 있습니다. */
+  if (config.authEmulatorHost && !emulatorConnected) {
+    connectAuthEmulator(auth, `http://${config.authEmulatorHost}`, { disableWarnings: true });
+    emulatorConnected = true;
+  }
   await setPersistence(auth, inMemoryPersistence);
 
   try {
