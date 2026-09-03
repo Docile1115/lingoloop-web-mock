@@ -97,6 +97,8 @@ export function PartnersScreen({
             <Avatar
               name={item.partner.name}
               photo={item.partner.photo}
+              avatarMode={item.partner.avatarMode}
+              avatarConfig={item.partner.avatarConfig}
               size={54}
               online={item.partner.online}
             />

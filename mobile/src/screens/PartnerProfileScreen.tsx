@@ -109,7 +109,14 @@ export function PartnerProfileScreen({
   return (
     <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={styles.page}>
       <View style={styles.head}>
-        <Avatar name={partner.name} photo={partner.photo} size={72} online={partner.online} />
+        <Avatar
+          name={partner.name}
+          photo={partner.photo}
+          avatarMode={partner.avatarMode}
+          avatarConfig={partner.avatarConfig}
+          size={72}
+          online={partner.online}
+        />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[styles.name, { color: c.ink }]}>
             {partner.name}
@@ -207,7 +214,14 @@ export function PartnerProfileScreen({
                     accessibilityRole="button"
                     style={[styles.similar, { backgroundColor: c.surfaceSoft, borderColor: c.line }]}
                   >
-                    <Avatar name={item.name} photo={item.photo} size={48} online={item.online} />
+                    <Avatar
+                      name={item.name}
+                      photo={item.photo}
+                      avatarMode={item.avatarMode}
+                      avatarConfig={item.avatarConfig}
+                      size={48}
+                      online={item.online}
+                    />
                     <Text style={[styles.similarName, { color: c.ink }]} numberOfLines={1}>
                       {item.name}
                     </Text>

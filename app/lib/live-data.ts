@@ -1,6 +1,7 @@
 // 브라우저 배선이 들어 있는 ./i18n 이 아니라 플랫폼 공용 core 를 봅니다 —
 // 이 파일은 앱(React Native)에서도 그대로 씁니다.
 import { msg, t, tx } from "./i18n/core";
+import { normalizeAvatarConfig, normalizeAvatarMode, type AvatarConfig, type AvatarMode } from "./avatar";
 import type {
   Accent,
   ChatMessage,
@@ -70,6 +71,9 @@ export interface ApiProfile {
   exchangeScore?: number;
   /** 프로필 사진 주소(데이터 URI 도 됩니다). 비면 자리표시자를 그립니다. */
   avatarUrl?: string;
+  /** Which profile representation is active. Older profiles omit this and remain photos. */
+  avatarMode?: AvatarMode;
+  avatarConfig?: AvatarConfig | null;
   /** 남에게 도시를 감출지. 본인 프로필에만 실려 옵니다. */
   hideLocation?: boolean;
 }
@@ -83,6 +87,8 @@ export interface ApiPost {
     handle: string;
     flag: string;
     avatarUrl?: string;
+    avatarMode?: AvatarMode;
+    avatarConfig?: AvatarConfig | null;
     countryCode?: string;
     /** 글쓴이의 나이·성별. */
     age?: number;
@@ -342,6 +348,8 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
     compatibility: score,
     accent: accentFor(profile.id),
     photo: profile.avatarUrl || "",
+    avatarMode: normalizeAvatarMode(profile.avatarMode),
+    avatarConfig: profile.avatarConfig ? normalizeAvatarConfig(profile.avatarConfig) : undefined,
     countryCode: profile.country?.code || "",
     age: profile.age || 0,
     gender: profile.gender || "",
@@ -370,6 +378,8 @@ export function toFeedPost(post: ApiPost): FeedPost {
     flag: post.author.flag || "🌐",
     accent: accentFor(post.authorId),
     photo: post.author.avatarUrl || "",
+    avatarMode: normalizeAvatarMode(post.author.avatarMode),
+    avatarConfig: post.author.avatarConfig ? normalizeAvatarConfig(post.author.avatarConfig) : undefined,
     countryCode: post.author.countryCode || "",
     age: post.author.age || 0,
     gender: post.author.gender || "",
@@ -417,6 +427,8 @@ export function toConversation(conversation: ApiConversation, messages: ChatMess
     name: partner?.name || t("알 수 없는 상대"),
     flag: partner?.country?.flag || "🌐",
     photo: partner?.avatarUrl || "",
+    avatarMode: normalizeAvatarMode(partner?.avatarMode),
+    avatarConfig: partner?.avatarConfig ? normalizeAvatarConfig(partner.avatarConfig) : undefined,
     countryCode: partner?.country?.code || "",
     timeOffset: offsetHoursFor(partner?.country?.code),
     accent: accentFor(partner?.id || conversation.id),
@@ -439,7 +451,16 @@ export interface ApiReply {
   parentId: string;
   likes: number;
   createdAt: string;
-  author: { id: string; name: string | null; handle: string | null; flag: string; avatarUrl?: string; countryCode?: string };
+  author: {
+    id: string;
+    name: string | null;
+    handle: string | null;
+    flag: string;
+    avatarUrl?: string;
+    avatarMode?: AvatarMode;
+    avatarConfig?: AvatarConfig | null;
+    countryCode?: string;
+  };
 }
 
 export interface ApiReceivedLike {
@@ -488,6 +509,10 @@ export interface ApiCorrection {
   createdAt: string;
   from: string | null;
   fromFlag: string;
+  fromAvatarUrl?: string;
+  fromAvatarMode?: AvatarMode;
+  fromAvatarConfig?: AvatarConfig | null;
+  fromCountryCode?: string;
 }
 
 export interface ApiSavedPhrase {
@@ -508,6 +533,8 @@ export function toPostReply(reply: ApiReply): PostReply {
     flag: reply.author?.flag || "🌐",
     accent: accentFor(reply.authorId),
     photo: reply.author?.avatarUrl || "",
+    avatarMode: normalizeAvatarMode(reply.author?.avatarMode),
+    avatarConfig: reply.author?.avatarConfig ? normalizeAvatarConfig(reply.author.avatarConfig) : undefined,
     countryCode: reply.author?.countryCode || "",
     time: relativeTime(reply.createdAt),
     text: reply.text,

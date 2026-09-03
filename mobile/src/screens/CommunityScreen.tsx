@@ -5,7 +5,7 @@
  * 맞는 사람(내 글을 고쳐줄 수 있는 사람 → 내가 도울 수 있는 사람) 순입니다.
  * 이 규칙이 두 화면에서 달라지면 같은 계정으로 보는 목록이 서로 달라집니다.
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { toFeedPost, type ApiPost } from "@shared/live-data";
@@ -35,6 +35,17 @@ export function CommunityScreen({
   const follows = useApi<string[]>("/api/follows", [], (raw: { following?: Array<{ id: string }> }) =>
     (raw.following ?? []).map((row) => row.id),
   );
+
+  /* 캐릭터 저장 뒤 탭이 그대로 마운트돼 있어도 내 기존 글의 아바타를 즉시 맞춥니다. */
+  useEffect(() => {
+    if (!me) return;
+    posts.set((rows) => rows.map((row) => row.authorId === me.id ? {
+      ...row,
+      photo: me.avatarUrl,
+      avatarMode: me.avatarMode,
+      avatarConfig: me.avatarConfig ?? undefined,
+    } : row));
+  }, [me?.avatarConfig, me?.avatarMode, me?.avatarUrl, me?.id, posts.set]);
 
   const myLearning = me?.learningLanguages?.[0]?.code ?? "";
   const myNative = me?.nativeLanguages?.[0] ?? "";
@@ -152,7 +163,13 @@ export function PostCard({
     <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.surfaceSoft }]}>
       {/* 왼쪽 세로줄에 아바타, 오른쪽에 내용 — 글이 길어져도 이름 자리가 흔들리지 않습니다. */}
       <Pressable onPress={onAuthor} accessibilityRole="button" hitSlop={6}>
-        <Avatar name={post.author} photo={post.photo} size={42} />
+        <Avatar
+          name={post.author}
+          photo={post.photo}
+          avatarMode={post.avatarMode}
+          avatarConfig={post.avatarConfig}
+          size={42}
+        />
       </Pressable>
 
       <View style={{ flex: 1, gap: 6 }}>

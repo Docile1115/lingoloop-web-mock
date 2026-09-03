@@ -7,6 +7,7 @@
  * 돌아갑니다.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { AvatarConfig, AvatarMode } from "@shared/avatar";
 import { ApiError, get, post, setUnauthorizedHandler } from "./api";
 import type { FirebaseSessionCredential } from "./socialAuth";
 
@@ -16,6 +17,8 @@ export type Me = {
   handle: string;
   email: string;
   avatarUrl?: string;
+  avatarMode?: AvatarMode;
+  avatarConfig?: AvatarConfig | null;
   city?: string;
   bio?: string;
   age?: number;

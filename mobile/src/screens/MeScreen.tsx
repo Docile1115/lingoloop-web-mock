@@ -1,4 +1,5 @@
 /** 내 프로필. 등록한 정보와 내가 쓴 글, 그리고 로그아웃. */
+import { useEffect } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { toFeedPost, type ApiPost } from "@shared/live-data";
@@ -12,9 +13,11 @@ import { Avatar, EmptyState, Loading } from "../ui";
 
 export function MeScreen({
   onEdit,
+  onEditAvatar,
   onOpenPost,
 }: {
   onEdit: () => void;
+  onEditAvatar: () => void;
   onOpenPost: (row: FeedPost) => void;
 }) {
   const c = useTheme();
@@ -23,6 +26,15 @@ export function MeScreen({
   const posts = useApi<FeedPost[]>("/api/posts", [], (raw: ApiPost[]) =>
     raw.map(toFeedPost),
   );
+  useEffect(() => {
+    if (!me) return;
+    posts.set((rows) => rows.map((row) => row.authorId === me.id ? {
+      ...row,
+      photo: me.avatarUrl,
+      avatarMode: me.avatarMode,
+      avatarConfig: me.avatarConfig ?? undefined,
+    } : row));
+  }, [me?.avatarConfig, me?.avatarMode, me?.avatarUrl, me?.id, posts.set]);
   const mine = posts.data.filter((row) => row.authorId === me?.id);
 
   if (!me) return <Loading />;
@@ -48,7 +60,24 @@ export function MeScreen({
       ListHeaderComponent={
         <View style={{ gap: space.md }}>
           <View style={styles.head}>
-            <Avatar name={me.name} photo={me.avatarUrl} size={68} />
+            <Pressable
+              onPress={onEditAvatar}
+              accessibilityRole="button"
+              accessibilityLabel={t("캐릭터 꾸미기")}
+              hitSlop={8}
+              style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}
+            >
+              <Avatar
+                name={me.name}
+                photo={me.avatarUrl}
+                avatarMode={me.avatarMode}
+                avatarConfig={me.avatarConfig}
+                size={68}
+              />
+              <View style={[styles.avatarEditBadge, { backgroundColor: c.ink, borderColor: c.bg }]}>
+                <Ionicons name="color-palette-outline" size={13} color={c.bg} />
+              </View>
+            </Pressable>
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={[styles.name, { color: c.ink }]}>{me.name}</Text>
               <Text style={[styles.handle, { color: c.subtle }]}>{me.handle}</Text>
@@ -118,6 +147,17 @@ export function MeScreen({
 const styles = StyleSheet.create({
   list: { padding: space.lg, gap: space.sm },
   head: { flexDirection: "row", alignItems: "center", gap: space.md },
+  avatarEditBadge: {
+    position: "absolute",
+    right: -3,
+    bottom: -3,
+    width: 25,
+    height: 25,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderRadius: radius.pill,
+  },
   name: { fontSize: 22, fontWeight: "700", letterSpacing: -0.5 },
   handle: { fontSize: 13 },
   bio: { fontSize: 14, lineHeight: 20 },

@@ -1,3 +1,5 @@
+import type { AvatarConfig, AvatarMode } from "./avatar";
+
 export type Accent = "violet" | "coral" | "mint" | "amber" | "blue" | "rose";
 
 export type Partner = {
@@ -23,6 +25,10 @@ export type Partner = {
   activeTime: string;
   /** 프로필 사진. */
   photo?: string;
+  /** 사진과 조립형 캐릭터 중 현재 표시 방식. */
+  avatarMode?: AvatarMode;
+  /** 서버에서 검증한 조립형 캐릭터 설정. */
+  avatarConfig?: AvatarConfig;
   /** 국가 코드(KR·JP…). 국기 아이콘을 고르는 값입니다. */
   countryCode?: string;
   /** 나이와 성별. 서버에 없으면 화면에서 감춥니다. */
@@ -60,6 +66,8 @@ export type FeedPost = {
   requestCorrection?: boolean;
   /** 글쓴이 프로필 사진. */
   photo?: string;
+  avatarMode?: AvatarMode;
+  avatarConfig?: AvatarConfig;
   /** 글쓴이 국가 코드. */
   countryCode?: string;
   /** 나이와 성별. 서버에 없으면 화면에서 감춥니다. */
@@ -117,6 +125,8 @@ export type Conversation = {
   flag: string;
   /** 상대 프로필 사진. */
   photo?: string;
+  avatarMode?: AvatarMode;
+  avatarConfig?: AvatarConfig;
   /** 상대 국가 코드. */
   countryCode?: string;
   /** 상대와 나의 시차(시간). 서버가 시간대를 주지 않으면 0 이고, 그러면 감춥니다. */
@@ -816,6 +826,8 @@ export type PostReply = {
   replies?: PostReply[];
   /** 작성자 프로필 사진. */
   photo?: string;
+  avatarMode?: AvatarMode;
+  avatarConfig?: AvatarConfig;
   /** 작성자 국가 코드. */
   countryCode?: string;
 };

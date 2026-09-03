@@ -104,7 +104,14 @@ export function SearchScreen({
           ListEmptyComponent={<Blank query={query} short={short} error={error} searching={searching} />}
           renderItem={({ item }) => (
             <Pressable style={styles.row} onPress={() => onOpenProfile(item.id)} accessibilityRole="button">
-              <Avatar name={item.name} photo={item.photo} size={46} online={item.online} />
+              <Avatar
+                name={item.name}
+                photo={item.photo}
+                avatarMode={item.avatarMode}
+                avatarConfig={item.avatarConfig}
+                size={46}
+                online={item.online}
+              />
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={[type.name, { color: c.ink }]} numberOfLines={1}>{item.name}</Text>
                 <Text style={[type.meta, { color: c.muted }]} numberOfLines={1}>
@@ -124,7 +131,13 @@ export function SearchScreen({
           ListEmptyComponent={<Blank query={query} short={short} error={error} searching={searching} />}
           renderItem={({ item }) => (
             <Pressable style={styles.row} onPress={() => onOpenPost(item)} accessibilityRole="button">
-              <Avatar name={item.author} photo={item.photo} size={38} />
+              <Avatar
+                name={item.author}
+                photo={item.photo}
+                avatarMode={item.avatarMode}
+                avatarConfig={item.avatarConfig}
+                size={38}
+              />
               <View style={{ flex: 1, gap: 3 }}>
                 <Text style={[type.name, { color: c.ink }]} numberOfLines={1}>{item.author}</Text>
                 <Text style={[type.meta, { color: c.muted }]} numberOfLines={2}>{item.text}</Text>

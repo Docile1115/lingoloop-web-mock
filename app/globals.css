@@ -3833,6 +3833,19 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 .notification-list button:hover { background: var(--hover-bg); }
 .notification-list button.unread { background: linear-gradient(90deg,var(--secondary-soft),transparent); }
 .notification-icon { display: inline-flex; width: 35px; height: 35px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: var(--r-btn); }
+.notification-avatar { position: relative; display: inline-flex; width: 42px; height: 42px; flex: 0 0 auto; }
+.notification-avatar-kind {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: inline-flex;
+  width: 19px;
+  height: 19px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--surface);
+  border-radius: var(--r-pill);
+}
 .accent-violet { background: var(--sunken); color: var(--ink); }
 .accent-coral { background: var(--danger-soft); color: var(--coral); }
 .accent-mint { background: var(--success-soft); color: var(--mint); }
@@ -4976,6 +4989,205 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 
 .profile-head-actions { display: flex; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-2); }
 .profile-head-actions button { flex: 1; min-height: 34px; border-radius: var(--r-btn); font-size: 15px; font-weight: 600; }
+
+/* 내 프로필의 큰 아바타 자체가 편집 진입점입니다. 별도 세 번째 액션 버튼을
+   만들지 않아 좁은 화면에서도 기존 두 행동의 폭을 유지합니다. */
+.profile-avatar-button {
+  position: relative;
+  display: inline-flex;
+  width: 82px;
+  height: 82px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+}
+
+.profile-avatar-button > span:last-child {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: inline-flex;
+  width: 25px;
+  height: 25px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--surface);
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.profile-avatar-button:hover .avatar { box-shadow: 0 0 0 3px var(--primary-soft); }
+
+/* 프로필 편집 맨 위의 캐릭터 행. 큰 아바타를 놓쳐도 같은 기능을 찾을 수 있습니다. */
+.profile-avatar-edit-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-5);
+  padding: var(--sp-3);
+  border: var(--bw-thin) solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface-soft);
+  text-align: left;
+}
+
+.profile-avatar-edit-row:hover { border-color: var(--primary-border); background: var(--primary-soft); }
+.profile-avatar-edit-row > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.profile-avatar-edit-row strong { font-size: 15px; }
+.profile-avatar-edit-row small { color: var(--subtle); font-size: 13px; line-height: 18px; }
+
+/* ─────────────────────────────────────────────
+   2D 프로필 캐릭터 편집기
+   ───────────────────────────────────────────── */
+.avatar-editor-view { padding-bottom: 0; }
+
+.avatar-editor-preview {
+  position: sticky;
+  z-index: 8;
+  top: 0;
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: center;
+  margin: calc(var(--sp-5) * -1) calc(var(--view-pad-x) * -1) 0;
+  padding: var(--sp-5) var(--view-pad-x) var(--sp-4);
+  border-bottom: var(--bw-hair) solid var(--line);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.avatar-editor-preview-image {
+  width: 132px;
+  height: 132px;
+  overflow: hidden;
+  border: var(--bw-thin) solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-soft);
+  box-shadow: var(--shadow-md);
+}
+
+.avatar-editor-preview-image img { display: block; width: 100%; height: 100%; }
+.avatar-editor-intro { display: flex; min-width: 0; flex-direction: column; gap: var(--sp-1); }
+.avatar-editor-intro strong { font-size: 18px; line-height: 24px; }
+.avatar-editor-intro small { color: var(--muted); font-size: 13px; line-height: 18px; }
+.avatar-editor-quick-actions { display: flex; grid-column: 2; gap: var(--sp-2); }
+.avatar-editor-quick-actions button { min-height: 36px; padding: 0 var(--sp-3); }
+
+.avatar-category-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  margin: 0 calc(var(--view-pad-x) * -1);
+  padding: var(--sp-3) var(--view-pad-x);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.avatar-category-tabs::-webkit-scrollbar { display: none; }
+.avatar-category-tabs button {
+  min-height: 36px;
+  flex: 0 0 auto;
+  padding: 0 var(--sp-3);
+  border: var(--bw-thin) solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.avatar-category-tabs button.active { border-color: var(--ink); background: var(--ink); color: var(--surface); }
+
+.avatar-option-section { padding: var(--sp-2) 0 var(--sp-5); }
+.avatar-option-section h2 { margin: var(--sp-2) 0 var(--sp-3); font-size: 15px; line-height: 21px; }
+.avatar-option-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--sp-2); }
+.avatar-option {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 91px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-1);
+  border: var(--bw-thin) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.avatar-option:hover { border-color: var(--line-strong); background: var(--surface-soft); }
+.avatar-option.active { border: 2px solid var(--primary-ink); background: var(--primary-soft); }
+.avatar-option img,
+.avatar-option-swatch { display: block; width: 46px; height: 46px; border-radius: var(--r-pill); }
+.avatar-option img { object-fit: cover; }
+.avatar-option-swatch { border: var(--bw-thin) solid rgba(22, 25, 24, 0.12); }
+.avatar-option small { max-width: 100%; overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.avatar-option-check {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-pill);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.avatar-editor-footer {
+  position: sticky;
+  z-index: 9;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin: 0 calc(var(--view-pad-x) * -1);
+  padding: var(--sp-3) var(--view-pad-x) var(--sp-4);
+  border-top: var(--bw-hair) solid var(--line);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(16px);
+}
+.avatar-editor-footer > div { display: flex; gap: var(--sp-2); }
+.avatar-editor-footer button { min-height: 40px; }
+.avatar-use-photo { display: inline-flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2); border: 0; background: transparent; color: var(--muted); }
+.avatar-photo-preview { display: inline-flex; }
+
+@media (max-width: 720px) {
+  .avatar-editor-view { padding-top: var(--sp-4); }
+  .avatar-editor-preview {
+    top: var(--mobile-topbar-total);
+    grid-template-columns: 104px minmax(0, 1fr);
+    margin-top: calc(var(--sp-4) * -1);
+    padding-top: var(--sp-3);
+  }
+  .avatar-editor-preview-image { width: 104px; height: 104px; border-radius: var(--r-pill); }
+  .avatar-editor-intro strong { font-size: 16px; line-height: 22px; }
+  .avatar-editor-quick-actions { grid-column: 1 / -1; }
+  .avatar-editor-quick-actions button { min-height: var(--mobile-tap); flex: 1; }
+  .avatar-category-tabs button { min-height: var(--mobile-tap); }
+  .avatar-option-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .avatar-option { min-height: 88px; }
+  .avatar-editor-footer {
+    bottom: var(--mobile-nav-total);
+    flex-wrap: wrap;
+    padding-bottom: var(--sp-3);
+  }
+  .avatar-editor-footer > div { flex: 1 1 220px; }
+  .avatar-editor-footer > div button { min-height: var(--mobile-tap); flex: 1; }
+  .avatar-use-photo { min-height: var(--mobile-tap); }
+}
+
+@media (max-width: 380px) {
+  .avatar-editor-preview { grid-template-columns: 88px minmax(0, 1fr); }
+  .avatar-editor-preview-image { width: 88px; height: 88px; border-radius: var(--r-pill); }
+  .avatar-option-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 
 /* 밑줄형 탭 — 실측 h48 · 15px/400 · 활성 밑줄 2px */
 .profile-tabs {
@@ -7458,3 +7670,8 @@ label > svg { flex: none; }
 /* 성별은 색으로도 구분합니다 — 기호만으로는 작은 글씨에서 잘 안 보입니다. */
 .age-gender-woman { background: var(--danger-soft); color: var(--danger-ink); }
 .age-gender-man { background: var(--info-soft, rgba(77, 171, 247, .16)); color: var(--link); }
+
+/* 뒤쪽 모바일 공통 .view 여백보다 우선해 고정 저장바와 하단 탐색 사이 빈 띠를 없앱니다. */
+@media (max-width: 720px) {
+  .view.avatar-editor-view { padding-bottom: 0; }
+}

@@ -15,7 +15,7 @@ TimoTalk은 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화를
 | 영역 | 현재 동작 |
 | --- | --- |
 | 로그인 | PC·Android 웹은 Google, iOS 웹은 Apple만 노출하고 Firebase Admin 세션 쿠키로 서버 세션을 유지. 각 소셜 공급자는 운영 자격정보 설정 후 활성화 |
-| 프로필 | 이름, 소개, 모국어, 학습 언어 등 Firestore 저장·수정 |
+| 프로필 | 이름, 소개, 모국어, 학습 언어와 조립형 프로필 캐릭터를 Firestore에 저장·수정 |
 | 매칭 | 실제 가입자 프로필과 저장된 선호 조건으로 일일 추천 생성·저장 |
 | 커뮤니티 | 게시물 작성·조회·좋아요를 Firestore에 영속 저장 |
 | 대화 | 대화방 생성, 메시지 전송·조회, 재로그인 후 복원 |
@@ -154,6 +154,7 @@ aiUsage/{uid}/days/{yyyy-mm-dd}
 | `POST` | `/api/auth/logout` | 세션 종료 |
 | `GET` | `/api/bootstrap` | 로그인 후 초기 데이터와 기능 상태 조회 |
 | `GET/PATCH` | `/api/profile` | 내 프로필 조회·수정 |
+| `PATCH` | `/api/profile/avatar` | 허용된 파츠 ID로 내 프로필 캐릭터 저장·사진 모드 전환 |
 | `GET` | `/api/partners` | 실제 가입자 기반 파트너 후보 조회 |
 | `GET/POST` | `/api/matching/preferences` | 매칭 희망 조건 조회·저장 |
 | `GET` | `/api/matching/daily` | 오늘의 매칭 스냅샷 조회·생성 |
