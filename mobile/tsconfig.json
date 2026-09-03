@@ -4,9 +4,11 @@
     "strict": true,
     "paths": {
       "@shared/*": ["../app/lib/*"],
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", "../app/lib/**/*.ts"],
+  "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules"]
 }
