@@ -57,9 +57,42 @@ jobs:
       - name: Test API
         run: npm --prefix backend test
 
+  verify-mobile:
+    name: Verify mobile application
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm --prefix mobile ci
+
+      - name: Verify Expo package compatibility
+        run: npm --prefix mobile run check:deps
+
+      - name: Verify native application config
+        run: npm --prefix mobile run check:config
+
+      - name: Verify Android native module autolinking
+        run: npm --prefix mobile run check:autolink
+
+      - name: Type-check mobile
+        run: npm --prefix mobile run typecheck
+
+      - name: Bundle iOS and Android
+        run: npm --prefix mobile run bundle
+
   deploy:
     name: Deploy API and web
-    needs: verify
+    needs: [verify, verify-mobile]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment:
@@ -97,6 +130,16 @@ jobs:
             --region="$GCP_REGION" \
             --format='value(metadata.name)'
 
+      - name: Deploy web
+        shell: bash
+        run: |
+          gcloud run deploy "$WEB_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --source=. \
+            --build-service-account="$GCP_BUILD_SERVICE_ACCOUNT" \
+            --quiet
+
       - name: Deploy API
         shell: bash
         run: |
@@ -120,16 +163,6 @@ jobs:
             --retry 8 --retry-all-errors --retry-delay 5 \
             "$API_URL/healthz/" > /dev/null
           echo "url=$API_URL" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy web
-        shell: bash
-        run: |
-          gcloud run deploy "$WEB_SERVICE" \
-            --project="$GCP_PROJECT_ID" \
-            --region="$GCP_REGION" \
-            --source=. \
-            --build-service-account="$GCP_BUILD_SERVICE_ACCOUNT" \
-            --quiet
 
       - name: Check production through the web proxy
         id: web_url

@@ -1,16 +1,14 @@
 /**
  * 로그인 상태.
  *
- * 토큰을 우리가 들고 있지 않습니다 — 세션은 서버가 준 httpOnly 쿠키이고,
- * iOS·안드로이드의 네이티브 쿠키 항아리가 저장하고 다시 붙여줍니다.
- * 그래서 "로그인했나"는 저장된 값을 보는 게 아니라 서버에 물어서 압니다.
- *
- * 앱을 껐다 켜도 이 확인이 통과하면 그대로 이어집니다. 안드로이드에서 쿠키가
- * 앱 재시작 뒤 사라지는 알려진 문제가 있는데, 그러면 여기서 로그인 화면으로
- * 돌아갑니다 — 조용히 깨지지 않고 눈에 보이는 것이 중요합니다.
+ * 실제 API 인증은 서버가 준 httpOnly 쿠키이고 iOS·안드로이드의 네이티브 쿠키
+ * 저장소가 붙입니다. Firebase ID/refresh token은 앱 저장소에 남기지 않습니다.
+ * 앱을 열 때 서버에 확인하고, 사용 중 세션이 만료되어 401이 오면 로그인 화면으로
+ * 돌아갑니다.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { ApiError, get, post } from "./api";
+import { ApiError, get, post, setUnauthorizedHandler } from "./api";
+import type { FirebaseSessionCredential } from "./socialAuth";
 
 export type Me = {
   id: string;
@@ -31,7 +29,7 @@ type SessionValue = {
   me: Me | null;
   /** 첫 확인이 끝나기 전. 이 동안 로그인 화면을 보여주면 깜빡입니다. */
   checking: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (credential: FirebaseSessionCredential) => Promise<void>;
   signOut: () => Promise<void>;
   /** 프로필을 고친 뒤 서버 값을 다시 읽어옵니다. */
   refresh: () => Promise<void>;
@@ -50,11 +48,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
+    // 어느 화면의 API 호출에서든 세션 만료가 확인되면 즉시 인증 화면으로 돌아갑니다.
+    setUnauthorizedHandler(() => setMe(null));
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  useEffect(() => {
     let alive = true;
     get<{ user: Me }>("/api/auth/me")
       .then((data) => { if (alive) setMe(data.user); })
       .catch((error) => {
-        // 401 은 "아직 로그인 안 함" 이라 정상입니다. 그 밖의 오류만 눈에 띄게 둡니다.
+        // 401은 "아직 로그인 안 함"이라 정상입니다. 그 밖의 오류만 기록합니다.
         if (alive && !(error instanceof ApiError && error.status === 401)) {
           console.warn("세션 확인 실패", error);
         }
@@ -63,8 +67,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return () => { alive = false; };
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const data = await post<{ user: Me }>("/api/auth/login", { email, password });
+  const signIn = useCallback(async (credential: FirebaseSessionCredential) => {
+    const data = await post<{ user: Me }>("/api/auth/session", {
+      idToken: credential.idToken,
+    });
     setMe(data.user);
   }, []);
 

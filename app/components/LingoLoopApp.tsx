@@ -151,6 +151,10 @@ type DetailRoute =
   | { kind: "blocked" }
   | null;
 
+type ActiveDetailRoute = Exclude<DetailRoute, null>;
+type DetailHistorySnapshot = { section: Section; stack: ActiveDetailRoute[] };
+type ReloadedChats = { conversations: Conversation[]; requestIds: Set<string> };
+
 /** 프로필 편집에서 고칠 수 있는 값. mock 이라 이 브라우저에만 남습니다. */
 type ProfileDraft = {
   name: string;
@@ -168,6 +172,7 @@ type ProfileDraft = {
 
 /** 커뮤니티 탭. 헬로톡과 같은 순서 — 최신이 기본입니다. */
 type FeedTab = "latest" | "recommended" | "following";
+type ChatListTab = "all" | "turn" | "requests";
 
 /**
  * 커뮤니티 글 거르기. 빈 문자열은 "모든"입니다.
@@ -501,6 +506,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [myPostList, setMyPostList] = useState<FeedPost[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedChatId, setSelectedChatId] = useState("");
+  const [chatListTab, setChatListTab] = useState<ChatListTab>("all");
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [conversationDrafts, setConversationDrafts] = useState<Record<string, string>>({});
   const [requestConversationIds, setRequestConversationIds] = useState<Set<string>>(() => new Set());
@@ -540,21 +546,46 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
    * 뒤로가기를 누르면 돌아갈 곳이 없어 섹션(커뮤니티)으로 떨어졌습니다.
    * 쌓아두면 한 겹씩 되짚어 올라갑니다.
    */
-  const [detailStack, setDetailStack] = useState<DetailRoute[]>([]);
+  const [detailStack, setDetailStack] = useState<ActiveDetailRoute[]>([]);
   const detail = detailStack.length ? detailStack[detailStack.length - 1] : null;
-
-  /** 새 상세 화면을 위에 얹습니다. null 이면 전부 닫습니다. */
-  const setDetail = useCallback((next: DetailRoute | ((current: DetailRoute) => DetailRoute)) => {
-    setDetailStack((stack) => {
-      if (typeof next === "function") {
-        // 지금 화면만 고치는 경우(좋아요 반영 등) — 쌓지 않습니다.
-        if (!stack.length) return stack;
-        const updated = next(stack[stack.length - 1]);
-        return updated ? [...stack.slice(0, -1), updated] : stack.slice(0, -1);
-      }
-      return next ? [...stack, next] : [];
-    });
+  /* history.state에는 큰 게시물·프로필 객체를 넣지 않고 짧은 키만 둡니다.
+     실제 화면 스냅샷은 이 탭의 메모리에만 보관해 Back/Forward 때 복원합니다. */
+  const detailHistory = useRef<Map<string, DetailHistorySnapshot>>(new Map());
+  const writeHistorySnapshot = useCallback((
+    mode: "push" | "replace",
+    snapshot: DetailHistorySnapshot,
+    url: string,
+  ) => {
+    const key = crypto.randomUUID();
+    detailHistory.current.set(key, snapshot);
+    if (detailHistory.current.size > 100) {
+      const oldest = detailHistory.current.keys().next().value;
+      if (oldest) detailHistory.current.delete(oldest);
+    }
+    const method = mode === "push" ? "pushState" : "replaceState";
+    window.history[method]({ timotalkDetailKey: key }, "", url);
   }, []);
+
+  /** Back/Forward로 다시 연 글도 현재 좋아요·저장 상태를 보여야 합니다. */
+  const updatePostHistorySnapshots = useCallback((postId: string, change: (post: FeedPost) => FeedPost) => {
+    for (const [key, snapshot] of detailHistory.current) {
+      let changed = false;
+      const stack = snapshot.stack.map((route) => {
+        if (route.kind !== "post" || route.post.id !== postId) return route;
+        changed = true;
+        return { ...route, post: change(route.post) };
+      });
+      if (changed) detailHistory.current.set(key, { ...snapshot, stack });
+    }
+  }, []);
+
+  /** 삭제·차단 뒤 브라우저 Forward가 없어진 대상을 되살리지 않게 합니다. */
+  const invalidateDetailHistory = useCallback((matches: (route: ActiveDetailRoute) => boolean) => {
+    for (const [key, snapshot] of detailHistory.current) {
+      if (snapshot.stack.some(matches)) detailHistory.current.delete(key);
+    }
+  }, []);
+
   /**
    * 지금 어느 메뉴에 있는가.
    *
@@ -612,6 +643,12 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
   const [blockedAuthorIds, setBlockedAuthorIds] = useState<Set<string>>(new Set());
   const [mutedChatIds, setMutedChatIds] = useState<Set<string>>(new Set());
   const [mutedRoomIds, setMutedRoomIds] = useState<Set<string>>(new Set());
+  const startingChatPartnerIds = useRef<Set<string>>(new Set());
+  const mutingConversationIds = useRef<Set<string>>(new Set());
+  const dismissingRequestIds = useRef<Set<string>>(new Set());
+  const leavingConversationIds = useRef<Set<string>>(new Set());
+  const selectedChatIdRef = useRef(selectedChatId);
+  useEffect(() => { selectedChatIdRef.current = selectedChatId; }, [selectedChatId]);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profile, setProfile] = useState<ProfileDraft>({
@@ -699,12 +736,28 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     }
   }, []);
 
-  const reload = useCallback(async () => {
+  const loadChats = useCallback(async (): Promise<ReloadedChats> => {
+    const [conversationList, requestList] = await Promise.all([
+      api<ApiConversation[]>("/api/conversations"),
+      api<ApiConversation[]>("/api/conversations?box=requests"),
+    ]);
+    const rooms = [...(conversationList || []), ...(requestList || [])];
+    const nextConversations = rooms.map((room) => toConversation(room));
+    const nextRequestIds = new Set((requestList || []).map((room) => room.id));
+    setConversations(nextConversations);
+    setMutedChatIds(new Set(rooms.filter((room) => room.muted).map((room) => room.id)));
+    setRequestConversationIds(nextRequestIds);
+    /* 처음 들어왔을 때 첫 대화를 자동으로 열지 않습니다.
+       이미 보고 있던 대화가 목록에 남아 있으면 그대로 둡니다. */
+    setSelectedChatId((current) => (rooms.some((room) => room.id === current) ? current : ""));
+    return { conversations: nextConversations, requestIds: nextRequestIds };
+  }, []);
+
+  const reload = useCallback(async (): Promise<ReloadedChats | null> => {
     try {
-      const [postList, conversationList, requestList, phraseList, correctionList, likeList, followList, blockList, peopleList, sentLikeList] = await Promise.all([
+      const [postList, chatResult, phraseList, correctionList, likeList, followList, blockList, peopleList, sentLikeList] = await Promise.all([
         api<ApiPost[]>("/api/posts"),
-        api<ApiConversation[]>("/api/conversations"),
-        api<ApiConversation[]>("/api/conversations?box=requests"),
+        loadChats(),
         api<ApiSavedPhrase[]>("/api/saved-phrases"),
         api<ApiCorrection[]>("/api/corrections/received"),
         api<ApiReceivedLike[]>("/api/likes/received"),
@@ -727,18 +780,12 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       const feed = (postList || []).map((post) => ({ ...toFeedPost(post), saved: savedIds.has(post.id) }));
       setPosts(feed);
       setMyPostList(feed.filter((post) => post.authorId === me.id));
-
-      const rooms = [...(conversationList || []), ...(requestList || [])];
-      setConversations(rooms.map((room) => toConversation(room)));
-      setRequestConversationIds(new Set((requestList || []).map((room) => room.id)));
-      /* 처음 들어왔을 때 첫 대화를 자동으로 열지 않습니다.
-         열면 그 자리에서 읽음 처리되어, 안 읽은 것이 있다는 표시를 볼 틈이
-         없습니다. 이미 보고 있던 대화가 목록에 남아 있으면 그대로 둡니다. */
-      setSelectedChatId((current) => (rooms.some((room) => room.id === current) ? current : ""));
+      return chatResult;
     } catch {
       /* 실패해도 빈 화면을 유지합니다. 오류는 아래 개별 동작에서 알립니다. */
+      return null;
     }
-  }, [me.id, loadFollowCounts]);
+  }, [me.id, loadChats, loadFollowCounts]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload(), 0);
@@ -797,7 +844,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     return () => { cancelled = true; };
   }, [selectedChatId, me.id]);
 
-  const selectedConversation = conversations.find((item) => item.id === selectedChatId) ?? conversations[0];
+  const selectedConversation = conversations.find((item) => item.id === selectedChatId);
   /* 내비게이션 배지는 실제 안 읽은 수의 합입니다. 대화를 열면 그 방의 안 읽음이 0이 되어 함께 줄어듭니다. */
   const unreadTotal = conversations.reduce((sum, item) => sum + item.unread, 0);
   const draft = selectedConversation ? conversationDrafts[selectedConversation.id] ?? "" : "";
@@ -886,15 +933,74 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       t("{author}님의 글을 다시 봅니다", { author: name }),
     );
 
-  /** 대화방을 실제로 목록에서 뺍니다. 나간 방을 고르고 있었다면 남은 첫 방으로 옮깁니다. */
-  const leaveChat = (id: string, name: string, block = false) => {
-    setConversations((current) => {
-      const next = current.filter((item) => item.id !== id);
-      setSelectedChatId((chosen) => (chosen === id ? next[0]?.id ?? "" : chosen));
+  const removeChatFromScreen = (id: string) => {
+    setConversations((current) => current.filter((item) => item.id !== id));
+    setRequestConversationIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
       return next;
     });
-    setMobileThreadOpen(false);
-    showToast(block ? t("{name}님을 차단하고 대화방에서 나갔어요", { name }) : t("{name}님과의 대화방에서 나갔어요", { name }));
+    setMutedChatIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    setConversationDrafts((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    if (selectedChatIdRef.current === id) {
+      selectedChatIdRef.current = "";
+      setSelectedChatId("");
+      setMobileThreadOpen(false);
+    }
+  };
+
+  /** 일반 나가기는 서버에 숨김 상태가 확정되어야 새로고침 뒤에도 돌아오지 않습니다. */
+  const leaveChat = async (id: string, name: string): Promise<boolean> => {
+    if (leavingConversationIds.current.has(id)) return false;
+    const removed = conversations.find((conversation) => conversation.id === id);
+    if (!removed) return false;
+
+    leavingConversationIds.current.add(id);
+    const originalIndex = conversations.findIndex((conversation) => conversation.id === id);
+    const wasRequest = requestConversationIds.has(id);
+    const wasMuted = mutedChatIds.has(id);
+    const hadDraft = Object.prototype.hasOwnProperty.call(conversationDrafts, id);
+    const previousDraft = conversationDrafts[id];
+    const wasSelected = selectedChatIdRef.current === id;
+    removeChatFromScreen(id);
+
+    try {
+      await api(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" });
+      // 나가기 직전 시작한 reload가 방을 다시 넣었더라도 성공 뒤에는 확실히 걷어냅니다.
+      removeChatFromScreen(id);
+      showToast(t("{name}님과의 대화방에서 나갔어요", { name }));
+      return true;
+    } catch (caught) {
+      setConversations((current) => {
+        if (current.some((conversation) => conversation.id === id)) return current;
+        const next = [...current];
+        next.splice(Math.min(Math.max(originalIndex, 0), next.length), 0, removed);
+        return next;
+      });
+      if (wasRequest) setRequestConversationIds((current) => new Set(current).add(id));
+      if (wasMuted) setMutedChatIds((current) => new Set(current).add(id));
+      if (hadDraft) setConversationDrafts((current) => ({ ...current, [id]: previousDraft }));
+      if (wasSelected && !selectedChatIdRef.current) {
+        selectedChatIdRef.current = id;
+        setSelectedChatId(id);
+        setMobileThreadOpen(true);
+      }
+      showToast(caught instanceof Error ? caught.message : t("대화방에서 나가지 못했어요."));
+      return false;
+    } finally {
+      leavingConversationIds.current.delete(id);
+    }
   };
 
   /** 차단하면 그 사람 글이 피드에서 사라져야 "차단됐다"는 게 보입니다. */
@@ -907,17 +1013,40 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     onSignedOut();
   };
 
-  const blockAuthor = async (authorId: string, name: string) => {
+  const blockAuthor = async (authorId: string, name: string): Promise<boolean> => {
     setBlockedAuthorIds((current) => new Set(current).add(authorId));
-    setDetail(null);
     try {
       await api(`/api/partners/${encodeURIComponent(authorId)}/block`, { method: "POST", body: JSON.stringify({}) });
+      const blockingCurrentDetail =
+        (detail?.kind === "profile" && detail.partner.id === authorId) ||
+        (detail?.kind === "post" && detail.post.authorId === authorId);
+      // 현재 상세가 차단 대상이면 유효한 이전 history 항목으로 먼저 이동합니다.
+      if (blockingCurrentDetail) closeDetail();
+      invalidateDetailHistory((route) =>
+        (route.kind === "profile" && route.partner.id === authorId) ||
+        (route.kind === "post" && route.post.authorId === authorId),
+      );
       showToast(t("{author}님을 차단했어요", { author: name }));
       await reload();
+      return true;
     } catch (caught) {
       // 서버에 못 남기면 내 화면에서만 사라진 상태가 됩니다 — 되돌리고 알립니다.
       setBlockedAuthorIds((current) => { const next = new Set(current); next.delete(authorId); return next; });
       showToast(caught instanceof Error ? caught.message : t("차단하지 못했어요."));
+      return false;
+    }
+  };
+
+  const blockChatPartner = async (conversationId: string, partnerId: string | undefined, name: string) => {
+    if (!partnerId) {
+      showToast(t("차단하지 못했어요."));
+      return;
+    }
+    const blocked = await blockAuthor(partnerId, name);
+    // 서버 차단이 확정된 뒤에만 방을 치웁니다. 실패하면 현재 대화와 메시지를 그대로 둡니다.
+    if (blocked) {
+      removeChatFromScreen(conversationId);
+      showToast(t("{name}님을 차단하고 대화방에서 나갔어요", { name }));
     }
   };
 
@@ -926,6 +1055,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     try {
       await api(`/api/partners/${encodeURIComponent(authorId)}/block`, { method: "DELETE" });
       await reload();
+      showToast(t("차단을 해제했어요"));
     } catch (caught) {
       setBlockedAuthorIds((current) => new Set(current).add(authorId));
       showToast(caught instanceof Error ? caught.message : t("차단을 풀지 못했어요."));
@@ -1015,29 +1145,77 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  // 새로고침·뒤로가기에서 현재 탭을 유지합니다. SSR 이후에 읽어 하이드레이션 불일치를 피합니다.
+  // 새로고침·브라우저 Back/Forward에서 현재 탭과 겹쳐 연 상세 화면을 함께 복원합니다.
   useEffect(() => {
-    const fromHash = (): Section | null => {
-      const id = window.location.hash.replace("#", "");
-      return navItems.some((item) => item.id === id) ? (id as Section) : null;
+    let disposed = false;
+    let navigationRevision = 0;
+
+    const parsedHash = () => {
+      const [sectionId, routeKind = "", encodedId = ""] = window.location.hash.replace("#", "").split("/");
+      const parsedSection = navItems.some((item) => item.id === sectionId) ? (sectionId as Section) : "discover";
+      let id = encodedId;
+      try { id = decodeURIComponent(encodedId); } catch { /* 잘못 인코딩된 링크는 찾을 수 없는 링크로 처리합니다. */ }
+      return { section: parsedSection, routeKind, id };
     };
-    const frame = window.requestAnimationFrame(() => {
-      const initial = fromHash();
-      if (initial) setSection(initial);
+
+    const scrollRestoredViewToTop = () => window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      document.querySelector<HTMLElement>(".main-content")?.scrollTo({ top: 0, left: 0, behavior: "auto" });
     });
-    const onHashChange = () => {
-      const raw = window.location.hash.replace("#", "");
-      const [sectionId] = raw.split("/");
-      if (navItems.some((item) => item.id === sectionId)) setSection(sectionId as Section);
-      // 상세 경로가 사라지면 목록으로 돌아옵니다 (뒤로가기)
-      if (!raw.includes("/")) setDetail(null);
+
+    const restoreFromLocation = async (state: unknown) => {
+      const revision = ++navigationRevision;
+      const key = state && typeof state === "object" && "timotalkDetailKey" in state
+        ? (state as { timotalkDetailKey?: unknown }).timotalkDetailKey
+        : "";
+      const snapshot = typeof key === "string" ? detailHistory.current.get(key) : undefined;
+      if (snapshot) {
+        setSection(snapshot.section);
+        setDetailStack(snapshot.stack);
+        scrollRestoredViewToTop();
+        return;
+      }
+
+      const requestedHash = window.location.hash;
+      const route = parsedHash();
+      let stack: ActiveDetailRoute[] = [];
+      try {
+        if (route.routeKind === "post" && route.id) {
+          const post = await api<ApiPost>(`/api/posts/${encodeURIComponent(route.id)}`);
+          stack = [{ kind: "post", post: toFeedPost(post) }];
+        } else if (route.routeKind === "user" && route.id) {
+          const rows = await api<ApiProfile[]>("/api/partners");
+          const partner = (rows || []).find((item) => item.id === route.id);
+          if (partner) stack = [{ kind: "profile", partner: toPartner(partner) }];
+        } else if (route.routeKind === "notifications") {
+          stack = [{ kind: "notifications" }];
+        } else if (route.routeKind === "profile-edit" && route.section === "learn") {
+          stack = [{ kind: "profile-edit" }];
+        } else if (route.routeKind === "blocked" && route.section === "learn") {
+          stack = [{ kind: "blocked" }];
+        }
+      } catch {
+        // 접근 권한이 없거나 삭제된 상세 링크는 해당 섹션 목록으로 안전하게 돌아갑니다.
+      }
+
+      if (disposed || revision !== navigationRevision || requestedHash !== window.location.hash) return;
+      setSection(route.section);
+      setDetailStack(stack);
+      const url = stack.length ? requestedHash : `#${route.section}`;
+      writeHistorySnapshot("replace", { section: route.section, stack }, url);
+      scrollRestoredViewToTop();
     };
-    window.addEventListener("hashchange", onHashChange);
+
+    const frame = window.requestAnimationFrame(() => void restoreFromLocation(window.history.state));
+    const onPopState = (event: PopStateEvent) => { void restoreFromLocation(event.state); };
+    window.addEventListener("popstate", onPopState);
     return () => {
+      disposed = true;
+      navigationRevision += 1;
       window.cancelAnimationFrame(frame);
-      window.removeEventListener("hashchange", onHashChange);
+      window.removeEventListener("popstate", onPopState);
     };
-  }, []);
+  }, [writeHistorySnapshot]);
 
   // 검색 모달이 안내하는 전역 단축키 — Ctrl(⌘)+K 로 어디서든 검색을 엽니다.
   useEffect(() => {
@@ -1245,43 +1423,53 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     });
   };
 
-  const openPost = (post: FeedPost) => {
-    setDetail({ kind: "post", post });
-    window.history.pushState(null, "", `#${section}/post/${post.id}`);
+  const pushDetailRoute = (next: ActiveDetailRoute, nextSection: Section, hash: string) => {
+    const currentStack = [...detailStack];
+    writeHistorySnapshot("replace", { section, stack: currentStack }, window.location.href);
+    const nextStack = [...currentStack, next];
+    writeHistorySnapshot("push", { section: nextSection, stack: nextStack }, hash);
+    setSection(nextSection);
+    setDetailStack(nextStack);
     resetViewScroll();
   };
 
+  const openPost = (post: FeedPost, nextSection: Section = section) => {
+    pushDetailRoute({ kind: "post", post }, nextSection, `#${nextSection}/post/${post.id}`);
+  };
+
   const openProfile = (partner: Partner) => {
-    setDetail({ kind: "profile", partner });
-    window.history.pushState(null, "", `#${section}/user/${partner.id}`);
-    resetViewScroll();
+    pushDetailRoute({ kind: "profile", partner }, section, `#${section}/user/${partner.id}`);
     void loadFollowCounts(partner.id);
   };
 
   /**
    * 한 겹만 되돌아갑니다. 마지막 겹이면 섹션으로 돌아갑니다.
    *
-   * history.back() 을 쓰지 않습니다 — 그러면 hashchange 처리와 겹쳐 두 번
-   * 되돌아갑니다. 직접 팝하고 주소만 새 화면에 맞춥니다.
+   * 이 화면을 열며 만든 브라우저 기록이 있으면 실제 Back을 사용합니다.
+   * 그래야 Forward로 다시 같은 상세 화면에 들어올 수 있습니다.
    */
   const closeDetail = () => {
-    setDetailStack((stack) => {
-      const next = stack.slice(0, -1);
-      const top = next[next.length - 1];
-      const hash =
-        top?.kind === "post" ? `#${section}/post/${top.post.id}`
-        : top?.kind === "profile" ? `#${section}/user/${top.partner.id}`
-        : `#${section}`;
-      window.history.replaceState(null, "", hash);
-      return next;
-    });
+    const key = window.history.state?.timotalkDetailKey;
+    const snapshot = typeof key === "string" ? detailHistory.current.get(key) : undefined;
+    if (snapshot && snapshot.stack.length === detailStack.length && detailStack.length > 0) {
+      window.history.back();
+      return;
+    }
+    const next = detailStack.slice(0, -1);
+    const top = next[next.length - 1];
+    const hash =
+      top?.kind === "post" ? `#${section}/post/${top.post.id}`
+      : top?.kind === "profile" ? `#${section}/user/${top.partner.id}`
+      : `#${section}`;
+    setDetailStack(next);
+    writeHistorySnapshot("replace", { section, stack: next }, hash);
   };
 
   const goToSection = (next: Section) => {
     setDetailStack([]);
     setSection(next);
     if (next === "chats") setMobileThreadOpen(false);
-    window.history.replaceState(null, "", `#${next}`);
+    writeHistorySnapshot("replace", { section: next, stack: [] }, `#${next}`);
     resetViewScroll();
   };
 
@@ -1291,7 +1479,11 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     setNotifications((current) => current.map((item) => (item.id === notification.id ? { ...item, readAt } : item)));
     setNotificationUnreadCount((current) => Math.max(0, current - 1));
     try {
-      await api(`/api/notifications/${encodeURIComponent(notification.id)}/read`, { method: "PATCH" });
+      const result = await api<{ stale?: boolean }>(`/api/notifications/${encodeURIComponent(notification.id)}/read`, {
+        method: "PATCH",
+        body: JSON.stringify({ eventId: notification.eventId || "" }),
+      });
+      if (result.stale) void loadNotifications(true);
     } catch (caught) {
       void loadNotifications();
       showToast(caught instanceof Error ? caught.message : t("알림을 읽음 처리하지 못했어요."));
@@ -1323,12 +1515,14 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       let post = posts.find((item) => item.id === notification.postId);
       if (!post) {
         try {
-          const latest = await api<ApiPost[]>("/api/posts");
           const savedIds = new Set(savedItems.map((item) => item.id));
-          const feed = (latest || []).map((item) => ({ ...toFeedPost(item), saved: savedIds.has(item.id) }));
-          setPosts(feed);
-          setMyPostList(feed.filter((item) => item.authorId === me.id));
-          post = feed.find((item) => item.id === notification.postId);
+          const latest = await api<ApiPost>(`/api/posts/${encodeURIComponent(notification.postId)}`);
+          const fetchedPost = { ...toFeedPost(latest), saved: savedIds.has(latest.id) };
+          post = fetchedPost;
+          setPosts((current) => current.some((item) => item.id === fetchedPost.id) ? current : [fetchedPost, ...current]);
+          if (fetchedPost.authorId === me.id) {
+            setMyPostList((current) => current.some((item) => item.id === fetchedPost.id) ? current : [fetchedPost, ...current]);
+          }
         } catch {
           // 아래의 찾을 수 없음 안내로 합칩니다.
         }
@@ -1337,24 +1531,31 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         showToast(t("이 알림의 글을 더 이상 볼 수 없어요."));
         return;
       }
-      setSection("community");
-      setDetail({ kind: "post", post });
-      window.history.pushState(null, "", `#community/post/${post.id}`);
-      resetViewScroll();
+      openPost(post, "community");
       return;
     }
 
     if (notification.conversationId) {
-      await reload();
+      const refreshed = await loadChats().catch(() => null);
+      const availableConversations = refreshed?.conversations ?? conversations;
+      const target = availableConversations.find((conversation) => conversation.id === notification.conversationId);
+      if (!target) {
+        setSelectedChatId("");
+        showToast(t("이 알림의 대화를 더 이상 볼 수 없어요."));
+        return;
+      }
       /* 알림 화면을 걷어냅니다. 예전에는 알림이 모달이라 위의 setModal(null) 로
          닫혔는데, 화면으로 바꾼 뒤로는 그대로 위에 남아 대화가 안 보였습니다.
          글 알림은 그 위에 쌓아 올려 뒤로가기로 알림함에 돌아오게 두지만,
          대화는 섹션이라 겹칠 자리가 없습니다. */
       setDetailStack([]);
-      setSelectedChatId(notification.conversationId);
+      setSelectedChatId(target.id);
+      setChatListTab(
+        (refreshed?.requestIds ?? requestConversationIds).has(target.id) ? "requests" : "all",
+      );
       setSection("chats");
       setMobileThreadOpen(true);
-      window.history.replaceState(null, "", "#chats");
+      writeHistorySnapshot("replace", { section: "chats", stack: [] }, "#chats");
       resetViewScroll();
       return;
     }
@@ -1398,10 +1599,13 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     const apply = (items: FeedPost[]) => items.map((post) => (post.id === postId ? change(post) : post));
     setPosts(apply);
     setMyPostList(apply);
-    setDetail((current) =>
-      current?.kind === "post" && current.post.id === postId
-        ? { ...current, post: change(current.post) }
-        : current,
+    updatePostHistorySnapshots(postId, change);
+    setDetailStack((stack) =>
+      stack.map((route) =>
+        route.kind === "post" && route.post.id === postId
+          ? { ...route, post: change(route.post) }
+          : route,
+      ),
     );
   };
 
@@ -1447,13 +1651,29 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         /* 화면에서 먼저 지우고 서버에 알립니다. 실패하면 되돌립니다 —
            예전에는 서버에 알리지 않아서 "삭제했어요" 라고 해놓고 새로고침하면
            그대로 있었습니다. */
+        const postIndex = posts.findIndex((item) => item.id === post.id);
+        const myPostIndex = myPostList.findIndex((item) => item.id === post.id);
         const drop = (items: FeedPost[]) => items.filter((item) => item.id !== post.id);
+        const restore = (items: FeedPost[], index: number) => {
+          if (index < 0 || items.some((item) => item.id === post.id)) return items;
+          const next = [...items];
+          next.splice(Math.min(index, next.length), 0, post);
+          return next;
+        };
         setPosts(drop);
         setMyPostList(drop);
-        setDetail((current) => (current?.kind === "post" && current.post.id === post.id ? null : current));
         api(`/api/posts/${encodeURIComponent(post.id)}`, { method: "DELETE" })
-          .then(() => showToast(t("글을 삭제했어요")))
+          .then(() => {
+            /* 성공하기 전에는 상세/history를 보존합니다. 실패했을 때 목록을 다시
+               받아오면 사용자는 같은 글과 같은 뒤로가기 위치에 그대로 남습니다. */
+            if (detail?.kind === "post" && detail.post.id === post.id) closeDetail();
+            invalidateDetailHistory((route) => route.kind === "post" && route.post.id === post.id);
+            showToast(t("글을 삭제했어요"));
+          })
           .catch((caught) => {
+            // 삭제 API와 같은 네트워크가 끊겼다면 reload도 실패할 수 있으므로 먼저 정확히 되돌립니다.
+            setPosts((current) => restore(current, postIndex));
+            setMyPostList((current) => restore(current, myPostIndex));
             void reload();
             showToast(caught instanceof Error ? caught.message : t("글을 삭제하지 못했어요."));
           });
@@ -1470,52 +1690,88 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     });
   };
 
-  const startChat = (partner: Partner) => {
+  const toggleConversationMute = async (id: string, name: string) => {
+    if (mutingConversationIds.current.has(id)) return;
+    mutingConversationIds.current.add(id);
+    const wasMuted = mutedChatIds.has(id);
+    const applyMuted = (muted: boolean) => {
+      setMutedChatIds((current) => {
+        const next = new Set(current);
+        if (muted) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+      setConversations((current) => current.map((item) => (item.id === id ? { ...item, muted } : item)));
+    };
+    applyMuted(!wasMuted);
+    try {
+      const result = await api<{ id: string; muted: boolean }>(`/api/conversations/${encodeURIComponent(id)}/mute`, {
+        method: "PATCH",
+        body: JSON.stringify({ muted: !wasMuted }),
+      });
+      applyMuted(result.muted);
+      showToast(result.muted ? t("{name}님과의 알림을 껐어요", { name }) : t("{name}님과의 알림을 켰어요", { name }));
+    } catch (caught) {
+      applyMuted(wasMuted);
+      showToast(caught instanceof Error ? caught.message : t("설정을 저장하지 못했어요."));
+    } finally {
+      mutingConversationIds.current.delete(id);
+    }
+  };
+
+  const startChat = async (partner: Partner) => {
+    if (startingChatPartnerIds.current.has(partner.id)) return;
     const existing = conversations.find((item) => item.partnerId === partner.id);
     if (existing) {
       setSelectedChatId(existing.id);
-      setRequestConversationIds((current) => {
-        if (!current.has(existing.id)) return current;
-        const next = new Set(current);
-        next.delete(existing.id);
-        return next;
-      });
+      setChatListTab(requestConversationIds.has(existing.id) ? "requests" : "all");
     } else {
-      const next: Conversation = {
-        id: `chat-${partner.id}`,
-        partnerId: partner.id,
-        name: partner.name,
-        flag: partner.flag,
-        /* 프로필 사진과 국적도 함께 옮깁니다 — 빠뜨리면 커뮤니티에서는 보이던
-           사람이 대화에 들어오는 순간 얼굴 없는 회색 아바타가 됩니다. */
-        photo: partner.photo,
-        countryCode: partner.countryCode,
-        timeOffset: partner.timeOffset,
-        accent: partner.accent,
-        preview: t("새로운 연습 제안을 보내보세요"),
-        time: t("지금"),
-        unread: 0,
-        online: partner.online,
-        messages: [
-          {
-            id: `welcome-${partner.id}`,
-            mine: false,
-            system: true,
-            text: t("{name}님과 언어 교환을 시작했어요. 친절하고 안전한 대화를 만들어주세요.", { name: partner.name }),
-            time: t("지금"),
-          },
-        ],
-      };
-      setConversations((items) => [next, ...items]);
-      setSelectedChatId(next.id);
-      setConversationDrafts((current) => ({
-        ...current,
-        [next.id]: dailyRecommendations.find((item) => item.partner.id === partner.id)?.icebreaker ?? dailyMatchDetails[partner.id]?.icebreaker ?? `Hi ${partner.name}! Nice to meet you.`,
-      }));
+      startingChatPartnerIds.current.add(partner.id);
+      try {
+        const room = await api<ApiConversation>("/api/conversations", {
+          method: "POST",
+          body: JSON.stringify({ partnerId: partner.id }),
+        });
+        const messages = (room.messages || []).map((message) => toChatMessage(message, me.id));
+        const next = toConversation(room, messages);
+        setConversations((items) => [
+          next,
+          ...items.filter((item) => item.id !== next.id && item.partnerId !== partner.id),
+        ]);
+        setSelectedChatId(next.id);
+        setChatListTab(room.isIncomingRequest ? "requests" : "all");
+        setRequestConversationIds((current) => {
+          const updated = new Set(current);
+          if (room.isIncomingRequest) updated.add(next.id);
+          else updated.delete(next.id);
+          return updated;
+        });
+        setMutedChatIds((current) => {
+          const updated = new Set(current);
+          if (room.muted) updated.add(next.id);
+          else updated.delete(next.id);
+          return updated;
+        });
+        setConversationDrafts((current) => {
+          if (next.id in current) return current;
+          return {
+            ...current,
+            [next.id]: dailyRecommendations.find((item) => item.partner.id === partner.id)?.icebreaker ?? dailyMatchDetails[partner.id]?.icebreaker ?? `Hi ${partner.name}! Nice to meet you.`,
+          };
+        });
+      } catch (caught) {
+        showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."));
+        return;
+      } finally {
+        startingChatPartnerIds.current.delete(partner.id);
+      }
     }
+    setDetailStack([]);
     setSection("chats");
     setMobileThreadOpen(true);
     setModal(null);
+    writeHistorySnapshot("replace", { section: "chats", stack: [] }, "#chats");
+    resetViewScroll();
     showToast(t("{name}님과 대화를 열었어요", { name: partner.name }));
   };
 
@@ -1591,7 +1847,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     }
   };
 
-  const acceptChatRequest = async (id: string) => {
+  const acceptChatRequest = async (id: string): Promise<boolean> => {
     try {
       await api(`/api/conversations/${encodeURIComponent(id)}/accept`, { method: "POST", body: JSON.stringify({}) });
       setRequestConversationIds((current) => {
@@ -1600,29 +1856,74 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         return next;
       });
       await reload();
+      return true;
     } catch (caught) {
       showToast(caught instanceof Error ? caught.message : t("요청을 수락하지 못했어요."));
+      return false;
     }
   };
 
-  const dismissChatRequest = (id: string) => {
-    const remaining = conversations.filter((conversation) => conversation.id !== id);
-    setRequestConversationIds((current) => {
-      if (!current.has(id)) return current;
-      const next = new Set(current);
-      next.delete(id);
-      return next;
-    });
-    setConversations(remaining);
-    setConversationDrafts((current) => {
-      if (!(id in current)) return current;
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-    if (selectedChatId === id) {
-      setSelectedChatId(remaining[0]?.id ?? "");
+  const dismissChatRequest = async (id: string, name: string): Promise<boolean> => {
+    if (dismissingRequestIds.current.has(id)) return false;
+    const removed = conversations.find((conversation) => conversation.id === id);
+    if (!removed || !requestConversationIds.has(id)) {
+      showToast(t("이 메시지 요청을 찾을 수 없어요."));
+      return false;
+    }
+
+    dismissingRequestIds.current.add(id);
+    const originalIndex = conversations.findIndex((conversation) => conversation.id === id);
+    const wasSelected = selectedChatId === id;
+    const removeFromScreen = () => {
+      setConversations((current) => current.filter((conversation) => conversation.id !== id));
+      setRequestConversationIds((current) => {
+        if (!current.has(id)) return current;
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    };
+
+    removeFromScreen();
+    if (wasSelected) {
+      setSelectedChatId("");
       setMobileThreadOpen(false);
+    }
+
+    try {
+      await api<{ id: string; dismissed: boolean }>(`/api/conversations/${encodeURIComponent(id)}/request`, { method: "DELETE" });
+      // 삭제 중의 reload가 예전 요청을 되살렸더라도 성공 응답 뒤에는 다시 걷어냅니다.
+      removeFromScreen();
+      setConversationDrafts((current) => {
+        if (!(id in current)) return current;
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setMutedChatIds((current) => {
+        if (!current.has(id)) return current;
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      showToast(tx(msg("{name}님의 요청을 삭제했어요 · 상대에게 알리지 않아요"), { name }));
+      return true;
+    } catch (caught) {
+      setConversations((current) => {
+        if (current.some((conversation) => conversation.id === id)) return current;
+        const next = [...current];
+        next.splice(Math.min(Math.max(originalIndex, 0), next.length), 0, removed);
+        return next;
+      });
+      setRequestConversationIds((current) => new Set(current).add(id));
+      if (wasSelected) {
+        setSelectedChatId(id);
+        setMobileThreadOpen(true);
+      }
+      showToast(caught instanceof Error ? caught.message : t("요청을 삭제하지 못했어요."));
+      return false;
+    } finally {
+      dismissingRequestIds.current.delete(id);
     }
   };
 
@@ -1706,10 +2007,12 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
       setSafetyReports((current) => [report, ...current]);
       setModal(null);
       /* 함께 차단은 서버까지 반영해야 합니다 — 화면에서만 지우면 새로고침에 되살아납니다. */
-      if (options.block) await blockAuthor(options.targetId, target);
+      const blocked = options.block ? await blockAuthor(options.targetId, target) : false;
       showToast(
-        options.block
+        options.block && blocked
           ? t("신고를 접수하고 {name}님을 차단했어요 · 접수번호 {id}", { name: target, id: shortReportId(report.id) })
+          : options.block
+            ? t("신고는 접수했지만 차단하지 못했어요 · 접수번호 {id}", { id: shortReportId(report.id) })
           : t("신고가 접수되었어요 · 접수번호 {id}", { id: shortReportId(report.id) }),
       );
     } catch (caught) {
@@ -1793,7 +2096,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               type="button"
               className={activeNav === "notifications" ? "active" : ""}
               aria-current={activeNav === "notifications" ? "page" : undefined}
-              onClick={() => { setDetail({ kind: "notifications" }); void loadNotifications(true); }}
+              onClick={() => {
+                pushDetailRoute({ kind: "notifications" }, section, `#${section}/notifications`);
+                void loadNotifications(true);
+              }}
             >
               <Bell size={20} />
               <span>{t("알림")}</span>
@@ -1845,7 +2151,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           {/* 화면 이름과 그 화면의 주된 동작을 여기 둡니다. 목록 위에 또 한 줄을
               두면 내용이 시작되기까지 두 번 내려가야 합니다. */}
           {section === "community" && !detail ? (
-            <div className="topbar-feed">
+            <div className="topbar-feed community-topbar-feed">
               <TopbarSelect
                 label={t("커뮤니티 피드")}
                 value={feedTab}
@@ -1951,7 +2257,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               label={t("알림")}
               icon={Bell}
               badge={notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}
-              onClick={() => { setDetail({ kind: "notifications" }); void loadNotifications(true); }}
+              onClick={() => {
+                pushDetailRoute({ kind: "notifications" }, section, `#${section}/notifications`);
+                void loadNotifications(true);
+              }}
             />
             <IconButton label={t("검색")} icon={Search} onClick={() => setModal({ type: "search" })} />
             {section === "community" ? <IconButton label={t("글쓰기")} icon={PenLine} className="top-compose-button" onClick={() => setModal({ type: "compose" })} /> : null}
@@ -1965,7 +2274,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 post={detail.post}
                 me={me}
                 onProfile={(authorId) => {
-                  if (authorId === me.id) { closeDetail(); goToSection("learn"); return; }
+                  if (authorId === me.id) { goToSection("learn"); return; }
                   const partner = findPartner(authorId);
                   if (partner) openProfile(partner);
                   else showToast(t("이 작성자의 프로필을 열 수 없어요"));
@@ -1977,7 +2286,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onHideAuthor={hideAuthor}
                 onBlockAuthor={blockAuthor}
                 onCopyLink={copyLink}
-                onTagSelect={(tag) => { setActiveTag(tag); closeDetail(); setSection("community"); }}
+                onTagSelect={(tag) => { setActiveTag(tag); goToSection("community"); }}
                 onToggleLike={() => togglePost(detail.post.id, "liked")}
                 onDeletePost={() => deletePost(detail.post)}
                 sort={replySort}
@@ -2010,14 +2319,14 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 blocked={[...blockedAuthorIds]}
                 directory={[...directory, ...blockedPartners]}
                 onUnhide={(id) => { setHiddenAuthorIds((c) => { const n = new Set(c); n.delete(id); return n; }); }}
-                onUnblock={(id) => { void unblockAuthor(id); showToast(t("차단을 해제했어요")); }}
+                onUnblock={(id) => { void unblockAuthor(id); }}
               />
             ) : null}
 
             {detail?.kind === "profile" ? (
               <ProfileDetailView
                 partner={detail.partner}
-                onStartChat={(partner) => { closeDetail(); startChat(partner); }}
+                onStartChat={startChat}
                 following={followingIds.includes(detail.partner.id)}
                 onToggleFollow={(partner) => void toggleFollow(partner)}
                 posts={posts.filter((post) => post.authorId === detail.partner.id)}
@@ -2088,6 +2397,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
               <ChatsView
                 conversations={conversations}
                 selected={selectedConversation}
+                listTab={chatListTab}
+                onListTabChange={setChatListTab}
                 mobileThreadOpen={mobileThreadOpen}
                 requestIds={requestConversationIds}
                 onSelect={(id) => {
@@ -2113,11 +2424,9 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onReport={() => setModal({ type: "report", target: selectedConversation?.name ?? t("대화"), targetId: selectedConversation?.partnerId })}
                 onToast={showToast}
                 mutedChatIds={mutedChatIds}
-                onToggleMute={(id, name) =>
-                  toggleIn(setMutedChatIds, id, t("{name}님과의 알림을 껐어요", { name }), t("{name}님과의 알림을 켰어요", { name }))
-                }
-                onLeaveChat={leaveChat}
-                onBlockPartner={(id, name) => leaveChat(id, name, true)}
+                onToggleMute={(id, name) => void toggleConversationMute(id, name)}
+                onLeaveChat={(id, name) => void leaveChat(id, name)}
+                onBlockPartner={(id, partnerId, name) => void blockChatPartner(id, partnerId, name)}
                 onNewChat={() => setModal({ type: "new-chat" })}
                 savedItems={savedItems}
                 onSavePhrase={savePhrase}
@@ -2143,7 +2452,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onStartReview={() => setModal({ type: "review", items: savedItems })}
                 onOpenPost={openPost}
                 onToast={showToast}
-                onEditProfile={() => setDetail({ kind: "profile-edit" })}
+                onEditProfile={() => pushDetailRoute({ kind: "profile-edit" }, "learn", "#learn/profile-edit")}
                 savedItems={savedItems}
                 onSavePhrase={savePhrase}
                 savedCount={savedItems.length}
@@ -2188,7 +2497,10 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           onChangeSettings={applySettings}
           onDownloadChats={downloadChats}
           onOnboarding={() => setModal({ type: "onboarding" })}
-          onOpenBlocked={() => { setSettingsOpen(false); goToSection("learn"); setDetail({ kind: "blocked" }); }}
+          onOpenBlocked={() => {
+            setSettingsOpen(false);
+            pushDetailRoute({ kind: "blocked" }, "learn", "#learn/blocked");
+          }}
           onSignOut={signOut}
           onToast={showToast}
           safetyReports={safetyReports}
@@ -2246,7 +2558,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           signaledPartners={signaledPartners}
           onJumpPartner={(position) => { setPartnerIndex(position); setModal(null); }}
           onOpenPartnerProfile={(partner) => { setModal(null); openProfile(partner); }}
-          onAcceptLike={(partner) => { setModal(null); startChat(partner); showToast(t("{name}님과 대화가 열렸어요", { name: partner.name })); }}
+            onAcceptLike={(partner) => void startChat(partner)}
           onUpdateGoal={(goal) => void saveProfile({ ...profile, goal })}
         />
       ) : null}
@@ -3851,6 +4163,8 @@ function CommunityView({
 function ChatsView({
   conversations,
   selected,
+  listTab,
+  onListTabChange,
   mobileThreadOpen,
   requestIds,
   onSelect,
@@ -3880,16 +4194,18 @@ function ChatsView({
   conversations: Conversation[];
   /** 고른 대화. 대화가 하나도 없으면 없습니다 — 새로 가입한 사람이 그렇습니다. */
   selected?: Conversation;
+  listTab: ChatListTab;
+  onListTabChange: (tab: ChatListTab) => void;
   mobileThreadOpen: boolean;
   requestIds: ReadonlySet<string>;
   mutedChatIds: Set<string>;
   onToggleMute: (id: string, name: string) => void;
   onLeaveChat: (id: string, name: string) => void;
-  onBlockPartner: (id: string, name: string) => void;
+  onBlockPartner: (conversationId: string, partnerId: string | undefined, name: string) => void;
   onSelect: (id: string) => void;
   onBack: () => void;
-  onAcceptRequest: (id: string) => void;
-  onDismissRequest: (id: string) => void;
+  onAcceptRequest: (id: string) => Promise<boolean>;
+  onDismissRequest: (id: string, name: string) => Promise<boolean>;
   draft: string;
   setDraft: (text: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
@@ -3900,7 +4216,6 @@ function ChatsView({
   onReport: () => void;
   onToast: (message: string) => void;
 }) {
-  const [listTab, setListTab] = useState<"all" | "turn" | "requests">("all");
   const [listQuery, setListQuery] = useState("");
   const [translatedMessages, setTranslatedMessages] = useState<Set<string>>(new Set(["m1"]));
   const [messageTranslations, setMessageTranslations] = useState<Record<string, string>>({});
@@ -4054,13 +4369,14 @@ function ChatsView({
   const myTurnCount = conversations.filter((item) => item.myTurn && !requestIds.has(item.id)).length;
   const selectedIsRequest = Boolean(selected && requestIds.has(selected.id));
   const acceptRequest = (id: string, name: string) => {
-    onAcceptRequest(id);
-    setListTab("all");
-    onToast(tx(msg("{name}님의 요청을 수락했어요"), { name }));
+    void onAcceptRequest(id).then((accepted) => {
+      if (!accepted) return;
+      onListTabChange("all");
+      onToast(tx(msg("{name}님의 요청을 수락했어요"), { name }));
+    });
   };
   const removeRequest = (id: string, name: string) => {
-    onDismissRequest(id);
-    onToast(tx(msg("{name}님의 요청을 삭제했어요 · 상대에게 알리지 않아요"), { name }));
+    void onDismissRequest(id, name);
   };
 
   /**
@@ -4108,9 +4424,9 @@ function ChatsView({
         </header>
         <label className="chat-search"><Search size={16} /><input type="search" value={listQuery} onChange={(event) => setListQuery(event.target.value)} placeholder={t("이름 또는 대화 검색")} />{listQuery ? <button type="button" className="chat-search-clear" aria-label={t("검색어 지우기")} onClick={() => setListQuery("")}><X size={14} /></button> : null}</label>
         <div className="chat-list-tabs">
-          <button type="button" className={listTab === "all" ? "active" : ""} onClick={() => setListTab("all")}>{t("전체")}</button>
-          <button type="button" className={listTab === "turn" ? "active" : ""} onClick={() => setListTab("turn")}>{t("내 차례")}{myTurnCount > 0 ? <span>{myTurnCount}</span> : null}</button>
-          <button type="button" className={listTab === "requests" ? "active" : ""} onClick={() => setListTab("requests")}>{t("요청함")}{requestIds.size > 0 ? <span>{requestIds.size}</span> : null}</button>
+          <button type="button" className={listTab === "all" ? "active" : ""} onClick={() => onListTabChange("all")}>{t("전체")}</button>
+          <button type="button" className={listTab === "turn" ? "active" : ""} onClick={() => onListTabChange("turn")}>{t("내 차례")}{myTurnCount > 0 ? <span>{myTurnCount}</span> : null}</button>
+          <button type="button" className={listTab === "requests" ? "active" : ""} onClick={() => onListTabChange("requests")}>{t("요청함")}{requestIds.size > 0 ? <span>{requestIds.size}</span> : null}</button>
         </div>
         <div className="conversation-list">
           {filtered.length === 0 ? (
@@ -4171,7 +4487,7 @@ function ChatsView({
                 { id: "exchange", label: t("교환 세션"), icon: Timer, onSelect: onExchange },
                 { id: "mute", label: mutedChatIds.has(selected.id) ? t("알림 켜기") : t("알림 끄기"), icon: BellOff, onSelect: () => onToggleMute(selected.id, selected.name) },
                 { id: "leave", label: t("대화방 나가기"), icon: LogOut, onSelect: () => onLeaveChat(selected.id, selected.name) },
-                { id: "block", label: t("차단하기"), icon: Ban, danger: true, onSelect: () => onBlockPartner(selected.id, selected.name) },
+                { id: "block", label: t("차단하기"), icon: Ban, danger: true, onSelect: () => onBlockPartner(selected.id, selected.partnerId, selected.name) },
                 { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: onReport },
               ]}
             />

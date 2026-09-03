@@ -29,15 +29,24 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [socialConfig, setSocialConfig] = useState<SocialAuthConfig | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const provider = useSyncExternalStore<SocialProvider | null>(subscribeToPlatform, browserProvider, serverProvider);
 
   useEffect(() => {
     let active = true;
     api<SocialAuthConfig>("/api/auth/config")
       .then((config) => {
-        if (active) setSocialConfig(config);
+        if (active) {
+          setSocialConfig(config);
+          setConfigLoaded(true);
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) {
+          setConfigLoaded(true);
+          setError(t("로그인 설정을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요."));
+        }
+      });
     return () => {
       active = false;
     };
@@ -82,6 +91,10 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
     : provider === "google"
       ? t("Google로 계속하기")
       : t("로그인 준비 중…");
+  const providerEnabled = Boolean(provider && socialConfig?.providers[provider]);
+  const providerStatus = configLoaded && provider && socialConfig && !providerEnabled
+    ? t("이 로그인 방식은 아직 준비 중이에요.")
+    : "";
 
   return (
     <main className="signin-page">
@@ -101,16 +114,17 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: ApiProfile) => void 
           <button
             type="button"
             className={`signin-provider ${provider ? `signin-provider-${provider}` : "signin-provider-loading"}`}
-            onClick={() => provider && void submitSocial(provider)}
-            disabled={busy || !provider}
+            onClick={() => provider && providerEnabled && void submitSocial(provider)}
+            disabled={busy || !providerEnabled}
           >
             <span className={`signin-provider-mark ${provider ? `signin-provider-mark-${provider}` : ""}`} aria-hidden="true">
-              {provider === "google" ? "G" : provider === "apple" ? "" : "…"}
+              {provider === "google" ? "G" : provider === "apple" ? "\uF8FF" : "…"}
             </span>
             <span>{busy ? t("처리 중…") : providerLabel}</span>
           </button>
 
           {/* 설정이 안 끝난 것은 사용자 잘못이 아닙니다. 버튼 이름에 섞지 않고 따로 알립니다. */}
+          {providerStatus ? <p className="signin-error" role="status">{providerStatus}</p> : null}
           {error ? <p className="signin-error" role="alert">{error}</p> : null}
         </div>
 

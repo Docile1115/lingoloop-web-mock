@@ -3,9 +3,17 @@ import express from "express";
 import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { buildConversationReadPatch, isConversationHidden } from "./conversation-read.mjs";
 import { extractGeminiText, GeminiProviderError, generateGeminiContent } from "./gemini.mjs";
-import { buildNotification, notificationDocumentId, NOTIFICATION_TYPES } from "./notifications.mjs";
+import {
+  buildNotification,
+  matchesNotificationEvent,
+  notificationDocumentId,
+  notificationEventIdentity,
+  NOTIFICATION_TYPES,
+} from "./notifications.mjs";
 import { decideDmRoute, spamSignals } from "./policy.mjs";
+import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-limit.mjs";
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
 const IDENTITY_API_KEY = process.env.IDENTITY_API_KEY;
@@ -14,6 +22,9 @@ const IDENTITY_WEB_API_KEY = process.env.IDENTITY_WEB_API_KEY || IDENTITY_API_KE
 const FIREBASE_AUTH_DOMAIN = process.env.FIREBASE_AUTH_DOMAIN || `${PROJECT_ID}.firebaseapp.com`;
 const GOOGLE_AUTH_ENABLED = process.env.GOOGLE_AUTH_ENABLED === "true";
 const APPLE_AUTH_ENABLED = process.env.APPLE_AUTH_ENABLED === "true";
+// OAuth client ID는 공개 식별자입니다. Android 네이티브 Google SDK가 같은
+// Identity Platform 프로젝트의 ID token을 받도록 앱 구성 응답에 포함합니다.
+const GOOGLE_WEB_CLIENT_ID = process.env.GOOGLE_WEB_CLIENT_ID || "";
 /* 로컬 에뮬레이터로 붙어 있는가. 이 값이 있으면 브라우저도 에뮬레이터를 봐야
    같은 계정으로 로그인됩니다 — 없으면 브라우저만 진짜 구글로 가서 어긋납니다.
    운영에는 이 변수가 없으므로 아래 값은 비어 나갑니다. */
@@ -575,6 +586,33 @@ function blockId(blockerId, blockedId) {
   return blockerId + "_" + blockedId;
 }
 
+/**
+ * 상호작용을 기록하는 transaction 안에서 양방향 차단 문서를 함께 읽습니다.
+ * 차단 생성과 경합하면 Firestore가 이 transaction을 재시도하므로, 차단 이후의
+ * 좋아요·팔로우·댓글·대화·알림이 뒤늦게 생기지 않습니다.
+ */
+async function assertNotBlockedInTransaction(
+  transaction,
+  actorId,
+  counterpartIds,
+  {
+    status = 403,
+    code = "PARTNER_BLOCKED",
+    message = "차단된 상대와는 상호작용할 수 없습니다.",
+  } = {},
+) {
+  const counterparts = [...new Set(counterpartIds)].filter((id) => id && id !== actorId);
+  if (!counterparts.length) return;
+  const references = counterparts.flatMap((counterpartId) => [
+    db.collection("blocks").doc(blockId(actorId, counterpartId)),
+    db.collection("blocks").doc(blockId(counterpartId, actorId)),
+  ]);
+  const snapshots = await transaction.getAll(...references);
+  if (snapshots.some((snapshot) => snapshot.exists)) {
+    throw new ApiError(status, code, message);
+  }
+}
+
 /** 나와 어느 쪽으로든 차단 관계인 사람들의 id. 목록·검색·피드에서 서로 지웁니다. */
 async function blockedBothWays(uid) {
   const [mine, theirs] = await Promise.all([
@@ -596,7 +634,65 @@ async function isBlockedBetween(a, b) {
   return ab.exists || ba.exists;
 }
 
-async function directMessageDecision(senderId, recipientId) {
+const BLOCK_NOTIFICATION_CLEANUP_PAGE = 200;
+
+/**
+ * block 문서가 먼저 커밋된 뒤 실행합니다. 각 transaction은 block 문서를 읽고
+ * 알림을 방향별 200개씩만 지워 Firestore의 500 write 한도 안에 머뭅니다.
+ * cleanupComplete=false인 동안에는 차단 해제를 막아 새 관계가 정리 중간에
+ * 만들어졌다가 함께 지워지는 경쟁도 피합니다.
+ */
+async function cleanupBlockedPair(blockReference, firstId, secondId) {
+  let includeRelationships = true;
+  while (true) {
+    const result = await db.runTransaction(async (transaction) => {
+      const blockSnapshot = await transaction.get(blockReference);
+      if (!blockSnapshot.exists) return { active: false, notificationCount: 0 };
+
+      const mineFromPartnerQuery = notificationItems(firstId)
+        .where("actorId", "==", secondId)
+        .limit(BLOCK_NOTIFICATION_CLEANUP_PAGE);
+      const partnerFromMineQuery = notificationItems(secondId)
+        .where("actorId", "==", firstId)
+        .limit(BLOCK_NOTIFICATION_CLEANUP_PAGE);
+      const [mineFromPartner, partnerFromMine] = await Promise.all([
+        transaction.get(mineFromPartnerQuery),
+        transaction.get(partnerFromMineQuery),
+      ]);
+
+      if (includeRelationships) {
+        transaction.delete(db.collection("likes").doc(firstId + "_" + secondId));
+        transaction.delete(db.collection("likes").doc(secondId + "_" + firstId));
+        transaction.delete(db.collection("follows").doc(firstId + "_" + secondId));
+        transaction.delete(db.collection("follows").doc(secondId + "_" + firstId));
+      }
+      mineFromPartner.docs.forEach((document) => transaction.delete(document.ref));
+      partnerFromMine.docs.forEach((document) => transaction.delete(document.ref));
+      return {
+        active: true,
+        notificationCount: mineFromPartner.size + partnerFromMine.size,
+      };
+    });
+
+    includeRelationships = false;
+    if (!result.active) return;
+    if (result.notificationCount === 0) break;
+  }
+
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(blockReference);
+    if (snapshot.exists) {
+      transaction.update(blockReference, { cleanupComplete: true, cleanupCompletedAt: nowIso() });
+    }
+  });
+}
+
+/**
+ * 새 대화를 만드는 transaction 안에서만 호출합니다. 수신 정책과 매칭·팔로우
+ * 관계를 대화 문서 생성과 같은 스냅샷으로 읽어, 정책 변경과 생성이 경합해도
+ * Firestore가 transaction을 재시도해 최신 결정만 커밋하게 합니다.
+ */
+async function directMessageDecisionInTransaction(transaction, senderId, recipientId) {
   const date = todayInSeoul();
   const references = [
     db.collection("dmPolicies").doc(recipientId),
@@ -606,7 +702,8 @@ async function directMessageDecision(senderId, recipientId) {
     db.collection("follows").doc(recipientId + "_" + senderId),
     db.collection("dailyMatches").doc(senderId).collection("days").doc(date),
   ];
-  const [policySnapshot, senderLike, recipientLike, senderFollow, recipientFollow, dailyMatch] = await db.getAll(...references);
+  const [policySnapshot, senderLike, recipientLike, senderFollow, recipientFollow, dailyMatch] =
+    await transaction.getAll(...references);
   const policy = policySnapshot.exists ? { ...DEFAULT_DM_PRIVACY, ...policySnapshot.data() } : DEFAULT_DM_PRIVACY;
   const systemMatched = Boolean(
     dailyMatch.exists && dailyMatch.data()?.recommendations?.some((item) => item.partnerId === recipientId),
@@ -652,20 +749,6 @@ function removeNotification(transaction, event) {
   transaction.delete(notificationRef(event));
 }
 
-/** 이 대화에서 온 알림을 읽음으로 바꿉니다(새 메시지·대화 요청). */
-async function markConversationNotificationsRead(uid, conversationId) {
-  const snapshot = await notificationItems(uid)
-    .where("conversationId", "==", conversationId)
-    .where("readAt", "==", null)
-    .limit(50)
-    .get();
-  if (snapshot.empty) return;
-  const readAt = nowIso();
-  const batch = db.batch();
-  for (const document of snapshot.docs) batch.update(document.ref, { readAt });
-  await batch.commit();
-}
-
 async function unreadNotificationCount(uid) {
   const [snapshot, blocked] = await Promise.all([
     notificationItems(uid).where("readAt", "==", null).limit(500).get(),
@@ -700,6 +783,7 @@ async function conversationView(conversation, uid, includeMessages = false) {
     spamSignals: conversation.requestSpamSignals || [],
     requestStatus: conversationStatus(conversation),
     isIncomingRequest: conversationStatus(conversation) === "pending" && conversation.requestRecipientId === uid,
+    muted: Array.isArray(conversation.mutedBy) && conversation.mutedBy.includes(uid),
     ...(messages ? { messages } : {}),
   };
 }
@@ -769,57 +853,67 @@ function geminiText(body) {
   }
 }
 
-const authAttempts = new Map();
-let nextAuthAttemptSweepAt = 0;
-function authRateLimit(req, _res, next) {
+const authTokenLimiter = createFixedWindowLimiter();
+const authUidLimiter = createFixedWindowLimiter();
+const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_TOKEN_LOCAL_LIMIT = 5;
+
+function authRateKey(scope, value) {
+  /* token/uid 원문을 메모리나 Firestore key로 남기지 않도록 서버 비밀을 키로 한
+     HMAC을 씁니다. 저장되는 값은 이 64자 fingerprint뿐입니다. */
+  return crypto.createHmac("sha256", PROXY_SHARED_SECRET).update(`${scope}:${value}`).digest("hex");
+}
+
+function rateLimitError(expireAtMillis) {
+  return new ApiError(429, "RATE_LIMITED", "로그인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.", {
+    retryAt: Number.isFinite(expireAtMillis) ? new Date(expireAtMillis).toISOString() : undefined,
+  });
+}
+
+/** Cloud Run 인스턴스 전체가 공유하는 Firestore 고정 구간 카운터입니다. */
+async function enforceDistributedAuthLimit(keyHash, limit) {
+  const reference = db.collection("_authRateLimits").doc(keyHash);
   const timestamp = Date.now();
-  if (timestamp >= nextAuthAttemptSweepAt) {
-    for (const [key, value] of authAttempts) {
-      if (value.resetAt <= timestamp) authAttempts.delete(key);
+  const outcome = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    const next = nextFixedWindowBucket(snapshot.exists ? snapshot.data() : null, {
+      timestamp,
+      windowMs: AUTH_RATE_WINDOW_MS,
+      limit,
+    });
+    if (next.allowed) {
+      transaction.set(reference, {
+        keyHash,
+        count: next.count,
+        /* Firestore TTL 정책이 바로 사용할 수 있는 Timestamp 형식으로 저장됩니다. */
+        expireAt: new Date(next.expireAtMillis),
+        updatedAt: new Date(timestamp),
+      });
     }
-    nextAuthAttemptSweepAt = timestamp + 60_000;
-  }
-  const forwardedIp = String(req.get("cf-connecting-ip") || req.ip || "unknown").slice(0, 128);
-  /* 누구의 시도인가.
-     비밀번호 로그인은 email 로 구분했는데 소셜 로그인(/api/auth/session)은
-     idToken 만 보냅니다. 그래서 한 IP 뒤의 모든 사람이 같은 바구니를 써서,
-     카페·사무실처럼 NAT 를 함께 쓰면 서로를 막았습니다.
-     토큰의 sub 를 꺼내 계정별로 셉니다 — 검증은 뒤에서 하므로 여기서는
-     구분자로만 쓰고, 위조해서 바구니를 늘리는 것은 아래 IP 한도가 막습니다. */
-  const identity = authIdentity(req);
-  const takeSlot = (key, limit) => {
-    if (!authAttempts.has(key) && authAttempts.size >= 10_000) return false;
-    const current = authAttempts.get(key);
-    if (!current || current.resetAt <= timestamp) {
-      authAttempts.set(key, { count: 1, resetAt: timestamp + 15 * 60 * 1000 });
-      return true;
-    }
-    current.count += 1;
-    return current.count <= limit;
-  };
-  const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
-  // 계정별 30회, 그리고 한 IP 전체로 300회. 한 사람이 막혀도 옆 사람은 안 막힙니다.
-  const ok = takeSlot(hash(forwardedIp + ":" + identity), 30) && takeSlot(hash("ip:" + forwardedIp), 300);
-  if (!ok) {
-    next(new ApiError(429, "RATE_LIMITED", "로그인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."));
+    return next;
+  });
+  if (!outcome.allowed) throw rateLimitError(outcome.expireAtMillis);
+}
+
+function authRateLimit(req, _res, next) {
+  /* Sites -> Cloud Run relay에서는 많은 사용자가 같은 egress IP를 공유합니다.
+     검증 전에는 raw token 자체를 보관하지 않고 HMAC fingerprint별로만 작게
+     제한합니다. 임의의 invalid token으로 Firestore 문서를 만들지는 않습니다. */
+  const rawToken = typeof req.body?.idToken === "string" ? req.body.idToken : "";
+  const key = authRateKey("token", rawToken);
+  if (!authTokenLimiter.take(key, AUTH_TOKEN_LOCAL_LIMIT)) {
+    next(rateLimitError());
     return;
   }
   next();
 }
 
-/** 시도한 사람을 구분할 값. 이메일이 있으면 그것, 없으면 토큰의 sub 입니다. */
-function authIdentity(req) {
-  if (typeof req.body?.email === "string") return req.body.email.trim().toLocaleLowerCase();
-  const token = typeof req.body?.idToken === "string" ? req.body.idToken : "";
-  const payload = token.split(".")[1];
-  if (!payload) return "unknown";
-  try {
-    // 검증하지 않습니다 — 진짜인지는 뒤에서 봅니다. 여기서는 구분자일 뿐입니다.
-    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    return String(claims.sub || claims.user_id || "unknown").slice(0, 128);
-  } catch {
-    return "unknown";
+async function enforceVerifiedAuthLimit(uid) {
+  const key = authRateKey("uid", uid);
+  if (!authUidLimiter.take(key, 30)) {
+    throw rateLimitError();
   }
+  await enforceDistributedAuthLimit(key, 30);
 }
 
 app.use((req, res, next) => {
@@ -910,6 +1004,7 @@ app.get("/api/auth/config", async (req, res) => {
       google: GOOGLE_AUTH_ENABLED,
       apple: APPLE_AUTH_ENABLED,
     },
+    googleWebClientId: GOOGLE_AUTH_ENABLED ? GOOGLE_WEB_CLIENT_ID : "",
     authEmulatorHost: AUTH_EMULATOR_HOST,
   });
 });
@@ -917,6 +1012,7 @@ app.get("/api/auth/config", async (req, res) => {
 app.post("/api/auth/session", authRateLimit, async (req, res) => {
   const idToken = safeSecret(req.body?.idToken, "idToken", { min: 20, max: 8192 });
   const decoded = await verifyRecentIdToken(idToken);
+  await enforceVerifiedAuthLimit(decoded.uid);
   const userRecord = await auth.getUser(decoded.uid);
   if (userRecord.disabled) {
     throw new ApiError(403, "ACCOUNT_DISABLED", "비활성화된 계정입니다.");
@@ -998,7 +1094,10 @@ app.get("/api/notifications", requireUser, async (req, res) => {
     blockedBothWays(req.auth.uid),
   ]);
   const rows = snapshot.docs
-    .map((document) => document.data())
+    .map((document) => {
+      const notification = document.data();
+      return { ...notification, eventId: notificationEventIdentity(notification) };
+    })
     .filter((notification) => NOTIFICATION_TYPES.has(notification.type) && !blocked.has(notification.actorId));
   const actors = await profilesByIds(rows.map((notification) => notification.actorId));
   const items = rows.map((notification) => ({
@@ -1019,31 +1118,51 @@ app.get("/api/notifications", requireUser, async (req, res) => {
 
 app.patch("/api/notifications/:notificationId/read", requireUser, async (req, res) => {
   const notificationId = safeString(req.params.notificationId, "notificationId", { min: 40, max: 40 });
+  const expectedEventId = safeString(req.body?.eventId, "eventId", { min: 1, max: 128 });
   const reference = notificationItems(req.auth.uid).doc(notificationId);
-  const snapshot = await reference.get();
-  if (!snapshot.exists) throw new ApiError(404, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다.");
-  const readAt = snapshot.data().readAt || nowIso();
-  if (!snapshot.data().readAt) await reference.update({ readAt });
-  return success(res, req, { id: notificationId, readAt });
+  const result = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists) throw new ApiError(404, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다.");
+    const notification = snapshot.data();
+    /* 대화 알림은 같은 문서를 최신 메시지로 갱신합니다. 화면이 본 이벤트와 지금
+       문서의 이벤트가 다르면, 새 메시지까지 읽었다고 표시하지 않습니다. */
+    if (!matchesNotificationEvent(notification, expectedEventId)) {
+      return { id: notificationId, readAt: notification.readAt || null, stale: true };
+    }
+    const readAt = notification.readAt || nowIso();
+    if (!notification.readAt) transaction.update(reference, { readAt });
+    return { id: notificationId, readAt, stale: false };
+  });
+  return success(res, req, result);
 });
 
 app.post("/api/notifications/read-all", requireUser, async (req, res) => {
   const readAt = nowIso();
+  /* 요청이 시작할 때 보였던 최대 2,000개 이벤트만 고정합니다. 이후 같은
+     deterministic 문서 id에 새 이벤트가 덮여도 eventId가 다르면 건너뜁니다. */
+  const snapshot = await notificationItems(req.auth.uid).where("readAt", "==", null).limit(2000).get();
+  const candidates = snapshot.docs.map((document) => ({
+    reference: document.ref,
+    eventId: notificationEventIdentity(document.data()),
+  }));
   let updated = 0;
-  let hasMore = false;
-  while (updated < 2000) {
-    const snapshot = await notificationItems(req.auth.uid).where("readAt", "==", null).limit(400).get();
-    if (snapshot.empty) break;
-    const batch = db.batch();
-    snapshot.docs.forEach((document) => batch.update(document.ref, { readAt }));
-    await batch.commit();
-    updated += snapshot.size;
-    if (snapshot.size < 400) break;
+  for (let start = 0; start < candidates.length; start += 100) {
+    const page = candidates.slice(start, start + 100);
+    updated += await db.runTransaction(async (transaction) => {
+      const currentSnapshots = await transaction.getAll(...page.map((candidate) => candidate.reference));
+      let pageUpdated = 0;
+      currentSnapshots.forEach((current, index) => {
+        if (!current.exists) return;
+        const notification = current.data();
+        if (notification.readAt || !matchesNotificationEvent(notification, page[index].eventId)) return;
+        transaction.update(current.ref, { readAt });
+        pageUpdated += 1;
+      });
+      return pageUpdated;
+    });
   }
-  if (updated >= 2000) {
-    const remaining = await notificationItems(req.auth.uid).where("readAt", "==", null).limit(1).get();
-    hasMore = !remaining.empty;
-  }
+  const remaining = await notificationItems(req.auth.uid).where("readAt", "==", null).limit(1).get();
+  const hasMore = !remaining.empty;
   return success(res, req, { updated, readAt, hasMore });
 });
 
@@ -1201,35 +1320,40 @@ app.post("/api/partners/:partnerId/block", requireUser, async (req, res) => {
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인을 차단할 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists) throw new ApiError(404, "PARTNER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
-  const [mineFromPartner, partnerFromMine] = await Promise.all([
-    notificationItems(req.auth.uid).where("actorId", "==", partnerId).limit(200).get(),
-    notificationItems(partnerId).where("actorId", "==", req.auth.uid).limit(200).get(),
-  ]);
-  // 차단하면 마음·팔로우·서로에게서 온 알림도 함께 지웁니다. 차단을 풀었을 때
-  // 오래된 관계 알림이 다시 나타나지 않아야 합니다.
-  const batch = db.batch();
-  batch.set(db.collection("blocks").doc(blockId(req.auth.uid, partnerId)), {
-    id: blockId(req.auth.uid, partnerId),
-    blockerId: req.auth.uid,
-    blockedId: partnerId,
-    createdAt: nowIso(),
+  const id = blockId(req.auth.uid, partnerId);
+  const reference = db.collection("blocks").doc(id);
+  const created = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    if (snapshot.exists) {
+      /* 이전 cleanup이 실패했어도 같은 요청을 다시 보내면 끝까지 복구합니다. */
+      transaction.update(reference, { cleanupComplete: false });
+      return false;
+    }
+    transaction.create(reference, {
+      id,
+      blockerId: req.auth.uid,
+      blockedId: partnerId,
+      createdAt: nowIso(),
+      cleanupComplete: false,
+    });
+    return true;
   });
-  batch.delete(db.collection("likes").doc(req.auth.uid + "_" + partnerId));
-  batch.delete(db.collection("likes").doc(partnerId + "_" + req.auth.uid));
-  batch.delete(db.collection("follows").doc(req.auth.uid + "_" + partnerId));
-  batch.delete(db.collection("follows").doc(partnerId + "_" + req.auth.uid));
-  mineFromPartner.docs.forEach((document) => batch.delete(document.ref));
-  partnerFromMine.docs.forEach((document) => batch.delete(document.ref));
-  await batch.commit();
-  return success(res, req, { blockedId: partnerId, blocked: true }, 201);
+  // block을 먼저 확정해야 그 뒤 시작되는 모든 producer transaction이 거절됩니다.
+  await cleanupBlockedPair(reference, req.auth.uid, partnerId);
+  return success(res, req, { blockedId: partnerId, blocked: true }, created ? 201 : 200);
 });
 
 app.delete("/api/partners/:partnerId/block", requireUser, async (req, res) => {
   const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
   const reference = db.collection("blocks").doc(blockId(req.auth.uid, partnerId));
-  const snapshot = await reference.get();
-  if (!snapshot.exists) throw new ApiError(404, "BLOCK_NOT_FOUND", "차단하지 않은 사용자입니다.");
-  await reference.delete();
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists) throw new ApiError(404, "BLOCK_NOT_FOUND", "차단하지 않은 사용자입니다.");
+    if (snapshot.data()?.cleanupComplete === false) {
+      throw new ApiError(409, "BLOCK_CLEANUP_PENDING", "차단 정보를 정리하고 있습니다. 잠시 후 다시 시도해 주세요.");
+    }
+    transaction.delete(reference);
+  });
   return success(res, req, { blockedId: partnerId, blocked: false });
 });
 
@@ -1244,6 +1368,7 @@ app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
     throw new ApiError(403, "PARTNER_BLOCKED", "차단된 상대에게는 마음을 보낼 수 없습니다.");
   }
   const timestamp = nowIso();
+  const notificationEventId = crypto.randomUUID();
   const reference = db.collection("likes").doc(req.auth.uid + "_" + partnerId);
   const reverseReference = db.collection("likes").doc(partnerId + "_" + req.auth.uid);
   const result = await db.runTransaction(async (transaction) => {
@@ -1251,6 +1376,9 @@ app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
       transaction.get(reference),
       transaction.get(reverseReference),
     ]);
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [partnerId], {
+      message: "차단된 상대에게는 마음을 보낼 수 없습니다.",
+    });
     if (!existing.exists) {
       transaction.create(reference, {
         fromUserId: req.auth.uid,
@@ -1262,6 +1390,7 @@ app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
         recipientId: partnerId,
         actorId: req.auth.uid,
         sourceId: partnerId,
+        eventId: notificationEventId,
         createdAt: timestamp,
       });
     }
@@ -1286,22 +1415,27 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
     throw new ApiError(403, "PARTNER_BLOCKED", "차단된 상대를 팔로우할 수 없습니다.");
   }
   const reference = db.collection("follows").doc(req.auth.uid + "_" + partnerId);
+  const timestamp = nowIso();
+  const notificationEventId = crypto.randomUUID();
   const requestedFollowing = req.body?.following === undefined
     ? null
     : optionalBoolean(req.body.following, "following", false);
   const following = await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [partnerId], {
+      message: "차단된 상대를 팔로우할 수 없습니다.",
+    });
     const next = requestedFollowing ?? !snapshot.exists;
     if (next === snapshot.exists) return next;
     if (next) {
-      const createdAt = nowIso();
-      transaction.create(reference, { fromUserId: req.auth.uid, toUserId: partnerId, createdAt });
+      transaction.create(reference, { fromUserId: req.auth.uid, toUserId: partnerId, createdAt: timestamp });
       putNotification(transaction, {
         type: "follow",
         recipientId: partnerId,
         actorId: req.auth.uid,
         sourceId: partnerId,
-        createdAt,
+        eventId: notificationEventId,
+        createdAt: timestamp,
       });
     } else {
       transaction.delete(reference);
@@ -1461,6 +1595,31 @@ async function readablePost(postId, uid) {
   return post;
 }
 
+app.get("/api/posts/:postId", requireUser, async (req, res) => {
+  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const post = await readablePost(postId, req.auth.uid);
+  const [reaction, authorSnapshot] = await Promise.all([
+    db.collection("posts").doc(postId).collection("reactions").doc(req.auth.uid).get(),
+    db.collection("profiles").doc(post.authorId).get(),
+  ]);
+  const author = authorSnapshot.exists ? authorSnapshot.data() : null;
+  return success(res, req, {
+    ...post,
+    liked: reaction.exists,
+    author: {
+      ...post.author,
+      avatarUrl: author?.avatarUrl || "",
+      countryCode: author?.country?.code || "",
+      age: author?.age || 0,
+      gender: author?.gender || "unspecified",
+      native: author?.nativeLanguages?.[0] || "",
+      learning: author?.learningLanguages?.[0]
+        ? { code: author.learningLanguages[0].code, level: author.learningLanguages[0].level }
+        : null,
+    },
+  });
+});
+
 /**
  * 댓글과 교정.
  *
@@ -1500,6 +1659,8 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
   const original = kind === "correction" ? safeString(req.body?.original, "original", { min: 1, max: 1000 }) : "";
   const parentId = optionalString(req.body?.parentId, "parentId", 128) || "";
   const timestamp = nowIso();
+  const postNotificationEventId = crypto.randomUUID();
+  const parentNotificationEventId = crypto.randomUUID();
   const reply = {
     id: "reply-" + crypto.randomUUID(),
     postId,
@@ -1523,6 +1684,12 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
       throw new ApiError(404, "REPLY_NOT_FOUND", "답글을 남길 댓글을 찾을 수 없습니다.");
     }
     const current = snapshot.data();
+    const parentAuthorId = parentSnapshot?.data()?.authorId;
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [current.authorId, parentAuthorId], {
+      status: 404,
+      code: "POST_NOT_FOUND",
+      message: "게시물을 찾을 수 없습니다.",
+    });
     transaction.create(postReference.collection("replies").doc(reply.id), reply);
     transaction.update(postReference, {
       comments: kind === "reply" ? (current.comments || 0) + 1 : current.comments || 0,
@@ -1536,10 +1703,10 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
       sourceId: reply.id,
       postId,
       replyId: reply.id,
+      eventId: postNotificationEventId,
       excerpt: text,
       createdAt: timestamp,
     });
-    const parentAuthorId = parentSnapshot?.data()?.authorId;
     if (parentAuthorId && parentAuthorId !== current.authorId) {
       putNotification(transaction, {
         type: "comment_reply",
@@ -1548,6 +1715,7 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
         sourceId: reply.id,
         postId,
         replyId: reply.id,
+        eventId: parentNotificationEventId,
         excerpt: text,
         createdAt: timestamp,
       });
@@ -1692,6 +1860,7 @@ app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
   const postReference = db.collection("posts").doc(postId);
   const reactionReference = postReference.collection("reactions").doc(req.auth.uid);
   const requestedLiked = req.body?.liked === undefined ? null : optionalBoolean(req.body.liked, "liked", false);
+  const notificationEventId = crypto.randomUUID();
   const result = await db.runTransaction(async (transaction) => {
     const [postSnapshot, reactionSnapshot] = await Promise.all([
       transaction.get(postReference),
@@ -1699,6 +1868,11 @@ app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
     ]);
     if (!postSnapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
     const post = postSnapshot.data();
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [post.authorId], {
+      status: 404,
+      code: "POST_NOT_FOUND",
+      message: "게시물을 찾을 수 없습니다.",
+    });
     const liked = requestedLiked ?? !reactionSnapshot.exists;
     if (liked === reactionSnapshot.exists) {
       return { liked, likes: Math.max(0, Number(post.likes || 0)) };
@@ -1712,6 +1886,7 @@ app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
         actorId: req.auth.uid,
         sourceId: postId,
         postId,
+        eventId: notificationEventId,
         excerpt: post.text,
         createdAt: timestamp,
       });
@@ -1744,19 +1919,29 @@ app.post("/api/conversations", requireUser, async (req, res) => {
   const id = conversationIdFor(req.auth.uid, partnerId);
   const reference = db.collection("conversations").doc(id);
   const timestamp = nowIso();
-  const existingConversation = await reference.get();
-  if (
-    existingConversation.exists &&
-    (!existingConversation.data()?.memberIds?.includes(req.auth.uid) || !existingConversation.data()?.memberIds?.includes(partnerId))
-  ) {
-    throw new ApiError(409, "CONVERSATION_CONFLICT", "대화 식별자 충돌을 확인했습니다.");
-  }
-  const decision =
-    existingConversation.exists && conversationStatus(existingConversation.data()) === "accepted"
-      ? { status: "accepted" }
-      : await directMessageDecision(req.auth.uid, partnerId);
   const created = await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
+    if (
+      snapshot.exists &&
+      (!(snapshot.data()?.memberIds || []).includes(req.auth.uid) || !(snapshot.data()?.memberIds || []).includes(partnerId))
+    ) {
+      throw new ApiError(409, "CONVERSATION_CONFLICT", "대화 식별자 충돌을 확인했습니다.");
+    }
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [partnerId], {
+      message: "차단된 상대와는 대화할 수 없습니다.",
+    });
+    if (snapshot.exists && conversationStatus(snapshot.data()) === "accepted") {
+      // 사용자가 목록에서 나갔던 기존 대화를 명시적으로 다시 열면 본인에게만
+      // 재노출합니다. 메시지나 상대방의 숨김 상태는 건드리지 않습니다.
+      if (isConversationHidden(snapshot.data(), req.auth.uid)) {
+        transaction.update(reference, { hiddenBy: FieldValue.arrayRemove(req.auth.uid) });
+      }
+      return false;
+    }
+
+    // 정책·관계 판정도 이 transaction의 읽기 단계에 둡니다. 아래 create/update보다
+    // 먼저 끝나므로 Firestore의 read-before-write 규칙도 지킵니다.
+    const decision = await directMessageDecisionInTransaction(transaction, req.auth.uid, partnerId);
     if (!snapshot.exists) {
       transaction.create(reference, {
         id,
@@ -1764,7 +1949,11 @@ app.post("/api/conversations", requireUser, async (req, res) => {
         createdAt: timestamp,
         updatedAt: timestamp,
         lastMessage: "",
+        lastMessageAt: "",
+        lastMessageId: null,
         lastSenderId: null,
+        mutedBy: [],
+        hiddenBy: [],
         requestStatus: decision.status,
         requestSenderId: decision.status === "pending" ? req.auth.uid : null,
         requestRecipientId: decision.status === "pending" ? partnerId : null,
@@ -1798,6 +1987,7 @@ app.get("/api/conversations", requireUser, async (req, res) => {
   const conversations = snapshot.docs
     .map((document) => document.data())
     .filter((conversation) => !(conversation.memberIds || []).some((memberId) => blocked.has(memberId)))
+    .filter((conversation) => !isConversationHidden(conversation, req.auth.uid))
     .filter((conversation) => {
       const status = conversationStatus(conversation);
       if (box === "requests") return status === "pending" && conversation.requestRecipientId === req.auth.uid;
@@ -1811,6 +2001,7 @@ app.get("/api/conversations", requireUser, async (req, res) => {
 app.post("/api/conversations/:conversationId/accept", requireUser, async (req, res) => {
   const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
   const reference = db.collection("conversations").doc(id);
+  const notificationEventId = crypto.randomUUID();
   const conversation = await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
     if (!snapshot.exists) throw new ApiError(404, "CONVERSATION_NOT_FOUND", "대화를 찾을 수 없습니다.");
@@ -1818,6 +2009,9 @@ app.post("/api/conversations/:conversationId/accept", requireUser, async (req, r
     if (conversationStatus(data) !== "pending" || data.requestRecipientId !== req.auth.uid) {
       throw new ApiError(403, "REQUEST_ACCEPT_FORBIDDEN", "이 메시지 요청을 수락할 수 없습니다.");
     }
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [data.requestSenderId], {
+      message: "차단된 상대의 메시지 요청은 수락할 수 없습니다.",
+    });
     const timestamp = nowIso();
     const patch = {
       requestStatus: "accepted",
@@ -1832,48 +2026,187 @@ app.post("/api/conversations/:conversationId/accept", requireUser, async (req, r
       actorId: data.requestSenderId,
       sourceId: id,
     });
-    putNotification(transaction, {
-      type: "request_accepted",
-      recipientId: data.requestSenderId,
-      actorId: req.auth.uid,
-      sourceId: id,
-      conversationId: id,
-      createdAt: timestamp,
-    });
+    if (!(data.mutedBy || []).includes(data.requestSenderId)) {
+      putNotification(transaction, {
+        type: "request_accepted",
+        recipientId: data.requestSenderId,
+        actorId: req.auth.uid,
+        sourceId: id,
+        conversationId: id,
+        eventId: notificationEventId,
+        createdAt: timestamp,
+      });
+    }
     return { ...data, ...patch };
   });
   return success(res, req, await conversationView(conversation, req.auth.uid, true));
 });
 
+app.delete("/api/conversations/:conversationId/request", requireUser, async (req, res) => {
+  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const reference = db.collection("conversations").doc(id);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    // 같은 DELETE 재시도는 성공으로 취급하고 존재 여부도 노출하지 않습니다.
+    if (!snapshot.exists) return;
+    const conversation = snapshot.data();
+    if (conversationStatus(conversation) !== "pending") {
+      throw new ApiError(409, "REQUEST_NOT_PENDING", "대기 중인 메시지 요청만 삭제할 수 있습니다.");
+    }
+    if (conversation.requestRecipientId !== req.auth.uid) {
+      throw new ApiError(403, "REQUEST_DECLINE_FORBIDDEN", "받은 메시지 요청만 삭제할 수 있습니다.");
+    }
+    const senderId = conversation.requestSenderId;
+    if (!senderId) throw new ApiError(409, "REQUEST_STATE_CONFLICT", "메시지 요청 상태를 확인하지 못했습니다.");
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [senderId], {
+      code: "CONVERSATION_BLOCKED",
+      message: "차단된 상대의 메시지 요청 상태를 변경할 수 없습니다.",
+    });
+
+    // pending 상태에서는 첫 메시지를 하나만 허용합니다. 두 개 이상이면 일부만
+    // 지워 고아 데이터를 만들지 말고 상태 충돌로 중단합니다.
+    const messagesSnapshot = await transaction.get(reference.collection("messages").limit(2));
+    if (messagesSnapshot.size > 1) {
+      throw new ApiError(409, "REQUEST_STATE_CONFLICT", "메시지 요청의 저장 상태를 확인하지 못했습니다.");
+    }
+    if (messagesSnapshot.size === 1 && messagesSnapshot.docs[0].data().senderId !== senderId) {
+      throw new ApiError(409, "REQUEST_STATE_CONFLICT", "메시지 요청의 발신자를 확인하지 못했습니다.");
+    }
+
+    messagesSnapshot.docs.forEach((document) => transaction.delete(document.ref));
+    removeNotification(transaction, {
+      type: "message_request",
+      recipientId: req.auth.uid,
+      actorId: senderId,
+      sourceId: id,
+    });
+    transaction.delete(reference);
+  });
+  return success(res, req, { id, dismissed: true });
+});
+
+app.delete("/api/conversations/:conversationId", requireUser, async (req, res) => {
+  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const reference = db.collection("conversations").doc(id);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists) throw new ApiError(404, "CONVERSATION_NOT_FOUND", "대화를 찾을 수 없습니다.");
+    const conversation = snapshot.data();
+    if (!(conversation.memberIds || []).includes(req.auth.uid)) {
+      throw new ApiError(403, "CONVERSATION_FORBIDDEN", "이 대화에서 나갈 수 없습니다.");
+    }
+    if (conversationStatus(conversation) !== "accepted") {
+      throw new ApiError(409, "CONVERSATION_NOT_ACTIVE", "일반 대화만 목록에서 나갈 수 있습니다.");
+    }
+    const partnerId = (conversation.memberIds || []).find((memberId) => memberId !== req.auth.uid);
+    if (!partnerId) throw new ApiError(409, "CONVERSATION_CONFLICT", "대화 상대를 확인하지 못했습니다.");
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [partnerId], {
+      code: "CONVERSATION_BLOCKED",
+      message: "차단된 상대와의 대화 상태를 변경할 수 없습니다.",
+    });
+    // 이미 숨긴 DELETE 재시도도 같은 성공으로 끝냅니다. 대화와 메시지는 보존합니다.
+    if (!isConversationHidden(conversation, req.auth.uid)) {
+      transaction.update(reference, { hiddenBy: FieldValue.arrayUnion(req.auth.uid) });
+    }
+  });
+  return success(res, req, { id, hidden: true });
+});
+
+app.patch("/api/conversations/:conversationId/mute", requireUser, async (req, res) => {
+  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  if (typeof req.body?.muted !== "boolean") {
+    throw new ApiError(422, "VALIDATION_ERROR", "알림 설정 값을 확인해 주세요.", { field: "muted" });
+  }
+  const reference = db.collection("conversations").doc(id);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists) throw new ApiError(404, "CONVERSATION_NOT_FOUND", "대화를 찾을 수 없습니다.");
+    if (!(snapshot.data().memberIds || []).includes(req.auth.uid)) {
+      throw new ApiError(403, "CONVERSATION_FORBIDDEN", "이 대화의 알림을 바꿀 수 없습니다.");
+    }
+    transaction.update(reference, {
+      mutedBy: req.body.muted ? FieldValue.arrayUnion(req.auth.uid) : FieldValue.arrayRemove(req.auth.uid),
+    });
+  });
+  return success(res, req, { id, muted: req.body.muted, persisted: true });
+});
+
 app.get("/api/conversations/:conversationId/messages", requireUser, async (req, res) => {
   const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
-  const conversationSnapshot = await db.collection("conversations").doc(id).get();
-  if (!conversationSnapshot.exists) throw new ApiError(404, "CONVERSATION_NOT_FOUND", "대화를 찾을 수 없습니다.");
-  if (!conversationSnapshot.data().memberIds.includes(req.auth.uid)) {
+  const conversationReference = db.collection("conversations").doc(id);
+  /* 큰 media payload를 transaction에 넣지 않습니다. 먼저 권한을 빠르게 확인한 뒤
+     메시지와 당시의 알림 event identity를 일반 조회로 고정합니다. */
+  const preflightSnapshot = await conversationReference.get();
+  if (!preflightSnapshot.exists) throw new ApiError(404, "CONVERSATION_NOT_FOUND", "대화를 찾을 수 없습니다.");
+  const preflightConversation = preflightSnapshot.data();
+  if (!(preflightConversation.memberIds || []).includes(req.auth.uid)) {
     throw new ApiError(403, "CONVERSATION_FORBIDDEN", "이 대화에 접근할 수 없습니다.");
   }
-  const snapshot = await db.collection("conversations").doc(id).collection("messages").orderBy("sentAt", "desc").limit(200).get();
-  const messages = snapshot.docs.map((document) => document.data()).reverse();
-
-  // 지금 읽었다고 기록합니다. 상대는 이 시각으로 자기 메시지가 읽혔는지 압니다.
-  const conversation = conversationSnapshot.data();
-  const readAt = conversation.readAt || {};
-  const latest = messages.length ? messages[messages.length - 1].sentAt : null;
-  const hadUnread = (conversation.unread?.[req.auth.uid] || 0) > 0;
-  if ((latest && readAt[req.auth.uid] !== latest) || hadUnread) {
-    await db.collection("conversations").doc(id).update({
-      ...(latest ? { [`readAt.${req.auth.uid}`]: latest } : {}),
-      [`unread.${req.auth.uid}`]: 0,
-    });
-    /* 대화를 열었으면 그 대화의 알림도 읽은 것입니다. 안 지우면 이미 다 읽은
-       대화의 알림이 알림함에 계속 안읽음으로 남습니다. */
-    await markConversationNotificationsRead(req.auth.uid, id);
+  const preflightPartnerId = (preflightConversation.memberIds || []).find((memberId) => memberId !== req.auth.uid);
+  if (!preflightPartnerId) throw new ApiError(409, "CONVERSATION_CONFLICT", "대화 상대를 확인하지 못했습니다.");
+  if (await isBlockedBetween(req.auth.uid, preflightPartnerId)) {
+    throw new ApiError(403, "CONVERSATION_BLOCKED", "차단된 상대와는 대화할 수 없습니다.");
   }
+
+  const messagesQuery = conversationReference.collection("messages").orderBy("sentAt", "desc").limit(200);
+  const notificationsQuery = notificationItems(req.auth.uid)
+    .where("conversationId", "==", id)
+    .where("readAt", "==", null)
+    .limit(50);
+  const [messageSnapshot, notificationSnapshot] = await Promise.all([
+    messagesQuery.get(),
+    notificationsQuery.get(),
+  ]);
+  const messages = messageSnapshot.docs.map((document) => document.data()).reverse();
+  const latestMessageAt = messages.length ? String(messages[messages.length - 1].sentAt || "") : "";
+  const visibleMessageIds = new Set(messages.map((message) => message.id).filter(Boolean));
+  const notificationCandidates = notificationSnapshot.docs
+    .map((document) => ({
+      reference: document.ref,
+      notification: document.data(),
+      eventId: notificationEventIdentity(document.data()),
+    }))
+    .filter(({ notification, eventId }) => {
+      if (!["message", "message_request"].includes(notification.type)) return true;
+      if (notification.eventId) return visibleMessageIds.has(eventId);
+      return Boolean(latestMessageAt && String(notification.createdAt || "") <= latestMessageAt);
+    });
+  const notificationReadAt = nowIso();
+
+  /* 이 작은 transaction은 conversation, block, 최대 50개 알림만 다시 읽습니다.
+     조회 뒤 새 메시지가 왔으면 unread를 보존하고, 알림 문서가 새 event로 덮였으면
+     identity 불일치로 건너뜁니다. */
+  const conversation = await db.runTransaction(async (transaction) => {
+    const conversationSnapshot = await transaction.get(conversationReference);
+    if (!conversationSnapshot.exists) throw new ApiError(404, "CONVERSATION_NOT_FOUND", "대화를 찾을 수 없습니다.");
+    const current = conversationSnapshot.data();
+    if (!(current.memberIds || []).includes(req.auth.uid)) {
+      throw new ApiError(403, "CONVERSATION_FORBIDDEN", "이 대화에 접근할 수 없습니다.");
+    }
+    const partnerId = (current.memberIds || []).find((memberId) => memberId !== req.auth.uid);
+    if (!partnerId) throw new ApiError(409, "CONVERSATION_CONFLICT", "대화 상대를 확인하지 못했습니다.");
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [partnerId], {
+      code: "CONVERSATION_BLOCKED",
+      message: "차단된 상대와는 대화할 수 없습니다.",
+    });
+    const currentNotifications = notificationCandidates.length
+      ? await transaction.getAll(...notificationCandidates.map((candidate) => candidate.reference))
+      : [];
+    const readPatch = buildConversationReadPatch(current, messages, req.auth.uid);
+
+    if (readPatch) transaction.update(conversationReference, readPatch);
+    currentNotifications.forEach((document, index) => {
+      if (!document.exists || document.data().readAt) return;
+      if (!matchesNotificationEvent(document.data(), notificationCandidates[index].eventId)) return;
+      transaction.update(document.ref, { readAt: notificationReadAt });
+    });
+    return current;
+  });
 
   // 내가 보낸 메시지에만 읽음 여부를 붙입니다 — 남이 내 걸 언제 읽었는지가 궁금한 것이지,
   // 내가 남의 걸 읽었는지는 화면에 필요 없습니다.
   const partnerId = (conversation.memberIds || []).find((memberId) => memberId !== req.auth.uid);
-  const partnerReadAt = partnerId ? readAt[partnerId] : null;
+  const partnerReadAt = partnerId ? conversation.readAt?.[partnerId] : null;
   const withRead = messages.map((message) =>
     message.senderId === req.auth.uid
       ? { ...message, readByPartner: Boolean(partnerReadAt && String(partnerReadAt) >= String(message.sentAt)) }
@@ -1910,43 +2243,30 @@ async function createMessage(req, res, conversationId) {
       : "message-" + crypto.randomUUID();
   const conversationReference = db.collection("conversations").doc(id);
   const messageReference = conversationReference.collection("messages").doc(clientMessageId);
-  // 차단 관계면 어느 쪽도 보낼 수 없습니다. 트랜잭션 밖에서 먼저 걸러
-  // 상대 id 를 알아야 하므로 대화 문서를 한 번 읽습니다.
-  const preflight = await conversationReference.get();
-  if (preflight.exists) {
-    const otherId = (preflight.data().memberIds || []).find((memberId) => memberId !== req.auth.uid);
-    if (otherId && (await isBlockedBetween(req.auth.uid, otherId))) {
-      throw new ApiError(403, "CONVERSATION_BLOCKED", "차단된 상대에게는 메시지를 보낼 수 없습니다.");
-    }
-  }
-  const timestamp = nowIso();
-  const message = {
-    id: clientMessageId,
-    conversationId: id,
-    senderId: req.auth.uid,
-    type,
-    text,
-    media,
-    sentAt: timestamp,
-    status: "sent",
-  };
   const result = await db.runTransaction(async (transaction) => {
-    const [conversationSnapshot, messageSnapshot] = await Promise.all([
-      transaction.get(conversationReference),
-      transaction.get(messageReference),
-    ]);
+    const conversationSnapshot = await transaction.get(conversationReference);
     if (!conversationSnapshot.exists) throw new ApiError(404, "CONVERSATION_NOT_FOUND", "대화를 찾을 수 없습니다.");
-    if (!conversationSnapshot.data().memberIds.includes(req.auth.uid)) {
+    const conversation = conversationSnapshot.data();
+    if (!(conversation.memberIds || []).includes(req.auth.uid)) {
       throw new ApiError(403, "CONVERSATION_FORBIDDEN", "이 대화에 메시지를 보낼 수 없습니다.");
     }
+
+    const messageSnapshot = await transaction.get(messageReference);
     if (messageSnapshot.exists) {
       const existing = messageSnapshot.data();
-      if (existing.senderId !== req.auth.uid || existing.text !== text || existing.type !== type) {
+      if (existing.senderId !== req.auth.uid || existing.text !== text || existing.type !== type || (existing.media || "") !== media) {
         throw new ApiError(409, "MESSAGE_ID_CONFLICT", "이미 사용된 메시지 ID입니다.");
       }
       return { message: existing, created: false };
     }
-    const conversation = conversationSnapshot.data();
+
+    const recipientId = (conversation.memberIds || []).find((memberId) => memberId !== req.auth.uid);
+    if (!recipientId) throw new ApiError(409, "CONVERSATION_CONFLICT", "대화 상대를 확인하지 못했습니다.");
+    await assertNotBlockedInTransaction(transaction, req.auth.uid, [recipientId], {
+      code: "CONVERSATION_BLOCKED",
+      message: "차단된 상대에게는 메시지를 보낼 수 없습니다.",
+    });
+
     if (conversationStatus(conversation) === "pending") {
       if (conversation.requestSenderId !== req.auth.uid) {
         throw new ApiError(403, "MESSAGE_REQUEST_PENDING", "메시지 요청을 수락한 뒤 답장할 수 있습니다.");
@@ -1957,17 +2277,32 @@ async function createMessage(req, res, conversationId) {
     } else if (conversationStatus(conversation) !== "accepted") {
       throw new ApiError(403, "CONVERSATION_CLOSED", "이 대화에는 메시지를 보낼 수 없습니다.");
     }
+
+    /* 같은 대화의 두 전송이 같은 ms에 들어와도 정렬 키가 겹치지 않게, 현재
+       대화의 마지막 시각보다 최소 1ms 뒤를 배정합니다. 대화 문서 갱신이 경합하면
+       Firestore가 트랜잭션을 재시도해 최신 순서를 다시 계산합니다. */
+    const previousMillis = Date.parse(conversation.lastMessageAt || conversation.updatedAt || "");
+    const currentMillis = Date.now();
+    const timestamp = new Date(Math.max(currentMillis, Number.isFinite(previousMillis) ? previousMillis + 1 : currentMillis)).toISOString();
+    const message = {
+      id: clientMessageId,
+      conversationId: id,
+      senderId: req.auth.uid,
+      type,
+      text,
+      media,
+      sentAt: timestamp,
+      status: "sent",
+    };
     transaction.create(messageReference, message);
     /* 받는 사람의 안읽음을 올립니다.
        예전에는 목록이 늘 unreadCount: 0 을 내려 보내 안읽음 표시가 아예 뜨지
        않았습니다. 목록마다 메시지를 세면 대화 수만큼 질의가 늘어나므로
        대화 문서에 사람별로 세어 둡니다 — 읽으면 그 자리에서 0 으로 돌립니다. */
-    const recipientId = (conversation.memberIds || []).find((memberId) => memberId !== req.auth.uid);
     const unread = { ...(conversation.unread || {}) };
-    if (recipientId) unread[recipientId] = (unread[recipientId] || 0) + 1;
-    unread[req.auth.uid] = 0;
+    unread[recipientId] = (unread[recipientId] || 0) + 1;
 
-    if (recipientId) {
+    if (!(conversation.mutedBy || []).includes(recipientId)) {
       /* 처음 말을 걸 때는 "요청", 이미 열린 대화면 "새 메시지".
          sourceId 를 대화 id 로 둡니다 — 문서 id 가 type+수신자+보낸이+sourceId 라
          같은 대화의 메시지가 한 줄로 모입니다. 20통을 보내도 알림은 하나이고
@@ -1978,6 +2313,7 @@ async function createMessage(req, res, conversationId) {
         actorId: req.auth.uid,
         sourceId: id,
         conversationId: id,
+        eventId: clientMessageId,
         excerpt: text,
         createdAt: timestamp,
       });
@@ -1986,7 +2322,12 @@ async function createMessage(req, res, conversationId) {
     transaction.update(conversationReference, {
       lastMessage: text,
       lastSenderId: req.auth.uid,
+      lastMessageId: clientMessageId,
+      lastMessageAt: timestamp,
       unread,
+      // 새 메시지를 받은 사람에게는 이전에 나갔던 방을 자동으로 다시 보입니다.
+      // arrayRemove transform도 메시지 생성과 같은 transaction에서 커밋됩니다.
+      hiddenBy: FieldValue.arrayRemove(recipientId),
       updatedAt: timestamp,
       ...(conversationStatus(conversation) === "pending"
         ? { requestMessageSent: true, requestSpamSignals: spamSignals(text) }

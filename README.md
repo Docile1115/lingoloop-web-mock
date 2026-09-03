@@ -246,6 +246,7 @@ npm run dev
 | `FIREBASE_AUTH_DOMAIN` | 아니요 | 기본값 `<GOOGLE_CLOUD_PROJECT>.firebaseapp.com` |
 | `GOOGLE_AUTH_ENABLED` | 아니요 | Identity Platform Google 공급자까지 저장한 경우 `true` |
 | `APPLE_AUTH_ENABLED` | 아니요 | Identity Platform Apple 공급자까지 저장한 경우 `true` |
+| `GOOGLE_WEB_CLIENT_ID` | Google 사용 시 | Android 네이티브 Google 로그인이 사용할 공개 Web OAuth Client ID |
 | `PROXY_SHARED_SECRET` | 예 | 웹 프록시와 API 사이 공유 비밀 |
 | `COOKIE_SECURE` | 운영 예 | 운영은 기본값 `true`, 로컬 HTTP만 `false` |
 | `GEMINI_API_KEY` | 아니요 | 서비스 계정 결속 Gemini 인증 키. Secret Manager로 API 서비스에만 주입 |
@@ -262,6 +263,7 @@ npm run dev
 | --- | --- | --- |
 | `LINGOLOOP_API_URL` | 예 | `lingoloop-api` Cloud Run URL |
 | `PROXY_SHARED_SECRET` | 예 | API 서비스와 같은 Secret Manager 버전 |
+| `LINGOLOOP_EDGE_PROXY_URL` | 아니요 | Sites처럼 비밀을 직접 보관하지 않는 배포에서 사용할 기존 `lingoloop-web` 프록시 URL. 설정하면 위 두 변수 대신 이 경로를 우선 사용 |
 
 ## GCP 배포
 

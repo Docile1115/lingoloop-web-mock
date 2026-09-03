@@ -13,9 +13,9 @@
  *    브라우저가 남의 사이트에서 쿠키를 자동으로 붙이는 상황을 막는 것이고,
  *    1인칭 네이티브 앱이 자기 출처를 밝히는 것은 정상입니다.
  *
- * 2. 세션 쿠키. httpOnly 라 JS 가 읽을 수 없지만 *들고 다닐* 수는 있습니다.
- *    iOS 는 NSHTTPCookieStorage, 안드로이드는 CookieManager 라는 네이티브
- *    쿠키 항아리가 알아서 저장하고 다시 붙입니다. 우리가 할 일이 없습니다.
+ * 2. 세션 쿠키. httpOnly 라 JS 가 읽지 않고, credentials: include로 네이티브
+ *    쿠키 저장소가 매 요청에 붙이게 합니다. 인증이 만료되어 401이 오면 세션
+ *    Provider가 즉시 로그인 화면으로 되돌립니다.
  */
 
 /** 운영 웹 주소. 로컬 서버를 보려면 app.config 대신 여기를 바꿉니다. */
@@ -42,11 +42,18 @@ type Envelope<T> = {
   error?: { code?: string; message?: string; field?: string };
 };
 
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler;
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(API_BASE + path, {
       ...init,
+      credentials: "include",
       headers: {
         "content-type": "application/json",
         // 브라우저가 아니라 자동으로 붙지 않습니다. 위 주석 참고.
@@ -61,6 +68,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = (await response.json().catch(() => null)) as Envelope<T> | null;
 
   if (!response.ok) {
+    if (response.status === 401) onUnauthorized?.();
     throw new ApiError(
       response.status,
       body?.error?.code ?? "UNKNOWN",

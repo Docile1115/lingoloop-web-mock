@@ -25,6 +25,7 @@ async function startServer(port) {
       ...process.env,
       GOOGLE_CLOUD_PROJECT: "lingoloop-test",
       IDENTITY_API_KEY: "test-identity-key",
+      GOOGLE_WEB_CLIENT_ID: "test-web-client.apps.googleusercontent.com",
       PROXY_SHARED_SECRET: "test-proxy-secret",
       APP_ORIGIN: "http://localhost:5174",
       COOKIE_SECURE: "false",
@@ -90,7 +91,20 @@ test("HTTP boundary rejects bypasses and serves only non-mock metadata", async (
   assert.equal(authConfigBody.data.firebase.authDomain, "lingoloop-test.firebaseapp.com");
   assert.equal(authConfigBody.data.providers.google, false);
   assert.equal(authConfigBody.data.providers.apple, false);
+  assert.equal(authConfigBody.data.googleWebClientId, "");
   assert.equal(authConfigBody.meta.mock, false);
+
+  const invalidProxyAuth = await fetch(baseUrl + "/api/auth/session", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: "http://localhost:5174",
+      "x-lingoloop-proxy": "wrong-proxy-secret",
+    },
+    body: JSON.stringify({ idToken: "x".repeat(32) }),
+  });
+  assert.equal(invalidProxyAuth.status, 403);
+  assert.equal((await invalidProxyAuth.json()).error.code, "INVALID_PROXY");
 
   const invalidSocialToken = await fetch(baseUrl + "/api/auth/session", {
     method: "POST",
@@ -103,6 +117,31 @@ test("HTTP boundary rejects bypasses and serves only non-mock metadata", async (
   });
   assert.equal(invalidSocialToken.status, 422);
   assert.equal((await invalidSocialToken.json()).error.code, "VALIDATION_ERROR");
+
+  const repeatedToken = "x".repeat(32);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const response = await fetch(baseUrl + "/api/auth/session", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost:5174",
+        "x-lingoloop-proxy": "test-proxy-secret",
+      },
+      body: JSON.stringify({ idToken: repeatedToken }),
+    });
+    assert.equal(response.status, attempt < 5 ? 401 : 429);
+  }
+  // 한 token의 로컬 제한이 다른 token이나 공유 egress 전체를 막지 않습니다.
+  const distinctInvalidToken = await fetch(baseUrl + "/api/auth/session", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: "http://localhost:5174",
+      "x-lingoloop-proxy": "test-proxy-secret",
+    },
+    body: JSON.stringify({ idToken: "y".repeat(32) }),
+  });
+  assert.equal(distinctInvalidToken.status, 401);
 
   const invalidOrigin = await fetch(baseUrl + "/api/auth/session", {
     method: "POST",

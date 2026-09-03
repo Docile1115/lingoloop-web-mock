@@ -128,8 +128,13 @@ test("웹 Worker는 same-origin 요청을 운영 API로만 전달한다", async 
   );
 
   assert.match(source, /LINGOLOOP_API_URL/);
+  assert.match(source, /LINGOLOOP_EDGE_PROXY_URL/);
   assert.match(source, /PROXY_SHARED_SECRET/);
+  assert.match(source, /const directApi = !edgeProxyUrl/);
   assert.match(source, /headers\.set\("x-lingoloop-proxy", proxySecret\)/);
+  assert.match(source, /headers\.set\("x-lingoloop-client-ip", clientAddress\)/);
+  assert.match(source, /headers\.delete\(name\)/);
+  assert.match(source, /trustedClientAddress\(request\)/);
   assert.match(source, /url\.pathname\.startsWith\("\/api\/"\)/);
   assert.doesNotMatch(source, /handleMockApi|\.\.\/mock-api/);
 });

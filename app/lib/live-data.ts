@@ -120,15 +120,22 @@ export interface ApiMessage {
   readByPartner?: boolean;
 }
 
+export interface ApiCreateMessageResult {
+  conversationId: string;
+  message: ApiMessage;
+}
+
 export interface ApiConversation {
   id: string;
   partner: ApiProfile | null;
   preview: string;
   updatedAt: string;
   unreadCount: number;
+  messages?: ApiMessage[];
   requestStatus?: string;
   isIncomingRequest?: boolean;
   spamSignals?: string[];
+  muted?: boolean;
 }
 
 export interface ApiRecommendation {
@@ -416,6 +423,7 @@ export function toConversation(conversation: ApiConversation, messages: ChatMess
     preview: conversation.preview,
     time: relativeTime(conversation.updatedAt),
     unread: conversation.unreadCount || 0,
+    muted: Boolean(conversation.muted),
     online: partner?.status === "online",
     messages,
   };
@@ -460,6 +468,7 @@ export interface ApiNotification {
   postId: string;
   replyId: string;
   conversationId: string;
+  eventId?: string;
   excerpt: string;
   createdAt: string;
   readAt: string | null;

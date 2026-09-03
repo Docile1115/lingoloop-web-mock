@@ -5,13 +5,22 @@
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.0.3",
+    "@react-native-google-signin/google-signin": "^16.1.5",
     "@react-navigation/bottom-tabs": "^7.18.18",
     "@react-navigation/native": "^7.3.18",
     "@react-navigation/native-stack": "^7.18.10",
     "expo": "~54.0.0",
+    "expo-apple-authentication": "~8.0.8",
     "expo-asset": "~12.0.13",
+    "expo-audio": "~1.1.1",
+    "expo-crypto": "~15.0.9",
+    "expo-file-system": "~19.0.24",
+    "expo-image-manipulator": "~14.0.8",
+    "expo-image-picker": "~17.0.11",
     "expo-localization": "~17.0.9",
     "expo-status-bar": "~3.0.9",
+    "expo-system-ui": "~6.0.9",
+    "firebase": "^12.18.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -29,7 +38,12 @@
     "ios": "expo start --ios",
     "android": "expo start --android",
     "typecheck": "tsc --noEmit",
-    "bundle": "expo export --platform ios --output-dir .expo/export-check"
+    "check:deps": "expo install --check",
+    "check:config": "expo config --type introspect",
+    "check:autolink": "expo-modules-autolinking react-native-config --platform android",
+    "bundle": "npm run bundle:ios && npm run bundle:android",
+    "bundle:ios": "expo export --platform ios --output-dir .expo/export-check-ios",
+    "bundle:android": "expo export --platform android --output-dir .expo/export-check-android"
   },
   "private": true
 }

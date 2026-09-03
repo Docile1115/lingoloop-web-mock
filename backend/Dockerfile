@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY --chown=node:node server.mjs policy.mjs gemini.mjs notifications.mjs ./
+COPY --chown=node:node server.mjs policy.mjs gemini.mjs notifications.mjs auth-rate-limit.mjs conversation-read.mjs ./
 
 ENV NODE_ENV=production
 ENV PORT=8080

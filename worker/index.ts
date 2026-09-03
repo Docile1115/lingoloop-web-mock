@@ -5,6 +5,8 @@ import handler from "vinext/server/app-router-entry";
 interface Env {
   ASSETS: Fetcher;
   LINGOLOOP_API_URL?: string;
+  /** Sites처럼 API 비밀을 직접 보관하지 않는 호스트는 기존 Cloud Run 웹 프록시를 경유합니다. */
+  LINGOLOOP_EDGE_PROXY_URL?: string;
   PROXY_SHARED_SECRET?: string;
   IMAGES: {
     input(stream: ReadableStream): {
@@ -20,7 +22,9 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-function runtimeSetting(env: Env, key: "LINGOLOOP_API_URL" | "PROXY_SHARED_SECRET"): string | undefined {
+type RuntimeSetting = "LINGOLOOP_API_URL" | "LINGOLOOP_EDGE_PROXY_URL" | "PROXY_SHARED_SECRET";
+
+function runtimeSetting(env: Env, key: RuntimeSetting): string | undefined {
   // Vinext's Node production adapter does not pass a Worker bindings object.
   // Keep Worker bindings support, but fall back to Cloud Run process env safely.
   const binding = env?.[key];
@@ -28,10 +32,37 @@ function runtimeSetting(env: Env, key: "LINGOLOOP_API_URL" | "PROXY_SHARED_SECRE
   return process.env[key];
 }
 
+function validClientAddress(value: string | null | undefined): string | null {
+  const candidate = String(value || "").trim().replace(/^\[|\]$/g, "");
+  if (!candidate || candidate.length > 64 || /[\s,]/.test(candidate)) return null;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(candidate)) {
+    return candidate.split(".").every((part) => Number(part) <= 255) ? candidate : null;
+  }
+  return /^[0-9a-f:]+$/i.test(candidate) && candidate.includes(":") ? candidate.toLowerCase() : null;
+}
+
+/** 공개 요청이 넣은 첫 X-Forwarded-For 값이 아니라, 플랫폼이 덧붙인 주소를 씁니다. */
+export function trustedClientAddress(request: Request): string {
+  const cloudflareRequest = request as Request & { cf?: unknown };
+  if (cloudflareRequest.cf && typeof cloudflareRequest.cf === "object") {
+    const cloudflareAddress = validClientAddress(request.headers.get("cf-connecting-ip"));
+    if (cloudflareAddress) return cloudflareAddress;
+  }
+
+  const forwarded = String(request.headers.get("x-forwarded-for") || "")
+    .split(",")
+    .map((part) => validClientAddress(part))
+    .filter((part): part is string => Boolean(part));
+  if (!forwarded.length) return "unknown";
+  return forwarded.length >= 2 ? forwarded[forwarded.length - 2] : forwarded[0];
+}
+
 async function proxyApi(request: Request, env: Env): Promise<Response> {
-  const apiUrl = runtimeSetting(env, "LINGOLOOP_API_URL");
+  const edgeProxyUrl = runtimeSetting(env, "LINGOLOOP_EDGE_PROXY_URL");
+  const apiUrl = edgeProxyUrl || runtimeSetting(env, "LINGOLOOP_API_URL");
   const proxySecret = runtimeSetting(env, "PROXY_SHARED_SECRET");
-  if (!apiUrl || !proxySecret) {
+  const directApi = !edgeProxyUrl;
+  if (!apiUrl || (directApi && !proxySecret)) {
     return Response.json(
       {
         error: {
@@ -52,7 +83,14 @@ async function proxyApi(request: Request, env: Env): Promise<Response> {
   const sourceUrl = new URL(request.url);
   const upstreamUrl = new URL(sourceUrl.pathname + sourceUrl.search, apiUrl.endsWith("/") ? apiUrl : `${apiUrl}/`);
   const headers = new Headers(request.headers);
-  headers.set("x-lingoloop-proxy", proxySecret);
+  const clientAddress = trustedClientAddress(request);
+  for (const name of ["cf-connecting-ip", "x-forwarded-for", "x-real-ip", "forwarded", "x-lingoloop-client-ip"]) {
+    headers.delete(name);
+  }
+  if (directApi && proxySecret) {
+    headers.set("x-lingoloop-proxy", proxySecret);
+    headers.set("x-lingoloop-client-ip", clientAddress);
+  }
   headers.set("x-forwarded-host", sourceUrl.host);
   headers.set("x-forwarded-proto", sourceUrl.protocol.replace(":", ""));
   headers.delete("host");

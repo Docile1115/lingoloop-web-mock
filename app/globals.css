@@ -4142,6 +4142,26 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   .top-profile { display: none; }
   .topbar-actions { gap: var(--sp-1); }
   .topbar-actions .icon-button { width: 34px; height: 34px; border: 0; background: transparent; }
+  /* 모바일에는 사이드바가 없으므로 커뮤니티 알림·검색·글쓰기를 상단에서
+     숨기면 안 됩니다. 피드 선택기는 남는 폭만 쓰고 액션은 한 줄에 유지합니다. */
+  .topbar:has(.community-topbar-feed) .topbar-actions { display: flex; flex: 0 0 auto; }
+  .app-root .topbar:has(.community-topbar-feed) {
+    height: var(--mobile-topbar-total);
+    gap: 2px;
+    padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+  }
+  .app-root .topbar:has(.community-topbar-feed) + .workspace-grid { height: auto; }
+  .community-topbar-feed { width: auto; min-width: 0; flex: 1; margin: 0; padding: 0; gap: 2px; }
+  .community-topbar-feed .menu-trigger.feed-select-trigger { min-width: 0; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .community-topbar-feed .menu-trigger.feed-select-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-root .topbar:has(.community-topbar-feed) .topbar-actions .icon-button,
+  .app-root .topbar:has(.community-topbar-feed) .feed-filter-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    flex: 0 0 44px;
+  }
   .workspace-grid { display: block; height: auto; }
   .main-content { overflow: visible; }
   .view { --view-pad-x: var(--sp-4); width: 100%; padding: var(--sp-4) var(--view-pad-x) var(--sp-6); }
@@ -7205,7 +7225,12 @@ label > svg { flex: none; }
 }
 
 .signin-provider-mark-google { color: #4285f4; font-size: 20px; }
-.signin-provider-mark-apple::before { content: ""; font-size: 21px; }
+.signin-provider-mark-apple {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1;
+}
 
 .signin-error { margin: 0; color: var(--danger); font-size: 13px; line-height: 1.5; }
 
