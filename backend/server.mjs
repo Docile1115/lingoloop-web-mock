@@ -14,6 +14,7 @@ import {
 } from "./notifications.mjs";
 import { decideDmRoute, spamSignals } from "./policy.mjs";
 import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-limit.mjs";
+import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import {
   AvatarValidationError,
   avatarFields,
@@ -276,7 +277,7 @@ function parseCookies(header = "") {
 function publicProfile(profile) {
   if (!profile) return null;
   const privateFields = new Set(["email", "accountStatus", "createdAt", "updatedAt"]);
-  const normalized = { ...profile, ...avatarFields(profile) };
+  const normalized = { ...profile, ...avatarFields(profile), ...roomFields(profile) };
   return Object.fromEntries(Object.entries(normalized).filter(([key]) => !privateFields.has(key)));
 }
 
@@ -1194,6 +1195,25 @@ app.post("/api/notifications/read-all", requireUser, async (req, res) => {
   const remaining = await notificationItems(req.auth.uid).where("readAt", "==", null).limit(1).get();
   const hasMore = !remaining.empty;
   return success(res, req, { updated, readAt, hasMore });
+});
+
+app.patch("/api/profile/room", requireUser, async (req, res) => {
+  if (!req.body || Object.keys(req.body).length !== 1 || !Object.hasOwn(req.body, "config")) {
+    throw new ApiError(422, "VALIDATION_ERROR", "방 설정 형식을 확인해 주세요.");
+  }
+  let roomConfig;
+  try { roomConfig = validateRoomConfig(req.body.config); }
+  catch (error) {
+    if (error instanceof RoomValidationError) throw new ApiError(422, "VALIDATION_ERROR", error.message);
+    throw error;
+  }
+  const patch = { roomConfig, updatedAt: nowIso() };
+  await db.collection("profiles").doc(req.auth.uid).update(patch);
+  return success(res, req, {
+    ...publicProfile({ ...req.auth.profile, ...patch }),
+    email: req.auth.email,
+    emailVerified: req.auth.emailVerified,
+  });
 });
 
 app.patch("/api/profile/avatar", requireUser, async (req, res) => {

@@ -8,6 +8,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { AvatarConfig, AvatarMode } from "@shared/avatar";
+import type { RoomConfig } from "@shared/room";
 import { ApiError, get, post, setUnauthorizedHandler } from "./api";
 import type { FirebaseSessionCredential } from "./socialAuth";
 
@@ -19,6 +20,7 @@ export type Me = {
   avatarUrl?: string;
   avatarMode?: AvatarMode;
   avatarConfig?: AvatarConfig | null;
+  roomConfig?: RoomConfig | null;
   city?: string;
   bio?: string;
   age?: number;

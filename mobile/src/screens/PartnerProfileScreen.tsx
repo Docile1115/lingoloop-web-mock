@@ -16,6 +16,7 @@ import { useApi } from "../lib/useApi";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, tapSize } from "../lib/theme";
 import { Avatar, EmptyState, Loading, PrimaryButton, SegmentedTabs } from "../ui";
+import { RoomCard } from "../ui/RoomCard";
 
 /** 이 사람과 비슷한 사람 몇 명. 웹의 similarPartners 와 같은 규칙입니다. */
 function similarPartners(partner: Partner, directory: Partner[], limit = 6): Partner[] {
@@ -130,6 +131,7 @@ export function PartnerProfileScreen({
       </View>
 
       {partner.bio ? <Text style={[styles.bio, { color: c.muted }]}>{partner.bio}</Text> : null}
+      <RoomCard name={partner.name} value={partner.roomConfig} avatar={partner.avatarConfig} />
 
       {counts.data ? (
         <View style={styles.stats}>

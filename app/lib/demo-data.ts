@@ -1,8 +1,10 @@
 import type { AvatarConfig, AvatarMode } from "./avatar";
+import type { RoomConfig } from "./room";
 
 export type Accent = "violet" | "coral" | "mint" | "amber" | "blue" | "rose";
 
 export type Partner = {
+  roomConfig?: RoomConfig;
   id: string;
   name: string;
   handle: string;
