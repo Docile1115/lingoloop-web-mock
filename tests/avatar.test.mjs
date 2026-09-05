@@ -126,3 +126,9 @@ test("studio groups cover each category once", () => {
   const categories = avatar.AVATAR_GROUPS.flatMap(group => group.categories);
   assert.deepEqual([...categories].sort(), [...avatar.AVATAR_CATEGORY_KEYS].sort());
 });
+
+test("mobile studio keeps save actions fixed above navigation with content clearance", async () => {
+  const css = await readFile(`${ROOT}/app/globals.css`, "utf8");
+  assert.match(css, /\.avatar-studio\s*\{\s*padding-bottom:\s*calc\(var\(--mobile-nav-total\) \+ 124px\)/);
+  assert.match(css, /\.avatar-studio \.avatar-editor-footer\s*\{\s*position: fixed;[\s\S]*?bottom: var\(--mobile-nav-total\)/);
+});
