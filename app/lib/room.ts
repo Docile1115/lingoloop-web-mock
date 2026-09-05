@@ -48,6 +48,13 @@ export function moveRoomItem(room: RoomConfig, id: RoomItemId, x: number, y: num
   return { ...room, items: room.items.map((item) => item.id === id ? { ...item, x, y } : item) };
 }
 export function roomPoint(x: number, y: number) { return { x: 300 + (x - y) * 46, y: 204 + (x + y) * 23 }; }
+/** Inverse of the isometric projection; deliberately not clamped so outside drops are rejected. */
+export function roomCell(px: number, py: number) {
+  return { x: Math.round(((px - 300) / 46 + (py - 204) / 23) / 2) + 0, y: Math.round(((py - 204) / 23 - (px - 300) / 46) / 2) + 0 };
+}
+export function canPlaceRoomItem(room: RoomConfig, id: RoomItemId, x: number, y: number) {
+  return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x <= 4 && y >= 0 && y <= 4 && cellFree(room, x, y, id);
+}
 export const WALL_COLOURS = { cream: '#f3e8d8', sage: '#cadbd1', rose: '#ebcfd2', sky: '#ccdfeb', night: '#555d7c' };
 export const FLOOR_COLOURS = { oak: '#d4aa7f', walnut: '#956b53', ivory: '#e9dfcc', slate: '#8d9caa' };
 
@@ -69,7 +76,7 @@ const SHAPES: Record<RoomItemId, string> = {
 export function roomItemSvg(id: RoomItemId) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-70 -125 140 155">${SHAPES[id] || ''}</svg>`;
 }
-export function renderRoomSvg(value: unknown, avatar?: unknown): string {
+export function renderRoomSvg(value: unknown, avatar?: unknown, selected?: RoomItemId | null): string {
   const room = normalizeRoom(value);
   const wall = WALL_COLOURS[room.wall];
   const floor = FLOOR_COLOURS[room.floor];
@@ -79,7 +86,7 @@ export function renderRoomSvg(value: unknown, avatar?: unknown): string {
   }).join('');
   const objects = room.items.map((item) => {
     const p = roomPoint(item.x, item.y);
-    return { depth: item.id === 'rug' ? -1 : item.x + item.y, svg: `<g transform="translate(${p.x} ${p.y}) scale(${item.flipped ? -1 : 1} 1)">${SHAPES[item.id]}</g>` };
+    return { depth: item.id === 'rug' ? -1 : item.x + item.y, svg: `<g data-room-item="${item.id}" transform="translate(${p.x} ${p.y}) scale(${item.flipped ? -1 : 1} 1)">${item.id === selected ? '<ellipse cy="4" rx="48" ry="23" fill="#5bdbaf" fill-opacity=".3" stroke="#157d57" stroke-width="3" pointer-events="none"/>' : ''}${SHAPES[item.id]}</g>` };
   });
   const resident = roomPoint(RESIDENT.x, RESIDENT.y);
   const figure = renderAvatarSvg(avatar)

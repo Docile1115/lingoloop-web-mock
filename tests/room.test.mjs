@@ -42,3 +42,39 @@ test('room renderer is deterministic and never interpolates untrusted markup', (
   assert.doesNotMatch(svg, /<script|<image|javascript:|evil\.invalid/);
   assert.equal(room.renderRoomSvg(room.DEFAULT_ROOM),room.renderRoomSvg(room.DEFAULT_ROOM));
 });
+
+test('drag projection round-trips all cells and rejects occupied, resident and outside drops', () => {
+  for (let y=0;y<5;y++) for (let x=0;x<5;x++) {
+    const point=room.roomPoint(x,y);
+    assert.deepEqual(room.roomCell(point.x,point.y),{x,y});
+    assert.deepEqual(room.roomCell(point.x+2,point.y-2),{x,y});
+  }
+  const draft=room.copyRoom(room.DEFAULT_ROOM);
+  assert.equal(room.canPlaceRoomItem(draft,'sofa',0,2),true);
+  assert.equal(room.canPlaceRoomItem(draft,'sofa',4,4),true);
+  for (const [x,y] of [[0,0],[2,3],[5,2],[-1,2],[NaN,1],[1,Infinity]]) assert.equal(room.canPlaceRoomItem(draft,'sofa',x,y),false);
+  // The same pointer delta at desktop and mobile scales reaches the same cell.
+  for (const width of [320,390,540]) {
+    const from=room.roomPoint(0,2);const to=room.roomPoint(4,4);
+    const dx=(to.x-from.x)*width/600;const dy=(to.y-from.y)*width/600;
+    assert.deepEqual(room.roomCell(from.x+dx*600/width,from.y+dy*600/width),{x:4,y:4});
+  }
+});
+
+test('interactive SVG marks only curated furniture and never interpolates selection markup', () => {
+  const svg=room.renderRoomSvg(room.DEFAULT_ROOM,undefined,'sofa');
+  assert.equal((svg.match(/data-room-item=/g)||[]).length,6);
+  assert.equal((svg.match(/fill-opacity=".3"/g)||[]).length,1);
+  assert.doesNotMatch(room.renderRoomSvg(room.DEFAULT_ROOM,undefined,'" onload="alert(1)'),/onload|alert/);
+});
+
+test('web editor supports pointer cancellation and removes overlapping hotspots and forced scrolling', async () => {
+  const editor=await readFile(new URL('../app/components/ProfileRoom.tsx',import.meta.url),'utf8');
+  const canvas=await readFile(new URL('../app/components/RoomCanvas.tsx',import.meta.url),'utf8');
+  assert.doesNotMatch(editor,/scrollIntoView|room-hotspot|window\.confirm/);
+  assert.match(canvas,/setPointerCapture/);
+  assert.match(canvas,/onPointerCancel/);
+  assert.match(canvas,/onLostPointerCapture/);
+  assert.match(canvas,/canPlaceRoomItem/);
+  assert.match(canvas,/ArrowUp/);
+});
