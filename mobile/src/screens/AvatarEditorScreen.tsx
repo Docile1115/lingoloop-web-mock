@@ -8,13 +8,18 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
+import { SvgXml } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, usePreventRemove, type NavigationProp } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   AVATAR_CATEGORIES,
   AVATAR_CATEGORY_KEYS,
+  AVATAR_GROUPS,
+  renderAvatarPreviewSvg,
+  avatarPreviewForCategory,
   DEFAULT_AVATAR_CONFIG,
   normalizeAvatarConfig,
   randomAvatarConfig,
@@ -24,24 +29,12 @@ import {
 } from "@shared/avatar";
 import type { RootParams } from "../Navigation";
 import { ApiError, api } from "../lib/api";
-import { t, type MessageKey } from "../lib/i18n";
+import { t } from "../lib/i18n";
+import { AVATAR_CATEGORY_LABELS as CATEGORY_LABELS, AVATAR_GROUP_LABELS, AVATAR_OPTION_LABELS } from "@shared/avatar-labels";
 import { useSession } from "../lib/session";
 import { radius, space, tapSize, type } from "../lib/theme";
 import { useTheme } from "../lib/useTheme";
 import { Avatar, Loading } from "../ui";
-
-const CATEGORY_LABELS: Record<AvatarCategory, MessageKey> = {
-  skinTone: "피부색",
-  face: "얼굴",
-  hair: "헤어스타일",
-  hairColor: "머리 색상",
-  eyes: "눈",
-  mouth: "입",
-  outfit: "의상",
-  outfitColor: "의상 색상",
-  accessory: "액세서리",
-  background: "배경",
-};
 
 const copyConfig = (value: unknown): AvatarConfig => ({ ...normalizeAvatarConfig(value) });
 const sameConfig = (left: AvatarConfig, right: AvatarConfig) =>
@@ -49,11 +42,15 @@ const sameConfig = (left: AvatarConfig, right: AvatarConfig) =>
 
 export function AvatarEditorScreen({ onDone }: { onDone: () => void }) {
   const c = useTheme();
+  const { height } = useWindowDimensions();
+  const previewHeight = Math.min(240, Math.max(100, height * .25));
   const navigation = useNavigation<NavigationProp<RootParams>>();
   const { me, refresh } = useSession();
   const initial = useRef<AvatarConfig>(copyConfig(me?.avatarConfig));
   const [draft, setDraft] = useState<AvatarConfig>(() => copyConfig(me?.avatarConfig));
   const [category, setCategory] = useState<AvatarCategory>("skinTone");
+  const [group, setGroup] = useState<typeof AVATAR_GROUPS[number]>(AVATAR_GROUPS[0]);
+  const [faceZoom, setFaceZoom] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [leaveApproved, setLeaveApproved] = useState(false);
@@ -165,13 +162,15 @@ export function AvatarEditorScreen({ onDone }: { onDone: () => void }) {
       ) : null}
 
       <View style={styles.previewSection}>
-        <View style={[styles.previewRing, { backgroundColor: c.surfaceSoft, borderColor: c.line }]}>
-          <Avatar
-            name={`${me.name} · ${t("캐릭터 미리보기")}`}
-            avatarMode="character"
-            avatarConfig={draft}
-            size={160}
-          />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
+          <View accessible accessibilityRole="image" accessibilityLabel={`${me.name} · ${t("캐릭터 미리보기")}`}>
+            <SvgXml xml={renderAvatarPreviewSvg(draft, faceZoom ? "face" : "full")} width={previewHeight * 2 / 3} height={previewHeight} />
+          </View>
+          <View style={{ gap: space.sm }}>
+            {[false, true].map((zoom) => <Pressable key={String(zoom)} accessibilityRole="button" accessibilityState={{ selected: faceZoom === zoom }} onPress={() => setFaceZoom(zoom)} style={[styles.category, { backgroundColor: faceZoom === zoom ? c.ink : c.surfaceSoft }]}>
+              <Text style={{ color: faceZoom === zoom ? c.bg : c.ink }}>{t(zoom ? "얼굴 확대" : "전신")}</Text>
+            </Pressable>)}
+          </View>
         </View>
         <View style={styles.quickActions}>
           <Pressable
@@ -212,13 +211,18 @@ export function AvatarEditorScreen({ onDone }: { onDone: () => void }) {
         contentContainerStyle={styles.page}
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.groups}>
+          {AVATAR_GROUPS.map((item) => <Pressable key={item.key} disabled={busy} accessibilityRole="button" accessibilityState={{ selected: group.key === item.key }} onPress={() => { setGroup(item); setCategory(item.categories[0]); }} style={[styles.group, { backgroundColor: group.key === item.key ? c.ink : c.surfaceSoft }]}>
+            <Text style={{ color: group.key === item.key ? c.bg : c.muted, fontSize: 13, fontWeight: "700" }}>{t(AVATAR_GROUP_LABELS[item.key])}</Text>
+          </Pressable>)}
+        </View>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.categories}
           accessibilityRole="tablist"
         >
-          {AVATAR_CATEGORIES.map((item) => {
+          {group.categories.map((key) => AVATAR_CATEGORIES.find((item) => item.key === key)!).map((item) => {
             const selected = category === item.key;
             return (
               <Pressable
@@ -247,9 +251,8 @@ export function AvatarEditorScreen({ onDone }: { onDone: () => void }) {
           {options.map((option, index) => {
             const selected = draft[category] === option.id;
             const preview = copyConfig({ ...draft, [category]: option.id });
-            const optionLabel = option.id === "accessory-none"
-              ? t("없음")
-              : t("스타일 {n}", { n: index + 1 });
+            const label = AVATAR_OPTION_LABELS[option.id];
+            const optionLabel = label ? t(label) : t("스타일 {n}", { n: index + 1 });
             return (
               <Pressable
                 key={option.id}
@@ -268,13 +271,8 @@ export function AvatarEditorScreen({ onDone }: { onDone: () => void }) {
                   },
                 ]}
               >
-                <Avatar
-                  name={`${t(CATEGORY_LABELS[category])} ${optionLabel}`}
-                  avatarMode="character"
-                  avatarConfig={preview}
-                  size={58}
-                />
-                <Text style={{ color: selected ? c.primaryStrong : c.subtle, fontSize: 11, fontWeight: selected ? "800" : "600" }}>
+                {"swatch" in option && typeof option.swatch === "string" ? <View style={{ width: 58, height: 58, borderRadius: 29, backgroundColor: option.swatch }} /> : <SvgXml xml={renderAvatarPreviewSvg(preview, avatarPreviewForCategory(category))} width={64} height={64} />}
+                <Text style={{ color: selected ? c.primaryStrong : c.subtle, fontSize: 11, textAlign: "center", fontWeight: selected ? "800" : "600" }}>
                   {optionLabel}
                 </Text>
                 {selected ? (
@@ -339,14 +337,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
   },
-  previewRing: {
-    width: 176,
-    height: 176,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 88,
-  },
+  groups: { flexDirection: "row", gap: 6, paddingHorizontal: space.lg },
+  group: { flex: 1, minHeight: tapSize, alignItems: "center", justifyContent: "center", borderRadius: radius.md },
   quickActions: { flexDirection: "row", gap: space.sm },
   quickAction: {
     minHeight: tapSize,
@@ -374,8 +366,9 @@ const styles = StyleSheet.create({
   },
   option: {
     position: "relative",
-    width: "22.5%",
-    minHeight: 90,
+    width: "30%",
+    flexGrow: 1,
+    minHeight: 110,
     alignItems: "center",
     justifyContent: "center",
     gap: space.xs,

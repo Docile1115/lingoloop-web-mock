@@ -1,4 +1,4 @@
-import { renderAvatarSvg } from './avatar';
+import { renderFullBodyAvatarSvg } from './avatar';
 
 export const ROOM_WALLS = ['cream', 'sage', 'rose', 'sky', 'night'] as const;
 export const ROOM_FLOORS = ['oak', 'walnut', 'ivory', 'slate'] as const;
@@ -89,10 +89,8 @@ export function renderRoomSvg(value: unknown, avatar?: unknown, selected?: RoomI
     return { depth: item.id === 'rug' ? -1 : item.x + item.y, svg: `<g data-room-item="${item.id}" transform="translate(${p.x} ${p.y}) scale(${item.flipped ? -1 : 1} 1)">${item.id === selected ? '<ellipse cy="4" rx="48" ry="23" fill="#5bdbaf" fill-opacity=".3" stroke="#157d57" stroke-width="3" pointer-events="none"/>' : ''}${SHAPES[item.id]}</g>` };
   });
   const resident = roomPoint(RESIDENT.x, RESIDENT.y);
-  const figure = renderAvatarSvg(avatar)
-    .replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '')
-    .replace(/<rect width="128"[^>]*\/>/, '').replace(/<circle cx="104"[^>]*\/>/, '');
-  objects.push({ depth: 5.1, svg: `<g transform="translate(${resident.x-32} ${resident.y-68})"><ellipse cx="32" cy="69" rx="29" ry="9" fill="#000" opacity=".12"/><ellipse cx="23" cy="67" rx="10" ry="5" fill="#4d5155"/><ellipse cx="42" cy="67" rx="10" ry="5" fill="#4d5155"/><g transform="scale(.5)">${figure}</g></g>` });
+  const figure = renderFullBodyAvatarSvg(avatar, true).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+  objects.push({ depth: 5.1, svg: `<g data-room-resident="true" transform="translate(${resident.x-96*.31} ${resident.y-274*.31}) scale(.31)">${figure}</g>` });
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 460"><rect width="600" height="460" rx="24" fill="${room.wall === 'night' ? '#30384e' : '#f7f2e9'}"/><ellipse cx="300" cy="416" rx="218" ry="26" fill="#362d29" opacity=".08"/><path d="M50 125 300 15 550 125v180L300 430 50 305Z" fill="${wall}"/><path d="M300 15 550 125v180L300 180Z" fill="#000" opacity=".07"/><path d="M50 305 300 180 550 305 300 430Z" fill="${floor}"/><g stroke="#fff" opacity=".14" stroke-width="2">${lines}</g><path d="M50 305 300 430 550 305v10L300 440 50 315Z" fill="#5a4036" opacity=".22"/><path d="M300 15v165M50 300l250-125 250 125" fill="none" stroke="#fff" opacity=".35" stroke-width="5"/><g transform="translate(377 115) skewY(24)"><rect x="-30" y="-48" width="83" height="80" rx="5" fill="#fff3dc"/><rect x="-24" y="-42" width="71" height="68" rx="2" fill="${room.wall === 'night' ? '#858bb2' : '#c6deda'}"/><circle cx="26" cy="-23" r="10" fill="#fff0b4"/><path d="M-24 16l25-24 21 16 25-15v33h-71Z" fill="#9cb7a1"/><path d="M11-42v68m-35-34h71" stroke="#fff3dc" stroke-width="5"/></g><g transform="translate(175 128) skewY(-24)"><rect x="-28" y="-32" width="55" height="63" rx="3" fill="#c7a27c"/><rect x="-23" y="-27" width="45" height="53" fill="#f7e9d2"/><circle cx="0" cy="-8" r="12" fill="#d5a482"/><path d="M-17 21q0-26 17-18t17 18Z" fill="#8da597"/></g>${objects.sort((a,b) => a.depth-b.depth).map((o) => o.svg).join('')}</svg>`;
 }
 export const roomDataUri = (value: unknown, avatar?: unknown) => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(renderRoomSvg(value, avatar))}`;
