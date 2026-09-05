@@ -59,7 +59,14 @@ export function LikesScreen({
             onPress={() => onOpenProfile(item.partner.id)}
             accessibilityRole="button"
           >
-            <Avatar name={item.partner.name} photo={item.partner.photo} size={50} online={item.partner.online} />
+            <Avatar
+              name={item.partner.name}
+              photo={item.partner.photo}
+              avatarMode={item.partner.avatarMode}
+              avatarConfig={item.partner.avatarConfig}
+              size={50}
+              online={item.partner.online}
+            />
             <View style={{ flex: 1, gap: 3 }}>
               <View style={styles.head}>
                 <Text style={[type.name, { color: c.ink }]} numberOfLines={1}>{item.partner.name}</Text>

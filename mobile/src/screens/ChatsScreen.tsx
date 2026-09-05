@@ -47,7 +47,14 @@ export function ChatsScreen({ onOpen }: { onOpen: (row: Conversation) => void })
           onPress={() => onOpen(item)}
           accessibilityRole="button"
         >
-          <Avatar name={item.name} photo={item.photo} size={54} online={item.online} />
+          <Avatar
+            name={item.name}
+            photo={item.photo}
+            avatarMode={item.avatarMode}
+            avatarConfig={item.avatarConfig}
+            size={54}
+            online={item.online}
+          />
           <View style={{ flex: 1, gap: 3 }}>
             <View style={styles.head}>
               <Text

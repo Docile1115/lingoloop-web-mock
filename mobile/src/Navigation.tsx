@@ -17,6 +17,7 @@ import { useTheme } from "./lib/useTheme";
 import { ChatsScreen } from "./screens/ChatsScreen";
 import { CommunityScreen } from "./screens/CommunityScreen";
 import { ComposeScreen } from "./screens/ComposeScreen";
+import { AvatarEditorScreen } from "./screens/AvatarEditorScreen";
 import { EditProfileScreen } from "./screens/EditProfileScreen";
 import { MeScreen } from "./screens/MeScreen";
 import { PartnerProfileScreen } from "./screens/PartnerProfileScreen";
@@ -34,6 +35,7 @@ export type RootParams = {
   Thread: { conversation: Conversation };
   Compose: undefined;
   EditProfile: undefined;
+  AvatarEditor: undefined;
   Filters: undefined;
   Likes: undefined;
   Search: undefined;
@@ -62,6 +64,8 @@ async function openConversation(partner: Partner): Promise<Conversation | null> 
       flag: partner.flag,
       accent: partner.accent,
       photo: partner.photo,
+      avatarMode: partner.avatarMode,
+      avatarConfig: partner.avatarConfig,
       countryCode: partner.countryCode,
       preview: "",
       time: "",
@@ -202,6 +206,7 @@ function Tabs() {
         {({ navigation }) => (
           <MeScreen
             onEdit={() => navigation.navigate("EditProfile")}
+            onEditAvatar={() => navigation.navigate("AvatarEditor")}
             onOpenPost={(post) => navigation.navigate("PostDetail", { post })}
           />
         )}
@@ -275,7 +280,19 @@ export function Navigation() {
         </Stack.Screen>
 
         <Stack.Screen name="EditProfile" options={{ title: t("프로필 편집"), presentation: "modal" }}>
-          {({ navigation }) => <EditProfileScreen onDone={() => navigation.goBack()} />}
+          {({ navigation }) => (
+            <EditProfileScreen
+              onDone={() => navigation.goBack()}
+              onEditAvatar={() => navigation.navigate("AvatarEditor")}
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen
+          name="AvatarEditor"
+          options={{ headerShown: false, headerBackButtonMenuEnabled: false, presentation: "modal" }}
+        >
+          {({ navigation }) => <AvatarEditorScreen onDone={() => navigation.goBack()} />}
         </Stack.Screen>
 
         <Stack.Screen name="Filters" options={{ title: t("오늘의 파트너 조건"), presentation: "modal" }}>

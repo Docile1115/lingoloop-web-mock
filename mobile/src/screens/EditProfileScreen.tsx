@@ -3,18 +3,20 @@ import { useCallback, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { ApiError, api } from "../lib/api";
 import { t } from "../lib/i18n";
 import { useSession, type Me } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, tapSize } from "../lib/theme";
-import { Chip, Loading, PrimaryButton } from "../ui";
+import { Avatar, Chip, Loading, PrimaryButton } from "../ui";
 
 /** 서버가 받는 단계. backend/server.mjs 의 LEARNING_LEVELS 와 같은 순서입니다. */
 const LEVELS = ["beginner", "elementary", "intermediate", "upper", "advanced"] as const;
@@ -26,7 +28,13 @@ const LEVEL_LABELS: Record<(typeof LEVELS)[number], string> = {
   advanced: "거의 불편함이 없어요",
 };
 
-export function EditProfileScreen({ onDone }: { onDone: () => void }) {
+export function EditProfileScreen({
+  onDone,
+  onEditAvatar,
+}: {
+  onDone: () => void;
+  onEditAvatar: () => void;
+}) {
   const { me, refresh } = useSession();
   const c = useTheme();
   const [name, setName] = useState(me?.name ?? "");
@@ -70,6 +78,34 @@ export function EditProfileScreen({ onDone }: { onDone: () => void }) {
       keyboardVerticalOffset={90}
     >
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+        <Pressable
+          onPress={onEditAvatar}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel={t("캐릭터 꾸미기")}
+          style={({ pressed }) => [
+            styles.avatarRow,
+            { backgroundColor: c.surfaceSoft, borderColor: c.line, opacity: pressed ? 0.75 : 1 },
+          ]}
+        >
+          <Avatar
+            name={me.name}
+            photo={me.avatarUrl}
+            avatarMode={me.avatarMode}
+            avatarConfig={me.avatarConfig}
+            size={56}
+          />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={[styles.avatarTitle, { color: c.ink }]}>
+              {t("캐릭터 꾸미기")}
+            </Text>
+            <Text style={[styles.avatarHint, { color: c.subtle }]}>
+              {t("나만의 프로필 캐릭터를 만들어보세요")}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={c.subtle} />
+        </Pressable>
+
         <Text style={[styles.label, { color: c.ink }]}>{t("이름")}</Text>
         <TextInput
           style={[styles.input, { backgroundColor: c.surfaceSoft, borderColor: c.line, color: c.ink }]}
@@ -131,6 +167,17 @@ export function EditProfileScreen({ onDone }: { onDone: () => void }) {
 
 const styles = StyleSheet.create({
   page: { padding: space.lg, gap: space.xs },
+  avatarRow: {
+    minHeight: 80,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    padding: space.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+  },
+  avatarTitle: { fontSize: 15, fontWeight: "700" },
+  avatarHint: { fontSize: 12, lineHeight: 17 },
   label: { fontSize: 13, fontWeight: "600", marginTop: space.md },
   input: {
     height: tapSize + 4,

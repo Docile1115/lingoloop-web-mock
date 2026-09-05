@@ -84,7 +84,13 @@ export function PostDetailScreen({
         }
         renderItem={({ item }) => (
           <View style={styles.reply}>
-            <Avatar name={item.author} photo={item.photo} size={32} />
+            <Avatar
+              name={item.author}
+              photo={item.photo}
+              avatarMode={item.avatarMode}
+              avatarConfig={item.avatarConfig}
+              size={32}
+            />
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={[styles.replyAuthor, { color: c.ink }]}>
                 {item.author}

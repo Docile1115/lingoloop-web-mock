@@ -85,6 +85,16 @@ import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, 
 import { SignIn } from "./SignIn";
 import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, type ApiNotification, type ApiNotificationPage, matchReasonText, type MatchReasonCode } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
+import {
+  AVATAR_CATEGORIES,
+  DEFAULT_AVATAR_CONFIG,
+  avatarDataUri,
+  normalizeAvatarConfig,
+  randomAvatarConfig,
+  type AvatarCategory,
+  type AvatarConfig,
+  type AvatarMode,
+} from "@/app/lib/avatar";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -148,6 +158,7 @@ type DetailRoute =
   | { kind: "notifications" }
   | { kind: "profile"; partner: Partner }
   | { kind: "profile-edit" }
+  | { kind: "avatar-edit" }
   | { kind: "blocked" }
   | null;
 
@@ -442,6 +453,8 @@ function Avatar({
   online,
   photo,
   countryCode,
+  avatarMode,
+  avatarConfig,
 }: {
   name: string;
   flag?: string;
@@ -452,12 +465,16 @@ function Avatar({
   photo?: string;
   /** 국가 코드(KR·JP…). 있으면 국기 배지를 답니다. */
   countryCode?: string;
+  avatarMode?: AvatarMode;
+  avatarConfig?: AvatarConfig | null;
 }) {
+  const character = avatarMode === "character" && avatarConfig ? normalizeAvatarConfig(avatarConfig) : null;
+  const source = character ? avatarDataUri(character) : photo;
   return (
     <span className={`avatar avatar-${size}`} style={accentStyle(accent)} role="img" aria-label={name}>
-      {photo ? (
+      {source ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img className="avatar-photo" src={photo} alt="" />
+        <img className={character ? "avatar-photo avatar-character" : "avatar-photo"} src={source} alt="" />
       ) : (
       <span className="avatar-initials">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -497,7 +514,15 @@ function IconButton({
   );
 }
 
-function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: () => void }) {
+function LingoLoopScreens({
+  me,
+  onSignedOut,
+  onProfileUpdated,
+}: {
+  me: ApiProfile;
+  onSignedOut: () => void;
+  onProfileUpdated: (profile: ApiProfile) => void;
+}) {
   setSignedInId(me.id);
   const [section, setSection] = useState<Section>("discover");
   const [modal, setModal] = useState<ModalState>(null);
@@ -662,6 +687,32 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     learningCode: me.learningLanguages?.[0]?.code ?? "en",
     learningLevel: me.learningLanguages?.[0]?.level ?? "beginner",
   });
+  /* 캐릭터 편집 화면을 위에 열었다 돌아와도 저장 전 프로필 입력을 보존합니다. */
+  const [profileEditDraft, setProfileEditDraft] = useState<ProfileDraft | null>(null);
+  const [avatarEditorDirty, setAvatarEditorDirty] = useState(false);
+  const [avatarEditorSaving, setAvatarEditorSaving] = useState(false);
+  const avatarNavigationGuard = useRef<{
+    active: boolean;
+    dirty: boolean;
+    saving: boolean;
+    snapshot: DetailHistorySnapshot;
+  }>({ active: false, dirty: false, saving: false, snapshot: { section: "learn", stack: [] } });
+  const handleAvatarDirtyChange = useCallback((dirty: boolean) => {
+    avatarNavigationGuard.current.dirty = dirty;
+    setAvatarEditorDirty(dirty);
+  }, []);
+  const handleAvatarSavingChange = useCallback((saving: boolean) => {
+    avatarNavigationGuard.current.saving = saving;
+    setAvatarEditorSaving(saving);
+  }, []);
+  useEffect(() => {
+    avatarNavigationGuard.current = {
+      active: detail?.kind === "avatar-edit",
+      dirty: avatarEditorDirty,
+      saving: avatarEditorSaving,
+      snapshot: { section, stack: detailStack },
+    };
+  }, [avatarEditorDirty, avatarEditorSaving, detail?.kind, detailStack, section]);
   const [replySort, setReplySort] = useState<"popular" | "recent">("popular");
   const toastTimer = useRef<number | null>(null);
 
@@ -1005,6 +1056,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
 
   /** 차단하면 그 사람 글이 피드에서 사라져야 "차단됐다"는 게 보입니다. */
   const signOut = async () => {
+    if (!canLeaveAvatarEditor()) return;
     try {
       await api("/api/auth/logout", { method: "POST", body: JSON.stringify({}) });
     } catch {
@@ -1191,6 +1243,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
           stack = [{ kind: "notifications" }];
         } else if (route.routeKind === "profile-edit" && route.section === "learn") {
           stack = [{ kind: "profile-edit" }];
+        } else if (route.routeKind === "avatar-edit" && route.section === "learn") {
+          stack = [{ kind: "avatar-edit" }];
         } else if (route.routeKind === "blocked" && route.section === "learn") {
           stack = [{ kind: "blocked" }];
         }
@@ -1207,7 +1261,25 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     };
 
     const frame = window.requestAnimationFrame(() => void restoreFromLocation(window.history.state));
-    const onPopState = (event: PopStateEvent) => { void restoreFromLocation(event.state); };
+    const onPopState = (event: PopStateEvent) => {
+      const guard = avatarNavigationGuard.current;
+      if (guard.active && guard.saving) {
+        writeHistorySnapshot("push", guard.snapshot, "#learn/avatar-edit");
+        return;
+      }
+      if (guard.active && guard.dirty) {
+        const confirmed = window.confirm(`${t("변경 내용을 버릴까요?")}\n${t("저장하지 않은 캐릭터 변경 내용이 사라져요.")}`);
+        if (!confirmed) {
+          /* popstate 시점에는 주소만 이미 이동한 상태입니다. 현재 편집 스냅샷을
+             다시 기록해 URL과 화면을 원래 캐릭터 편집기로 맞춥니다. */
+          writeHistorySnapshot("push", guard.snapshot, "#learn/avatar-edit");
+          return;
+        }
+        guard.dirty = false;
+        setAvatarEditorDirty(false);
+      }
+      void restoreFromLocation(event.state);
+    };
     window.addEventListener("popstate", onPopState);
     return () => {
       disposed = true;
@@ -1423,7 +1495,20 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     });
   };
 
+  const canLeaveAvatarEditor = () => {
+    if (detail?.kind !== "avatar-edit") return true;
+    if (avatarEditorSaving) return false;
+    if (!avatarEditorDirty) return true;
+    const confirmed = window.confirm(`${t("변경 내용을 버릴까요?")}\n${t("저장하지 않은 캐릭터 변경 내용이 사라져요.")}`);
+    if (confirmed) {
+      avatarNavigationGuard.current.dirty = false;
+      setAvatarEditorDirty(false);
+    }
+    return confirmed;
+  };
+
   const pushDetailRoute = (next: ActiveDetailRoute, nextSection: Section, hash: string) => {
+    if (!canLeaveAvatarEditor()) return;
     const currentStack = [...detailStack];
     writeHistorySnapshot("replace", { section, stack: currentStack }, window.location.href);
     const nextStack = [...currentStack, next];
@@ -1460,12 +1545,56 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
     const hash =
       top?.kind === "post" ? `#${section}/post/${top.post.id}`
       : top?.kind === "profile" ? `#${section}/user/${top.partner.id}`
+      : top?.kind === "profile-edit" ? "#learn/profile-edit"
+      : top?.kind === "avatar-edit" ? "#learn/avatar-edit"
       : `#${section}`;
     setDetailStack(next);
     writeHistorySnapshot("replace", { section, stack: next }, hash);
   };
 
+  const openAvatarEditor = () => {
+    avatarNavigationGuard.current.dirty = false;
+    avatarNavigationGuard.current.saving = false;
+    setAvatarEditorDirty(false);
+    setAvatarEditorSaving(false);
+    pushDetailRoute({ kind: "avatar-edit" }, "learn", "#learn/avatar-edit");
+  };
+
+  const openProfileEditor = () => {
+    setProfileEditDraft(profile);
+    pushDetailRoute({ kind: "profile-edit" }, "learn", "#learn/profile-edit");
+  };
+
+  const closeAvatarEditor = () => {
+    if (!canLeaveAvatarEditor()) return;
+    closeDetail();
+  };
+
+  const saveAvatar = async (mode: AvatarMode, config: AvatarConfig): Promise<boolean> => {
+    try {
+      const updated = await api<ApiProfile>("/api/profile/avatar", {
+        method: "PATCH",
+        body: JSON.stringify({ mode, config }),
+      });
+      onProfileUpdated(updated);
+      avatarNavigationGuard.current.dirty = false;
+      avatarNavigationGuard.current.saving = false;
+      setAvatarEditorDirty(false);
+      showToast(mode === "character" ? t("캐릭터를 저장했어요") : t("프로필 사진으로 돌아왔어요"));
+      closeDetail();
+      setAvatarEditorSaving(false);
+      void reload();
+      return true;
+    } catch (caught) {
+      avatarNavigationGuard.current.saving = false;
+      setAvatarEditorSaving(false);
+      showToast(caught instanceof Error ? caught.message : t("캐릭터를 저장하지 못했어요."));
+      return false;
+    }
+  };
+
   const goToSection = (next: Section) => {
+    if (!canLeaveAvatarEditor()) return;
     setDetailStack([]);
     setSection(next);
     if (next === "chats") setMobileThreadOpen(false);
@@ -2131,7 +2260,7 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
         <div className="sidebar-spacer" />
         <div className="sidebar-profile-row">
           <button className="sidebar-profile" type="button" aria-label={t("내 프로필")} onClick={() => goToSection("learn")}>
-            <Avatar name={profile.name} flag={me.country?.flag ?? "🌐"} accent="violet" size="sm" online photo={me.avatarUrl} countryCode={me.country?.code} />
+            <Avatar name={profile.name} flag={me.country?.flag ?? "🌐"} accent="violet" size="sm" online photo={me.avatarUrl} avatarMode={me.avatarMode} avatarConfig={me.avatarConfig} countryCode={me.country?.code} />
             <span><strong>{profile.name}</strong><small>{tx(languageName(me.nativeLanguages?.[0] ?? "ko"))} → {tx(languageName(me.learningLanguages?.[0]?.code ?? "en"))}</small></span>
           </button>
           <MenuPopover
@@ -2191,6 +2320,15 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 <ArrowLeft size={20} />
               </button>
               <span className="topbar-title">{t("프로필 편집")}</span>
+            </div>
+          ) : null}
+
+          {detail?.kind === "avatar-edit" ? (
+            <div className="topbar-feed">
+              <button type="button" className="topbar-back" disabled={avatarEditorSaving} onClick={closeAvatarEditor} aria-label={t("뒤로")}>
+                <ArrowLeft size={20} />
+              </button>
+              <span className="topbar-title">{t("캐릭터 꾸미기")}</span>
             </div>
           ) : null}
 
@@ -2296,8 +2434,28 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
 
             {detail?.kind === "profile-edit" ? (
               <ProfileEditView
-                value={profile}
-                onSave={(next) => { closeDetail(); void saveProfile(next); }}
+                value={profileEditDraft ?? profile}
+                savedValue={profile}
+                me={me}
+                onEditAvatar={openAvatarEditor}
+                onChange={setProfileEditDraft}
+                onSave={(next) => { setProfileEditDraft(null); closeDetail(); void saveProfile(next); }}
+              />
+            ) : null}
+
+            {detail?.kind === "avatar-edit" ? (
+              <AvatarEditorView
+                name={profile.name}
+                mode={me.avatarMode}
+                value={me.avatarConfig}
+                photo={me.avatarUrl}
+                countryCode={me.country?.code}
+                saving={avatarEditorSaving}
+                onDirtyChange={handleAvatarDirtyChange}
+                onSavingChange={handleAvatarSavingChange}
+                onCancel={closeAvatarEditor}
+                onSave={(config) => saveAvatar("character", config)}
+                onUsePhoto={(config) => saveAvatar("photo", config)}
               />
             ) : null}
 
@@ -2452,7 +2610,8 @@ function LingoLoopScreens({ me, onSignedOut }: { me: ApiProfile; onSignedOut: ()
                 onStartReview={() => setModal({ type: "review", items: savedItems })}
                 onOpenPost={openPost}
                 onToast={showToast}
-                onEditProfile={() => pushDetailRoute({ kind: "profile-edit" }, "learn", "#learn/profile-edit")}
+                onEditProfile={openProfileEditor}
+                onEditAvatar={openAvatarEditor}
                 savedItems={savedItems}
                 onSavePhrase={savePhrase}
                 savedCount={savedItems.length}
@@ -2621,7 +2780,7 @@ function PartnerCard({
             카드에 담긴 것만 보고 고르는 게 맞습니다. 프로필은 마음이 통해 대화가
             열린 뒤(또는 커뮤니티에서 글을 보고) 들어갑니다. */}
         <div className="single-match-person">
-          <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
+          <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} />
           <div>
             <span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={17} className="verified" aria-label={t("인증됨")} /> : null}</span>
             <p><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.country)}{partner.city ? ` · ${partner.city}` : ""}</p>
@@ -3054,7 +3213,7 @@ function PostDetailView({
   const renderReply = (reply: PostReply, isChild: boolean) => (
     <article className={`thread-item reply ${isChild ? "child" : ""}`} key={reply.id}>
       <div className="thread-gutter">
-        <Avatar name={reply.author} flag={reply.flag} accent={reply.accent} size={isChild ? "xs" : "sm"} photo={reply.photo} countryCode={reply.countryCode} />
+        <Avatar name={reply.author} flag={reply.flag} accent={reply.accent} size={isChild ? "xs" : "sm"} photo={reply.photo} avatarMode={reply.avatarMode} avatarConfig={reply.avatarConfig} countryCode={reply.countryCode} />
       </div>
       <div className="thread-body">
         <div className="thread-head">
@@ -3098,7 +3257,7 @@ function PostDetailView({
       <article className="thread-item">
         <div className="thread-gutter">
           <button type="button" className="thread-avatar" onClick={() => onProfile(post.authorId)} aria-label={t("{author} 프로필", { author: post.author })}>
-            <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} countryCode={post.countryCode} />
+            <Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} avatarMode={post.avatarMode} avatarConfig={post.avatarConfig} countryCode={post.countryCode} />
           </button>
         </div>
         <div className="thread-body">
@@ -3152,7 +3311,7 @@ function PostDetailView({
             <button type="button" onClick={() => setReplyTo(null)} aria-label={t("대댓글 취소")}><X size={13} /></button>
           </span>
         ) : (
-          <Avatar name={me.name} accent="violet" size="sm" photo={me.avatarUrl} countryCode={me.country?.code} />
+          <Avatar name={me.name} accent="violet" size="sm" photo={me.avatarUrl} avatarMode={me.avatarMode} avatarConfig={me.avatarConfig} countryCode={me.country?.code} />
         )}
         <textarea
           id="reply-input"
@@ -3297,7 +3456,7 @@ function ProfileDetailView({
           <p className="profile-head-handle">{partner.handle}{partner.city ? ` · ${partner.city}` : ""}</p>
           <LanguageExchange native={partner.nativeCode} learning={partner.learningCode} level={partner.learningLevel} />
         </div>
-        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
+        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} />
       </header>
 
       <p className="profile-head-bio">{partner.bio}</p>
@@ -3375,7 +3534,7 @@ function ProfileDetailView({
               <div className="similar-partner-row">
                 {similar.map((person) => (
                   <button className="similar-partner-card" type="button" key={person.id} onClick={() => onOpenProfile(person)}>
-                    <Avatar name={person.name} flag={person.flag} accent={person.accent} size="lg" online={person.online} photo={person.photo} countryCode={person.countryCode} />
+                    <Avatar name={person.name} flag={person.flag} accent={person.accent} size="lg" online={person.online} photo={person.photo} avatarMode={person.avatarMode} avatarConfig={person.avatarConfig} countryCode={person.countryCode} />
                     <strong>{person.name}</strong>
                     <LanguageExchange native={person.nativeCode} learning={person.learningCode} level={person.learningLevel} />
                   </button>
@@ -3454,16 +3613,36 @@ function similarPartners(partner: Partner, directory: Partner[], limit = 6): Par
  */
 function ProfileEditView({
   value,
+  savedValue,
+  me,
+  onEditAvatar,
+  onChange,
   onSave,
 }: {
   value: ProfileDraft;
+  savedValue: ProfileDraft;
+  me: ApiProfile;
+  onEditAvatar: () => void;
+  onChange: (next: ProfileDraft) => void;
   onSave: (next: ProfileDraft) => void;
 }) {
-  const [draft, setDraft] = useState<ProfileDraft>(value);
-  const changed = JSON.stringify(draft) !== JSON.stringify(value);
+  const draft = value;
+  const changed = JSON.stringify(draft) !== JSON.stringify(savedValue);
 
   return (
     <div className="view detail-view">
+      <button className="profile-avatar-edit-row" type="button" onClick={onEditAvatar}>
+        <Avatar
+          name={draft.name}
+          size="lg"
+          photo={me.avatarUrl}
+          avatarMode={me.avatarMode}
+          avatarConfig={me.avatarConfig}
+          countryCode={me.country?.code}
+        />
+        <span><strong>{t("내 캐릭터")}</strong><small>{t("프로필에서 보일 나만의 모습을 만들어요")}</small></span>
+        <ChevronRight size={18} />
+      </button>
       <div className="form-section">
         <label className="field-label" htmlFor="profile-name">{t("이름")}</label>
         <input
@@ -3471,7 +3650,7 @@ function ProfileEditView({
           className="text-input"
           value={draft.name}
           maxLength={LIMITS.profileName}
-          onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+          onChange={(event) => onChange({ ...draft, name: event.target.value })}
         />
       </div>
       <div className="form-section">
@@ -3482,7 +3661,7 @@ function ProfileEditView({
           rows={4}
           value={draft.bio}
           maxLength={LIMITS.profileBio}
-          onChange={(event) => setDraft({ ...draft, bio: event.target.value })}
+          onChange={(event) => onChange({ ...draft, bio: event.target.value })}
         />
         <small className="field-hint">{t("{n}/{max}자", { n: draft.bio.length, max: LIMITS.profileBio })}</small>
       </div>
@@ -3496,7 +3675,7 @@ function ProfileEditView({
           max={100}
           value={draft.age || ""}
           placeholder={t("숫자만")}
-          onChange={(event) => setDraft({ ...draft, age: Number(event.target.value) || 0 })}
+          onChange={(event) => onChange({ ...draft, age: Number(event.target.value) || 0 })}
         />
         <small className="field-hint">{t("만 18세부터 쓸 수 있어요.")}</small>
       </div>
@@ -3510,7 +3689,7 @@ function ProfileEditView({
               key={value}
               className={draft.gender === value ? "chip active" : "chip"}
               aria-pressed={draft.gender === value}
-              onClick={() => setDraft({ ...draft, gender: value })}
+              onClick={() => onChange({ ...draft, gender: value })}
             >
               {tx(label)}
             </button>
@@ -3527,7 +3706,7 @@ function ProfileEditView({
               key={option.code}
               className={draft.nativeCode === option.code ? "chip active" : "chip"}
               aria-pressed={draft.nativeCode === option.code}
-              onClick={() => setDraft({ ...draft, nativeCode: option.code })}
+              onClick={() => onChange({ ...draft, nativeCode: option.code })}
             >
               {tx(option.label)}
             </button>
@@ -3544,7 +3723,7 @@ function ProfileEditView({
               key={option.code}
               className={draft.learningCode === option.code ? "chip active" : "chip"}
               aria-pressed={draft.learningCode === option.code}
-              onClick={() => setDraft({ ...draft, learningCode: option.code })}
+              onClick={() => onChange({ ...draft, learningCode: option.code })}
             >
               {tx(option.label)}
             </button>
@@ -3561,7 +3740,7 @@ function ProfileEditView({
               key={level}
               className={draft.learningLevel === level ? "level-option active" : "level-option"}
               aria-pressed={draft.learningLevel === level}
-              onClick={() => setDraft({ ...draft, learningLevel: level })}
+              onClick={() => onChange({ ...draft, learningLevel: level })}
             >
               <span className="level-dots">
                 {[1, 2, 3, 4, 5].map((step) => <b key={step} className={step <= index + 1 ? "on" : ""} />)}
@@ -3579,7 +3758,7 @@ function ProfileEditView({
           className="text-input"
           value={draft.goal}
           maxLength={LIMITS.profileGoal}
-          onChange={(event) => setDraft({ ...draft, goal: event.target.value })}
+          onChange={(event) => onChange({ ...draft, goal: event.target.value })}
         />
       </div>
       <div className="form-section">
@@ -3588,14 +3767,14 @@ function ProfileEditView({
           <button
             type="button"
             className={draft.visibility === "public" ? "active" : ""}
-            onClick={() => setDraft({ ...draft, visibility: "public" })}
+            onClick={() => onChange({ ...draft, visibility: "public" })}
           >
             {t("전체 공개")}
           </button>
           <button
             type="button"
             className={draft.visibility === "partners" ? "active" : ""}
-            onClick={() => setDraft({ ...draft, visibility: "partners" })}
+            onClick={() => onChange({ ...draft, visibility: "partners" })}
           >
             {t("매칭된 파트너만")}
           </button>
@@ -3606,6 +3785,167 @@ function ProfileEditView({
           {t("저장")}
         </button>
       </div>
+    </div>
+  );
+}
+
+const avatarCategoryLabels: Record<AvatarCategory, MessageKey> = {
+  skinTone: msg("피부색"),
+  face: msg("얼굴"),
+  hair: msg("헤어스타일"),
+  hairColor: msg("머리 색상"),
+  eyes: msg("눈"),
+  mouth: msg("입"),
+  outfit: msg("의상"),
+  outfitColor: msg("의상 색상"),
+  accessory: msg("액세서리"),
+  background: msg("배경"),
+};
+
+/**
+ * Full-screen character editor shared by desktop and mobile layouts.
+ * The main preview remains visible while the option grid scrolls on narrow screens.
+ */
+function AvatarEditorView({
+  name,
+  mode,
+  value,
+  photo,
+  countryCode,
+  saving,
+  onDirtyChange,
+  onSavingChange,
+  onCancel,
+  onSave,
+  onUsePhoto,
+}: {
+  name: string;
+  mode?: AvatarMode;
+  value?: AvatarConfig | null;
+  photo?: string;
+  countryCode?: string;
+  saving: boolean;
+  onDirtyChange: (dirty: boolean) => void;
+  onSavingChange: (saving: boolean) => void;
+  onCancel: () => void;
+  onSave: (config: AvatarConfig) => Promise<boolean>;
+  onUsePhoto: (config: AvatarConfig) => Promise<boolean>;
+}) {
+  const initial = useMemo(() => normalizeAvatarConfig(value || DEFAULT_AVATAR_CONFIG), [value]);
+  const [draft, setDraft] = useState<AvatarConfig>(initial);
+  const [category, setCategory] = useState<AvatarCategory>("skinTone");
+  const active = AVATAR_CATEGORIES.find((item) => item.key === category) || AVATAR_CATEGORIES[0];
+  const configChanged = JSON.stringify(draft) !== JSON.stringify(initial);
+  const changed = configChanged || mode !== "character";
+
+  useEffect(() => {
+    onDirtyChange(configChanged);
+    return () => onDirtyChange(false);
+  }, [configChanged, onDirtyChange]);
+
+  useEffect(() => {
+    if (!configChanged && !saving) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [configChanged, saving]);
+
+  const update = (next: AvatarConfig) => {
+    setDraft(normalizeAvatarConfig(next));
+  };
+
+  const save = async (nextMode: AvatarMode) => {
+    if (saving) return;
+    onSavingChange(true);
+    const succeeded = nextMode === "character" ? await onSave(draft) : await onUsePhoto(draft);
+    if (!succeeded) onSavingChange(false);
+  };
+
+  return (
+    <div className="view detail-view avatar-editor-view">
+      <section className="avatar-editor-preview" aria-label={t("캐릭터 미리보기")}>
+        <div className="avatar-editor-preview-image">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={avatarDataUri(draft)}
+            alt={`${name} · ${t("캐릭터 미리보기")}`}
+          />
+        </div>
+        <div className="avatar-editor-intro">
+          <strong>{t("나만의 프로필 캐릭터를 만들어보세요")}</strong>
+          <small>{t("고른 캐릭터는 프로필, 커뮤니티와 대화에 함께 표시돼요.")}</small>
+        </div>
+        <div className="avatar-editor-quick-actions">
+          <button type="button" className="secondary-button" disabled={saving} onClick={() => update(randomAvatarConfig(`${Date.now()}-${Math.random()}`))}>
+            <RefreshCw size={16} /> {t("랜덤 만들기")}
+          </button>
+          <button type="button" className="secondary-button" disabled={saving || JSON.stringify(draft) === JSON.stringify(DEFAULT_AVATAR_CONFIG)} onClick={() => update(DEFAULT_AVATAR_CONFIG)}>
+            <RotateCcw size={16} /> {t("기본으로")}
+          </button>
+        </div>
+      </section>
+
+      <div className="avatar-category-tabs" role="group" aria-label={t("꾸밀 항목")}>
+        {AVATAR_CATEGORIES.map((item) => (
+          <button
+            type="button"
+            key={item.key}
+            aria-pressed={category === item.key}
+            className={category === item.key ? "active" : ""}
+            onClick={() => setCategory(item.key)}
+          >
+            {t(avatarCategoryLabels[item.key])}
+          </button>
+        ))}
+      </div>
+
+      <section className="avatar-option-section" aria-labelledby={`avatar-category-${active.key}`}>
+        <h2 id={`avatar-category-${active.key}`}>{t(avatarCategoryLabels[active.key])}</h2>
+        <div className="avatar-option-grid" role="radiogroup" aria-label={t(avatarCategoryLabels[active.key])}>
+          {active.options.map((option, index) => {
+            const selected = draft[active.key] === option.id;
+            const optionLabel = option.id === "accessory-none" ? t("없음") : t("스타일 {n}", { n: index + 1 });
+            const preview = normalizeAvatarConfig({ ...draft, [active.key]: option.id });
+            return (
+              <button
+                type="button"
+                role="radio"
+                key={option.id}
+                className={selected ? "avatar-option active" : "avatar-option"}
+                aria-checked={selected}
+                aria-label={`${t(avatarCategoryLabels[active.key])} · ${optionLabel}`}
+                disabled={saving}
+                onClick={() => update(preview)}
+              >
+                {"swatch" in option && option.swatch ? <span className="avatar-option-swatch" style={{ background: option.swatch }} /> : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={avatarDataUri(preview)} alt="" />
+                )}
+                <small>{optionLabel}</small>
+                {selected ? <span className="avatar-option-check" aria-hidden="true"><Check size={13} /></span> : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <footer className="avatar-editor-footer">
+        {photo ? (
+          <button className="quiet-button avatar-use-photo" type="button" disabled={saving || mode !== "character"} onClick={() => void save("photo")}>
+            <span className="avatar-photo-preview"><Avatar name={name} photo={photo} countryCode={countryCode} size="xs" /></span>
+            {t("기존 프로필 사진 사용")}
+          </button>
+        ) : <span />}
+        <div>
+          <button className="secondary-button" type="button" disabled={saving} onClick={onCancel}>{t("취소")}</button>
+          <button className="primary-button" type="button" disabled={saving || !changed} onClick={() => void save("character")}>
+            {saving ? t("저장 중…") : t("캐릭터 저장")}
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }
@@ -3630,7 +3970,8 @@ function BlockedListView({
   /* 차단한 사람은 명부(/api/partners)에서 빠지므로 이름을 찾지 못할 수 있습니다.
      그때는 id 를 그대로 보여주는 대신 "차단한 사용자"라고 적습니다 — 화면에 uid 가
      찍히면 무엇을 푸는 건지 알 수 없습니다. */
-  const nameOf = (id: string) => directory.find((item) => item.id === id)?.name ?? t("차단한 사용자");
+  const personOf = (id: string) => directory.find((item) => item.id === id);
+  const nameOf = (id: string) => personOf(id)?.name ?? t("차단한 사용자");
   const [tab, setTab] = useState<"blocked" | "hidden">("blocked");
   const ids = tab === "blocked" ? blocked : hidden;
 
@@ -3652,22 +3993,32 @@ function BlockedListView({
         </div>
       ) : (
         <ul className="blocked-list">
-          {ids.map((id) => (
-            <li key={`${tab}-${id}`}>
-              <Avatar name={nameOf(id)} size="sm" />
-              <span>
-                <strong>{nameOf(id)}</strong>
-                <small>{tab === "blocked" ? t("차단함") : t("글 숨김")}</small>
-              </span>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => (tab === "blocked" ? onUnblock(id) : onUnhide(id))}
-              >
-                {tab === "blocked" ? t("차단 해제") : t("다시 보기")}
-              </button>
-            </li>
-          ))}
+          {ids.map((id) => {
+            const person = personOf(id);
+            return (
+              <li key={`${tab}-${id}`}>
+                <Avatar
+                  name={nameOf(id)}
+                  size="sm"
+                  photo={person?.photo}
+                  avatarMode={person?.avatarMode}
+                  avatarConfig={person?.avatarConfig}
+                  countryCode={person?.countryCode}
+                />
+                <span>
+                  <strong>{nameOf(id)}</strong>
+                  <small>{tab === "blocked" ? t("차단함") : t("글 숨김")}</small>
+                </span>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => (tab === "blocked" ? onUnblock(id) : onUnhide(id))}
+                >
+                  {tab === "blocked" ? t("차단 해제") : t("다시 보기")}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -3906,7 +4257,7 @@ function PostCard({
         <article className="feed-post">
           <header className="post-header">
             <button className="post-author" type="button" onClick={() => onProfile(post.authorId)}>
-              <Avatar name={post.author} accent={post.accent} size="md" photo={post.photo} countryCode={post.countryCode} />
+              <Avatar name={post.author} accent={post.accent} size="md" photo={post.photo} avatarMode={post.avatarMode} avatarConfig={post.avatarConfig} countryCode={post.countryCode} />
               <span>
                 <strong>{post.author}<AgeGender age={post.age} gender={post.gender} /></strong>
                 <LanguageExchange native={post.nativeCode} learning={post.learningCode} level={post.learningLevel} />
@@ -4444,7 +4795,7 @@ function ChatsView({
                 className={`conversation-item ${selected?.id === conversation.id ? "active" : ""}`}
                 onClick={() => onSelect(conversation.id)}
               >
-                <Avatar name={conversation.name} flag={conversation.flag} accent={conversation.accent} size="lg" online={conversation.online} photo={conversation.photo} countryCode={conversation.countryCode} />
+                <Avatar name={conversation.name} flag={conversation.flag} accent={conversation.accent} size="lg" online={conversation.online} photo={conversation.photo} avatarMode={conversation.avatarMode} avatarConfig={conversation.avatarConfig} countryCode={conversation.countryCode} />
                 <span className="conversation-copy">
                   <span className="conversation-name"><strong>{conversation.name}</strong>{mutedChatIds.has(conversation.id) ? <BellOff size={12} className="conversation-muted" /> : null}<small>{tx(conversation.time)}</small></span>
                   <span className={conversation.typing ? "typing" : ""}>{conversation.typing ? t("입력 중…") : conversation.preview}</span>
@@ -4474,7 +4825,7 @@ function ChatsView({
         <header className="thread-header">
           <button className="mobile-back" type="button" onClick={onBack} aria-label={t("대화 목록으로")}><ArrowLeft size={21} /></button>
           <button className="thread-person" type="button" onClick={onProfile}>
-            <Avatar name={selected.name} flag={selected.flag} accent={selected.accent} size="sm" online={selected.online} photo={selected.photo} countryCode={selected.countryCode} />
+            <Avatar name={selected.name} flag={selected.flag} accent={selected.accent} size="sm" online={selected.online} photo={selected.photo} avatarMode={selected.avatarMode} avatarConfig={selected.avatarConfig} countryCode={selected.countryCode} />
             {/* 교환 언어는 프로필에 있습니다. 여기서는 지금 말을 걸어도 되는 시간인지가
                 더 궁금하므로 상대 지역의 시각을 적습니다. */}
             <span><strong>{selected.name}</strong>{partnerClock ? <small>{t("현지 {clock}", { clock: partnerClock })}</small> : null}</span>
@@ -4544,7 +4895,7 @@ function ChatsView({
                 <Fragment key={message.id}>
                 {mark}
                 <div className="message-row correction-message">
-                  <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} />
+                  <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} avatarMode={selected.avatarMode} avatarConfig={selected.avatarConfig} countryCode={selected.countryCode} />
                   <div className="chat-correction-card">
                     <span className="correction-label"><PenLine size={14} /> {t("{name}님이 문장을 고쳤어요", { name: selected.name })}</span>
                     <p className="before">{message.correction.original}</p>
@@ -4561,7 +4912,7 @@ function ChatsView({
               <Fragment key={message.id}>
               {mark}
               <div className={`message-row ${message.mine ? "mine" : "theirs"}`}>
-                {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} /> : null}
+                {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} avatarMode={selected.avatarMode} avatarConfig={selected.avatarConfig} countryCode={selected.countryCode} /> : null}
                 <div className="message-stack">
                   <div className={message.kind ? "message-bubble message-bubble-media" : "message-bubble"}>
                     {message.voice ? <button className="voice-message" type="button" onClick={() => { if (message.text && !speakText(message.text)) onToast(t("이 브라우저에서는 음성 재생을 지원하지 않아요")); }}><span className="play-dot"><Play size={13} fill="currentColor" /></span><span className="waveform"><i /><i /><i /><i /><i /><i /><i /><i /><i /></span><small>{message.voice}</small></button> : null}
@@ -4595,7 +4946,7 @@ function ChatsView({
               </Fragment>
             );
           })}
-          {selected.typing ? <div className="typing-indicator"><Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} countryCode={selected.countryCode} /><span><i /><i /><i /></span><small>{t("{name}님이 입력 중", { name: selected.name })}</small></div> : null}
+          {selected.typing ? <div className="typing-indicator"><Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} avatarMode={selected.avatarMode} avatarConfig={selected.avatarConfig} countryCode={selected.countryCode} /><span><i /><i /><i /></span><small>{t("{name}님이 입력 중", { name: selected.name })}</small></div> : null}
         </div>
 
         {selectedIsRequest ? <div className="request-composer-lock"><LockKeyhole size={17} /><span><strong>{tx(msg("요청을 수락하면 답장할 수 있어요"))}</strong><small>{tx(msg("삭제하거나 수락해도 상대에게 별도 알림은 가지 않아요."))}</small></span></div> : <form className="message-composer" onSubmit={onSend}>
@@ -4937,6 +5288,7 @@ function LearnView({
   counts,
   onToast,
   onEditProfile,
+  onEditAvatar,
   savedItems,
   onSavePhrase,
   onOpenPost,
@@ -4954,6 +5306,7 @@ function LearnView({
   /** 팔로잉·팔로워 수. 못 받아왔으면 숫자를 감춥니다. */
   counts?: { following: number; followers: number; posts: number };
   onEditProfile: () => void;
+  onEditAvatar: () => void;
   savedItems: SavedPhrase[];
   onSavePhrase: (item: SavedPhrase) => void;
   onOpenPost: (post: FeedPost) => void;
@@ -4990,7 +5343,20 @@ function LearnView({
             level={me.learningLanguages?.[0]?.level}
           />
         </div>
-        <Avatar name={profileName} flag={me.country?.flag ?? "🌐"} accent="violet" size="xl" online photo={me.avatarUrl} countryCode={me.country?.code} />
+        <button className="profile-avatar-button" type="button" onClick={onEditAvatar} aria-label={t("캐릭터 꾸미기")}>
+          <Avatar
+            name={profileName}
+            flag={me.country?.flag ?? "🌐"}
+            accent="violet"
+            size="xl"
+            online
+            photo={me.avatarUrl}
+            avatarMode={me.avatarMode}
+            avatarConfig={me.avatarConfig}
+            countryCode={me.country?.code}
+          />
+          <span aria-hidden="true"><PenLine size={13} /></span>
+        </button>
       </header>
 
       <p className="profile-head-bio">{profileBio}</p>
@@ -5073,7 +5439,16 @@ function LearnView({
             {corrections.map((item) => (
               <li key={item.id}>
                 <div className="received-correction-head">
-                  <Avatar name={item.from ?? "?"} flag={item.fromFlag} accent={accentFor(item.id)} size="xs" />
+                  <Avatar
+                    name={item.from ?? "?"}
+                    flag={item.fromFlag}
+                    accent={accentFor(item.id)}
+                    size="xs"
+                    photo={item.fromAvatarUrl}
+                    avatarMode={item.fromAvatarMode}
+                    avatarConfig={item.fromAvatarConfig}
+                    countryCode={item.fromCountryCode}
+                  />
                   <span><strong>{item.from ?? t("알 수 없는 상대")}</strong><small>{liveRelativeTime(item.createdAt)}</small></span>
                 </div>
                 <p className="before">{item.original}</p>
@@ -5436,7 +5811,20 @@ function NotificationsView({
                 className={notification.readAt ? "" : "unread"}
                 onClick={() => { onRead(notification); onOpen(notification); }}
               >
-                <span className={`notification-icon accent-${presentation.accent}`}><Icon size={17} /></span>
+                {notification.actor ? (
+                  <span className="notification-avatar">
+                    <Avatar
+                      name={notification.actor.name}
+                      accent={presentation.accent}
+                      size="sm"
+                      photo={notification.actor.avatarUrl}
+                      avatarMode={notification.actor.avatarMode}
+                      avatarConfig={notification.actor.avatarConfig}
+                      countryCode={notification.actor.country?.code}
+                    />
+                    <i className={`notification-avatar-kind accent-${presentation.accent}`} aria-hidden="true"><Icon size={11} /></i>
+                  </span>
+                ) : <span className={`notification-icon accent-${presentation.accent}`}><Icon size={17} /></span>}
                 <span>
                   <strong>{presentation.title}</strong>
                   <small>{notification.excerpt || t("눌러서 확인해 보세요.")}</small>
@@ -5516,7 +5904,7 @@ function LikesModal({
           {list.map(({ partner, time, note }) => (
             <li key={partner.id}>
               <button type="button" className="likes-row" onClick={() => onProfile(partner)}>
-                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
+                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} />
                 <span className="likes-copy">
                   <strong>{partner.name}</strong>
                   <LikeMeta partner={partner} time={time} />
@@ -5593,7 +5981,7 @@ function NewChatModal({
           {candidates.map((partner) => (
             <li key={partner.id}>
               <button type="button" onClick={() => onPick(partner)}>
-                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
+                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} />
                 <span>
                   <strong>{partner.name}</strong>
                   {/* 관심사는 코드가 아니라 지금 언어의 이름으로 보여줍니다. */}
@@ -5640,7 +6028,7 @@ function PartnerListModal({
           return (
             <li key={partner.id} className={isCurrent ? "current" : ""}>
               <button type="button" className="partner-list-row" onClick={() => onJump(position)}>
-                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
+                <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} />
                 <span className="partner-list-copy">
                   <strong>{partner.name}</strong>
                   <small>{t("{native} 가르치고 {learning} 배워요", { native: tx(partner.native), learning: tx(partner.learning) })}</small>
@@ -5673,7 +6061,7 @@ function ProfileModal({ partner, following, onToggleFollow, onStartChat, onRepor
     <div className="profile-modal-content">
       <div className={`profile-cover cover-${partner.accent}`}><span className="cover-pattern" /></div>
       <div className="profile-modal-head">
-        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} />
+        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} />
         <div><span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={18} className="verified" /> : null}</span><p>{partner.handle} · {partner.city}</p></div>
         <div className="profile-head-actions"><button className="primary-button" type="button" onClick={() => onStartChat(partner)}><MessageCircle size={17} /> {t("대화 시작")}</button><button className={following ? "secondary-button active" : "secondary-button"} type="button" aria-pressed={following} onClick={() => onToggleFollow(partner)}><UserPlus size={16} /> {following ? t("팔로잉") : t("팔로우")}</button><button className="secondary-button" type="button" onClick={onReport}><Flag size={16} /> {t("신고")}</button></div>
       </div>
@@ -6364,14 +6752,14 @@ function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, 
       {partnerResults.length || nothingFound || !needle ? (
       <section>
         <h3>{query ? t("“{query}” 검색 결과", { query }) : t("추천 파트너")}</h3>
-        {partnerResults.map((partner) => <button className="search-result" type="button" key={partner.id} aria-label={t("{name} 프로필 보기", { name: partner.name })} onClick={() => onOpenProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} countryCode={partner.countryCode} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning} · {partner.interests.join(" · ")}</small></span><Pill tone="success">{partner.compatibility}%</Pill><ChevronRight size={16} /></button>)}
+        {partnerResults.map((partner) => <button className="search-result" type="button" key={partner.id} aria-label={t("{name} 프로필 보기", { name: partner.name })} onClick={() => onOpenProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning} · {partner.interests.join(" · ")}</small></span><Pill tone="success">{partner.compatibility}%</Pill><ChevronRight size={16} /></button>)}
         {nothingFound ? <div className="empty-search"><Search size={28} /><strong>{t("검색 결과가 없어요")}</strong><p>{t("언어나 관심사를 더 짧게 입력해보세요.")}</p></div> : null}
       </section>
       ) : null}
       {postResults.length ? (
         <section>
           <h3>{t("게시물")}</h3>
-          {postResults.map((post) => <button className="search-result" type="button" key={post.id} onClick={() => onOpenPost(post)}><Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} countryCode={post.countryCode} /><span><strong>{post.author}</strong><small>{post.text.length > 64 ? `${post.text.slice(0, 64)}…` : post.text}</small></span><ChevronRight size={16} /></button>)}
+          {postResults.map((post) => <button className="search-result" type="button" key={post.id} onClick={() => onOpenPost(post)}><Avatar name={post.author} flag={post.flag} accent={post.accent} size="sm" photo={post.photo} avatarMode={post.avatarMode} avatarConfig={post.avatarConfig} countryCode={post.countryCode} /><span><strong>{post.author}</strong><small>{post.text.length > 64 ? `${post.text.slice(0, 64)}…` : post.text}</small></span><ChevronRight size={16} /></button>)}
         </section>
       ) : null}
       {phraseResults.length ? (
@@ -6705,13 +7093,13 @@ function ExchangeModal({
       </header>
       <div className="exchange-partners">
         <span>
-          <Avatar name={me.name} accent="violet" size="md" photo={me.avatarUrl} countryCode={me.country?.code} />
+          <Avatar name={me.name} accent="violet" size="md" photo={me.avatarUrl} avatarMode={me.avatarMode} avatarConfig={me.avatarConfig} countryCode={me.country?.code} />
           <strong>{me.name}</strong>
           <small>{t("{language} 연습", { language: myLanguage })}</small>
         </span>
         <i><Languages size={18} /></i>
         <span>
-          <Avatar name={partnerName} accent={partner?.accent ?? "coral"} size="md" photo={partner?.photo} countryCode={partner?.countryCode} />
+          <Avatar name={partnerName} accent={partner?.accent ?? "coral"} size="md" photo={partner?.photo} avatarMode={partner?.avatarMode} avatarConfig={partner?.avatarConfig} countryCode={partner?.countryCode} />
           <strong>{partnerName}</strong>
           <small>{t("{language} 연습", { language: theirLanguage })}</small>
         </span>
@@ -6981,5 +7369,9 @@ function AuthGate() {
   }
 
   // 계정이 바뀌면 화면 상태를 처음부터 다시 만듭니다.
-  return <LingoLoopScreens key={me.id} me={me} onSignedOut={() => { setMe(null); setState("out"); }} />;
+  return <LingoLoopScreens key={me.id}
+    me={me}
+    onProfileUpdated={setMe}
+    onSignedOut={() => { setMe(null); setState("out"); }}
+  />;
 }

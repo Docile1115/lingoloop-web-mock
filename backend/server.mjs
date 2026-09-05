@@ -14,6 +14,12 @@ import {
 } from "./notifications.mjs";
 import { decideDmRoute, spamSignals } from "./policy.mjs";
 import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-limit.mjs";
+import {
+  AvatarValidationError,
+  avatarFields,
+  normalizeAvatarPatch,
+  sameAvatarConfig,
+} from "./avatar.mjs";
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
 const IDENTITY_API_KEY = process.env.IDENTITY_API_KEY;
@@ -270,7 +276,16 @@ function parseCookies(header = "") {
 function publicProfile(profile) {
   if (!profile) return null;
   const privateFields = new Set(["email", "accountStatus", "createdAt", "updatedAt"]);
-  return Object.fromEntries(Object.entries(profile).filter(([key]) => !privateFields.has(key)));
+  const normalized = { ...profile, ...avatarFields(profile) };
+  return Object.fromEntries(Object.entries(normalized).filter(([key]) => !privateFields.has(key)));
+}
+
+/** 작은 작성자 카드에서도 전체 프로필과 같은 캐릭터 계약을 반환합니다. */
+function avatarPresentation(profile) {
+  return {
+    avatarUrl: profile?.avatarUrl || "",
+    ...avatarFields(profile),
+  };
 }
 
 /**
@@ -307,6 +322,8 @@ function defaultProfile(uid, email, name) {
     // 프로필 사진. 지금은 데이터 URI 를 그대로 담습니다 — 저장소 버킷이 생기면
     // 그 주소로 바뀌기만 하면 됩니다(화면은 문자열만 봅니다).
     avatarUrl: "",
+    avatarMode: "photo",
+    avatarConfig: null,
     nativeLanguages: ["ko"],
     learningLanguages: [{ code: "en", level: "beginner", goal: "부담 없는 일상 대화" }],
     bio: "함께 꾸준히 연습할 언어 파트너를 찾고 있어요.",
@@ -329,7 +346,20 @@ function defaultProfile(uid, email, name) {
 async function ensureProfile(uid, email, name) {
   const reference = db.collection("profiles").doc(uid);
   const snapshot = await reference.get();
-  if (snapshot.exists) return snapshot.data();
+  if (snapshot.exists) {
+    const stored = snapshot.data();
+    const normalizedAvatar = avatarFields(stored);
+    const storedConfig = stored.avatarConfig ?? null;
+    const needsAvatarBackfill =
+      !Object.hasOwn(stored, "avatarMode") ||
+      !Object.hasOwn(stored, "avatarConfig") ||
+      stored.avatarMode !== normalizedAvatar.avatarMode ||
+      !sameAvatarConfig(storedConfig, normalizedAvatar.avatarConfig);
+    if (needsAvatarBackfill) {
+      await reference.update({ ...normalizedAvatar, updatedAt: nowIso() });
+    }
+    return { ...stored, ...normalizedAvatar };
+  }
   const profile = defaultProfile(uid, email || "unknown@example.invalid", name);
   await reference.create(profile);
   await db.collection("matchingPreferences").doc(uid).set({
@@ -1166,6 +1196,30 @@ app.post("/api/notifications/read-all", requireUser, async (req, res) => {
   return success(res, req, { updated, readAt, hasMore });
 });
 
+app.patch("/api/profile/avatar", requireUser, async (req, res) => {
+  const current = req.auth.profile;
+  let normalized;
+  try {
+    normalized = normalizeAvatarPatch(req.body, current);
+  } catch (error) {
+    if (error instanceof AvatarValidationError) {
+      throw new ApiError(422, "VALIDATION_ERROR", error.message, { field: error.field });
+    }
+    throw error;
+  }
+  const patch = {
+    avatarMode: normalized.avatarMode,
+    avatarConfig: normalized.avatarConfig,
+    updatedAt: nowIso(),
+  };
+  await db.collection("profiles").doc(req.auth.uid).update(patch);
+  return success(res, req, {
+    ...publicProfile({ ...current, ...patch }),
+    email: req.auth.email,
+    emailVerified: req.auth.emailVerified,
+  });
+});
+
 app.patch("/api/profile", requireUser, async (req, res) => {
   const current = req.auth.profile;
   const allowedGenders = ["unspecified", "woman", "man", "nonbinary"];
@@ -1502,7 +1556,7 @@ app.get("/api/posts", requireUser, async (req, res) => {
     author: {
       ...post.author,
       // 글마다 굳히지 않고 지금 프로필을 씁니다 — 언어를 바꾸면 옛 글에도 반영됩니다.
-      avatarUrl: authors.get(post.authorId)?.avatarUrl || "",
+      ...avatarPresentation(authors.get(post.authorId)),
       countryCode: authors.get(post.authorId)?.country?.code || "",
       age: authors.get(post.authorId)?.age || 0,
       gender: authors.get(post.authorId)?.gender || "unspecified",
@@ -1534,7 +1588,7 @@ app.post("/api/posts", requireUser, async (req, res) => {
       name: req.auth.profile.name,
       handle: req.auth.profile.handle,
       flag: req.auth.profile.country?.flag || "🌐",
-      avatarUrl: req.auth.profile.avatarUrl || "",
+      ...avatarPresentation(req.auth.profile),
       countryCode: req.auth.profile.country?.code || "",
       age: req.auth.profile.age || 0,
       gender: req.auth.profile.gender || "unspecified",
@@ -1608,7 +1662,7 @@ app.get("/api/posts/:postId", requireUser, async (req, res) => {
     liked: reaction.exists,
     author: {
       ...post.author,
-      avatarUrl: author?.avatarUrl || "",
+      ...avatarPresentation(author),
       countryCode: author?.country?.code || "",
       age: author?.age || 0,
       gender: author?.gender || "unspecified",
@@ -1642,8 +1696,15 @@ app.get("/api/posts/:postId/replies", requireUser, async (req, res) => {
     rows.map((row) => ({
       ...row,
       author: profiles.get(row.authorId)
-        ? { id: row.authorId, name: profiles.get(row.authorId).name, handle: profiles.get(row.authorId).handle, flag: profiles.get(row.authorId).country?.flag || "🌐", avatarUrl: profiles.get(row.authorId).avatarUrl || "", countryCode: profiles.get(row.authorId).country?.code || "" }
-        : { id: row.authorId, name: null, handle: null, flag: "🌐", avatarUrl: "" },
+        ? {
+            id: row.authorId,
+            name: profiles.get(row.authorId).name,
+            handle: profiles.get(row.authorId).handle,
+            flag: profiles.get(row.authorId).country?.flag || "🌐",
+            ...avatarPresentation(profiles.get(row.authorId)),
+            countryCode: profiles.get(row.authorId).country?.code || "",
+          }
+        : { id: row.authorId, name: null, handle: null, flag: "🌐", ...avatarPresentation(null) },
     })),
     200,
     { pagination: { total: rows.length, nextCursor: null } },
@@ -1731,6 +1792,7 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
         name: req.auth.profile.name,
         handle: req.auth.profile.handle,
         flag: req.auth.profile.country?.flag || "🌐",
+        ...avatarPresentation(req.auth.profile),
       },
     },
     201,
@@ -1752,16 +1814,24 @@ app.get("/api/corrections/received", requireUser, async (req, res) => {
   const profiles = await profilesByIds(rows.map((row) => row.authorId));
   const corrections = rows
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
-    .map((row) => ({
-      id: row.id,
-      postId: row.postId,
-      postText: row.postText,
-      original: row.original,
-      fixed: row.text,
-      createdAt: row.createdAt,
-      from: profiles.get(row.authorId)?.name ?? null,
-      fromFlag: profiles.get(row.authorId)?.country?.flag ?? "🌐",
-    }));
+    .map((row) => {
+      const author = profiles.get(row.authorId);
+      const avatar = avatarPresentation(author);
+      return {
+        id: row.id,
+        postId: row.postId,
+        postText: row.postText,
+        original: row.original,
+        fixed: row.text,
+        createdAt: row.createdAt,
+        from: author?.name ?? null,
+        fromFlag: author?.country?.flag ?? "🌐",
+        fromAvatarUrl: avatar.avatarUrl,
+        fromAvatarMode: avatar.avatarMode,
+        fromAvatarConfig: avatar.avatarConfig,
+        fromCountryCode: author?.country?.code ?? "",
+      };
+    });
   return success(res, req, corrections, 200, { pagination: { total: corrections.length, nextCursor: null } });
 });
 
@@ -2521,7 +2591,17 @@ app.get("/api/search", requireUser, async (req, res) => {
     )
     .filter((post) => !blocked.has(post.authorId))
     .filter((post) => [post.text, ...(post.tags || [])].join(" ").toLocaleLowerCase().includes(query));
-  return success(res, req, { partners, posts }, 200, { total: partners.length + posts.length });
+  const postAuthors = await profilesByIds(posts.map((post) => post.authorId));
+  const postsWithAvatars = posts.map((post) => ({
+    ...post,
+    author: {
+      ...post.author,
+      ...avatarPresentation(postAuthors.get(post.authorId)),
+    },
+  }));
+  return success(res, req, { partners, posts: postsWithAvatars }, 200, {
+    total: partners.length + postsWithAvatars.length,
+  });
 });
 
 app.post("/api/translate", requireUser, async (req, res) => {

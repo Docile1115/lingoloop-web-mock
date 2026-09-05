@@ -9,6 +9,12 @@
  * 글자가 생깁니다.
  */
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { SvgXml } from "react-native-svg";
+import {
+  renderAvatarSvg,
+  type AvatarConfig,
+  type AvatarMode,
+} from "@shared/avatar";
 import { drawablePhoto } from "../lib/format";
 import { t } from "../lib/i18n";
 import { radius, space, tapSize, type } from "../lib/theme";
@@ -25,20 +31,36 @@ function tintFor(seed: string): string {
 export function Avatar({
   name,
   photo,
+  avatarMode,
+  avatarConfig,
   size = 44,
   online,
 }: {
   name: string;
   photo?: string;
+  avatarMode?: AvatarMode;
+  avatarConfig?: AvatarConfig | null;
   size?: number;
   online?: boolean;
 }) {
   const c = useTheme();
   const uri = drawablePhoto(photo);
   const tint = tintFor(name);
+  const character = avatarMode === "character" && avatarConfig ? renderAvatarSvg(avatarConfig) : "";
   return (
-    <View>
-      {uri ? (
+    <View accessibilityRole="image" accessibilityLabel={name}>
+      {character ? (
+        <View
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            overflow: "hidden",
+          }}
+        >
+          <SvgXml xml={character} width={size} height={size} />
+        </View>
+      ) : uri ? (
         <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />
       ) : (
         <View
