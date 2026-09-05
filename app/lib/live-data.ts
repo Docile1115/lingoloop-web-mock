@@ -2,6 +2,7 @@
 // 이 파일은 앱(React Native)에서도 그대로 씁니다.
 import { msg, t, tx } from "./i18n/core";
 import { normalizeAvatarConfig, normalizeAvatarMode, type AvatarConfig, type AvatarMode } from "./avatar";
+import { normalizeRoom, type RoomConfig } from "./room";
 import type {
   Accent,
   ChatMessage,
@@ -74,6 +75,7 @@ export interface ApiProfile {
   /** Which profile representation is active. Older profiles omit this and remain photos. */
   avatarMode?: AvatarMode;
   avatarConfig?: AvatarConfig | null;
+  roomConfig?: RoomConfig | null;
   /** 남에게 도시를 감출지. 본인 프로필에만 실려 옵니다. */
   hideLocation?: boolean;
 }
@@ -348,6 +350,7 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
     compatibility: score,
     accent: accentFor(profile.id),
     photo: profile.avatarUrl || "",
+    roomConfig: profile.roomConfig ? normalizeRoom(profile.roomConfig) : undefined,
     avatarMode: normalizeAvatarMode(profile.avatarMode),
     avatarConfig: profile.avatarConfig ? normalizeAvatarConfig(profile.avatarConfig) : undefined,
     countryCode: profile.country?.code || "",

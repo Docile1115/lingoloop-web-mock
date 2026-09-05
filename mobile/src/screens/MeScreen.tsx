@@ -10,14 +10,17 @@ import { useSession } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, tapSize } from "../lib/theme";
 import { Avatar, EmptyState, Loading } from "../ui";
+import { RoomCard } from "../ui/RoomCard";
 
 export function MeScreen({
   onEdit,
   onEditAvatar,
+  onEditRoom,
   onOpenPost,
 }: {
   onEdit: () => void;
   onEditAvatar: () => void;
+  onEditRoom: () => void;
   onOpenPost: (row: FeedPost) => void;
 }) {
   const c = useTheme();
@@ -59,6 +62,7 @@ export function MeScreen({
       }
       ListHeaderComponent={
         <View style={{ gap: space.md }}>
+          <RoomCard name={me.name} value={me.roomConfig} avatar={me.avatarConfig} onEdit={onEditRoom} />
           <View style={styles.head}>
             <Pressable
               onPress={onEditAvatar}

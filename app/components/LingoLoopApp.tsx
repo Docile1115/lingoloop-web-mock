@@ -83,6 +83,8 @@ import {
 } from "@/app/lib/demo-data";
 import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
 import { SignIn } from "./SignIn";
+import { ProfileRoom } from "./ProfileRoom";
+import type { RoomConfig } from "../lib/room";
 import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, type ApiNotification, type ApiNotificationPage, matchReasonText, type MatchReasonCode } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import {
@@ -2605,6 +2607,11 @@ function LingoLoopScreens({
             ) : null}
             {!detail && section === "learn" ? (
               <LearnView
+                onSaveRoom={async (config) => {
+                  const updated = await api<ApiProfile>("/api/profile/room", { method: "PATCH", body: JSON.stringify({ config }) });
+                  onProfileUpdated(updated);
+                  showToast(t("방을 저장했어요"));
+                }}
                 counts={followCounts[me.id]}
                 onOpenSettings={() => setSettingsOpen(true)}
                 onStartReview={() => setModal({ type: "review", items: savedItems })}
@@ -3460,6 +3467,8 @@ function ProfileDetailView({
       </header>
 
       <p className="profile-head-bio">{partner.bio}</p>
+
+      <ProfileRoom name={partner.name} value={partner.roomConfig} avatar={partner.avatarConfig} />
 
       <div className="profile-head-stats">
         <span><strong>{counts ? counts.posts : posts.length}</strong> {t("게시물")}</span>
@@ -5285,6 +5294,7 @@ function SettingsModal({
 }
 
 function LearnView({
+  onSaveRoom,
   counts,
   onToast,
   onEditProfile,
@@ -5306,6 +5316,7 @@ function LearnView({
   /** 팔로잉·팔로워 수. 못 받아왔으면 숫자를 감춥니다. */
   counts?: { following: number; followers: number; posts: number };
   onEditProfile: () => void;
+  onSaveRoom: (room: RoomConfig) => Promise<void>;
   onEditAvatar: () => void;
   savedItems: SavedPhrase[];
   onSavePhrase: (item: SavedPhrase) => void;
@@ -5333,6 +5344,7 @@ function LearnView({
 
   return (
     <div className="view learn-view compact-learn">
+      <ProfileRoom name={profileName} value={me.roomConfig} avatar={me.avatarConfig} onSave={onSaveRoom} />
       <header className="profile-head">
         <div className="profile-head-id">
           <span className="profile-head-name">{profileName}<AgeGender age={me.age} gender={me.gender} /><BadgeCheck size={18} className="verified" /></span>

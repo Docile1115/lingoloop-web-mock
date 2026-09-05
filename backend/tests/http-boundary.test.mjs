@@ -188,4 +188,16 @@ test("HTTP boundary rejects bypasses and serves only non-mock metadata", async (
   });
   assert.equal(malformedCookie.status, 401);
   assert.equal((await malformedCookie.json()).error.code, "AUTH_REQUIRED");
+
+  const anonymousRoomWrite = await fetch(baseUrl + "/api/profile/room", {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+      origin: "http://localhost:5174",
+      "x-lingoloop-proxy": "test-proxy-secret",
+    },
+    body: JSON.stringify({ config: { version: 1, wall: "cream", floor: "oak", items: [] } }),
+  });
+  assert.equal(anonymousRoomWrite.status, 401);
+  assert.equal((await anonymousRoomWrite.json()).error.code, "AUTH_REQUIRED");
 });
