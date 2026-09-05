@@ -89,6 +89,9 @@ import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import {
   AVATAR_CATEGORIES,
+  AVATAR_GROUPS,
+  avatarPreviewDataUri,
+  avatarPreviewForCategory,
   DEFAULT_AVATAR_CONFIG,
   avatarDataUri,
   normalizeAvatarConfig,
@@ -97,6 +100,7 @@ import {
   type AvatarConfig,
   type AvatarMode,
 } from "@/app/lib/avatar";
+import { AVATAR_CATEGORY_LABELS as avatarCategoryLabels, AVATAR_GROUP_LABELS, AVATAR_OPTION_LABELS } from "../lib/avatar-labels";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -3798,19 +3802,6 @@ function ProfileEditView({
   );
 }
 
-const avatarCategoryLabels: Record<AvatarCategory, MessageKey> = {
-  skinTone: msg("피부색"),
-  face: msg("얼굴"),
-  hair: msg("헤어스타일"),
-  hairColor: msg("머리 색상"),
-  eyes: msg("눈"),
-  mouth: msg("입"),
-  outfit: msg("의상"),
-  outfitColor: msg("의상 색상"),
-  accessory: msg("액세서리"),
-  background: msg("배경"),
-};
-
 /**
  * Full-screen character editor shared by desktop and mobile layouts.
  * The main preview remains visible while the option grid scrolls on narrow screens.
@@ -3843,6 +3834,8 @@ function AvatarEditorView({
   const initial = useMemo(() => normalizeAvatarConfig(value || DEFAULT_AVATAR_CONFIG), [value]);
   const [draft, setDraft] = useState<AvatarConfig>(initial);
   const [category, setCategory] = useState<AvatarCategory>("skinTone");
+  const [group, setGroup] = useState<typeof AVATAR_GROUPS[number]>(AVATAR_GROUPS[0]);
+  const [faceZoom, setFaceZoom] = useState(false);
   const active = AVATAR_CATEGORIES.find((item) => item.key === category) || AVATAR_CATEGORIES[0];
   const configChanged = JSON.stringify(draft) !== JSON.stringify(initial);
   const changed = configChanged || mode !== "character";
@@ -3874,18 +3867,22 @@ function AvatarEditorView({
   };
 
   return (
-    <div className="view detail-view avatar-editor-view">
+    <div className="view detail-view avatar-editor-view avatar-studio">
       <section className="avatar-editor-preview" aria-label={t("캐릭터 미리보기")}>
         <div className="avatar-editor-preview-image">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={avatarDataUri(draft)}
+            src={avatarPreviewDataUri(draft, faceZoom ? "face" : "full")}
             alt={`${name} · ${t("캐릭터 미리보기")}`}
           />
         </div>
         <div className="avatar-editor-intro">
-          <strong>{t("나만의 프로필 캐릭터를 만들어보세요")}</strong>
-          <small>{t("고른 캐릭터는 프로필, 커뮤니티와 대화에 함께 표시돼요.")}</small>
+          <strong>{t("머리부터 발끝까지, 나답게")}</strong>
+          <small>{t("얼굴부터 옷차림까지 골라보세요. 마이룸에도 그대로 반영돼요.")}</small>
+          <div className="avatar-preview-toggle" role="group" aria-label={t("캐릭터 미리보기")}>
+            <button type="button" aria-pressed={!faceZoom} onClick={() => setFaceZoom(false)}>{t("전신")}</button>
+            <button type="button" aria-pressed={faceZoom} onClick={() => setFaceZoom(true)}>{t("얼굴 확대")}</button>
+          </div>
         </div>
         <div className="avatar-editor-quick-actions">
           <button type="button" className="secondary-button" disabled={saving} onClick={() => update(randomAvatarConfig(`${Date.now()}-${Math.random()}`))}>
@@ -3897,8 +3894,13 @@ function AvatarEditorView({
         </div>
       </section>
 
+      <div className="avatar-studio-groups" role="group" aria-label={t("꾸밀 항목")}>
+        {AVATAR_GROUPS.map((item) => <button key={item.key} type="button" aria-pressed={group.key === item.key} onClick={() => { setGroup(item); setCategory(item.categories[0]); }}>
+          {t(AVATAR_GROUP_LABELS[item.key])}
+        </button>)}
+      </div>
       <div className="avatar-category-tabs" role="group" aria-label={t("꾸밀 항목")}>
-        {AVATAR_CATEGORIES.map((item) => (
+        {group.categories.map((key) => AVATAR_CATEGORIES.find((item) => item.key === key)!).map((item) => (
           <button
             type="button"
             key={item.key}
@@ -3916,7 +3918,8 @@ function AvatarEditorView({
         <div className="avatar-option-grid" role="radiogroup" aria-label={t(avatarCategoryLabels[active.key])}>
           {active.options.map((option, index) => {
             const selected = draft[active.key] === option.id;
-            const optionLabel = option.id === "accessory-none" ? t("없음") : t("스타일 {n}", { n: index + 1 });
+            const label = AVATAR_OPTION_LABELS[option.id];
+            const optionLabel = label ? t(label) : t("스타일 {n}", { n: index + 1 });
             const preview = normalizeAvatarConfig({ ...draft, [active.key]: option.id });
             return (
               <button
@@ -3931,7 +3934,7 @@ function AvatarEditorView({
               >
                 {"swatch" in option && option.swatch ? <span className="avatar-option-swatch" style={{ background: option.swatch }} /> : (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={avatarDataUri(preview)} alt="" />
+                  <img src={avatarPreviewDataUri(preview, avatarPreviewForCategory(category))} alt="" />
                 )}
                 <small>{optionLabel}</small>
                 {selected ? <span className="avatar-option-check" aria-hidden="true"><Check size={13} /></span> : null}

@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   AVATAR_CONFIG_KEYS,
+  AVATAR_BODY_DEFAULTS,
+  AVATAR_LEGACY_KEYS,
   AVATAR_ITEM_IDS,
   AvatarValidationError,
   avatarFields,
@@ -12,7 +14,7 @@ import {
 } from "../avatar.mjs";
 
 const validConfig = Object.freeze({
-  version: 1,
+  version: 2,
   skinTone: "skin-04",
   face: "face-02",
   hair: "hair-12",
@@ -23,9 +25,10 @@ const validConfig = Object.freeze({
   outfitColor: "outfit-color-08",
   accessory: "accessory-none",
   background: "background-07",
+  ...AVATAR_BODY_DEFAULTS,
 });
 
-test("캐릭터 설정은 curated ID와 완전한 version 1 계약만 정규화한다", () => {
+test("캐릭터 설정은 curated ID와 완전한 version 2 계약을 정규화한다", () => {
   assert.deepEqual(normalizeAvatarConfig(validConfig), validConfig);
   assert.deepEqual(Object.keys(normalizeAvatarConfig(validConfig)), AVATAR_CONFIG_KEYS);
   assert.ok(Object.values(AVATAR_ITEM_IDS).every((items) => Object.isFrozen(items)));
@@ -35,7 +38,8 @@ test("캐릭터 설정은 부분 값, 추가 키, 미지원 ID와 실행 가능�
   const invalid = [
     null,
     [],
-    { ...validConfig, version: 2 },
+    { ...validConfig, version: 99 },
+    { ...validConfig, bottom: undefined },
     { ...validConfig, mouth: undefined },
     { ...validConfig, hair: "https://evil.example/hair.svg" },
     { ...validConfig, accessory: "<svg onload=alert(1)>" },
@@ -51,6 +55,16 @@ test("캐릭터 설정은 부분 값, 추가 키, 미지원 ID와 실행 가능�
     () => normalizeAvatarPatch({ mode: "photo", extra: "x".repeat(2_100) }, {}),
     AvatarValidationError,
   );
+});
+
+test("version 1 저장값은 얼굴을 유지하며 전신 기본값으로 업그레이드한다", () => {
+  const legacy = Object.fromEntries(AVATAR_LEGACY_KEYS.map(key => [key, key === "version" ? 1 : validConfig[key]]));
+  assert.deepEqual(normalizeAvatarConfig(legacy), validConfig);
+  assert.deepEqual(avatarFields({ avatarMode: "character", avatarConfig: legacy }), { avatarMode: "character", avatarConfig: validConfig });
+  assert.throws(() => normalizeAvatarConfig({...legacy, shoes:"shoes-02"}), AvatarValidationError);
+  const current = {...validConfig, shoes:"shoes-04", bag:"bag-02", bottom:"bottom-03"};
+  const result = normalizeAvatarPatch({ mode:"character", config:{...legacy, eyes:"eyes-04"} }, {avatarMode:"character", avatarConfig:current});
+  assert.deepEqual(result.avatarConfig, {...current, eyes:"eyes-04"});
 });
 
 test("avatar patch는 character 완전 설정을 요구하고 photo 전환 때 설정을 보존하거나 지운다", () => {

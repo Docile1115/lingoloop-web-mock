@@ -5189,6 +5189,55 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   .avatar-option-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
+/* Full-body studio keeps the stage visible without hiding the wardrobe on phones. */
+.avatar-studio .avatar-editor-preview {
+  grid-template-columns: 172px minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
+  gap: 12px 24px;
+}
+.avatar-studio .avatar-editor-preview-image {
+  grid-row: 1 / 3;
+  width: 172px;
+  height: 258px;
+  border-radius: 24px;
+  box-shadow: none;
+}
+.avatar-studio .avatar-editor-preview-image img { object-fit: contain; }
+.avatar-studio .avatar-editor-intro { gap: 12px; }
+.avatar-studio .avatar-editor-quick-actions { grid-column: 2; flex-wrap: wrap; }
+.avatar-studio .avatar-editor-quick-actions button { min-height: 44px; }
+.avatar-preview-toggle { display: flex; flex-wrap: wrap; gap: 8px; }
+.avatar-preview-toggle button {
+  min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); color: var(--muted); font-size: 13px;
+}
+.avatar-preview-toggle button[aria-pressed="true"] { color: var(--primary-ink); border-color: var(--primary-ink); background: var(--primary-soft); }
+.avatar-studio-groups { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 16px; }
+.avatar-studio-groups button {
+  min-width: 0; min-height: 48px; padding: 8px 4px; border: 0; border-bottom: 3px solid transparent;
+  border-radius: 10px 10px 0 0; background: var(--surface-soft); color: var(--muted); font-size: 14px; font-weight: 700;
+}
+.avatar-studio-groups button[aria-pressed="true"] { border-bottom-color: var(--primary-ink); color: var(--primary-ink); background: var(--primary-soft); }
+.avatar-studio .avatar-option-grid { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }
+.avatar-studio .avatar-option { min-height: 118px; gap: 8px; }
+.avatar-studio .avatar-option img { width: 72px; height: 72px; object-fit: contain; border-radius: 12px; }
+.avatar-studio .avatar-option small { white-space: normal; text-align: center; line-height: 1.4; }
+.avatar-studio button:focus-visible { outline: 3px solid var(--primary-ink); outline-offset: 3px; }
+@media (max-width: 720px) {
+  .avatar-studio .avatar-editor-preview { grid-template-columns: 120px minmax(0, 1fr); gap: 8px 14px; padding-bottom: 12px; }
+  .avatar-studio .avatar-editor-preview-image { width: 120px; height: 180px; border-radius: 18px; }
+  .avatar-studio .avatar-editor-intro { gap: 8px; }
+  .avatar-studio .avatar-editor-intro strong { font-size: 15px; line-height: 1.4; }
+  .avatar-studio .avatar-editor-intro small { font-size: 12px; line-height: 1.5; }
+  .avatar-studio .avatar-editor-quick-actions { grid-column: 1 / -1; flex-wrap: nowrap; }
+  .avatar-studio .avatar-option-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .avatar-preview-toggle { gap: 6px; }
+  .avatar-preview-toggle button { padding: 6px 10px; }
+}
+@media (max-height: 700px) {
+  .avatar-studio .avatar-editor-preview { position: static; }
+}
+
 /* 밑줄형 탭 — 실측 h48 · 15px/400 · 활성 밑줄 2px */
 .profile-tabs {
   display: flex;

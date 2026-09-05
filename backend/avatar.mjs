@@ -18,7 +18,19 @@ export const AVATAR_ITEM_IDS = Object.freeze({
     ...Array.from({ length: 8 }, (_, index) => `accessory-${String(index + 1).padStart(2, "0")}`),
   ]),
   background: Object.freeze(Array.from({ length: 8 }, (_, index) => `background-${String(index + 1).padStart(2, "0")}`)),
+  eyebrows: Object.freeze(["brows-01", "brows-02", "brows-03", "brows-04"]),
+  nose: Object.freeze(["nose-01", "nose-02", "nose-03"]),
+  bottom: Object.freeze(["bottom-01", "bottom-02", "bottom-03", "bottom-04", "bottom-05", "bottom-06"]),
+  bottomColor: Object.freeze(["bottom-color-01", "bottom-color-02", "bottom-color-03", "bottom-color-04", "bottom-color-05", "bottom-color-06"]),
+  socks: Object.freeze(["socks-01", "socks-02", "socks-03"]),
+  shoes: Object.freeze(["shoes-01", "shoes-02", "shoes-03", "shoes-04", "shoes-05"]),
+  shoeColor: Object.freeze(["shoe-color-01", "shoe-color-02", "shoe-color-03", "shoe-color-04", "shoe-color-05", "shoe-color-06"]),
+  headwear: Object.freeze(["headwear-none", "headwear-01", "headwear-02", "headwear-03"]),
+  bag: Object.freeze(["bag-none", "bag-01", "bag-02", "bag-03"]),
 });
+
+export const AVATAR_BODY_DEFAULTS = Object.freeze({ eyebrows:"brows-01", nose:"nose-01", bottom:"bottom-01", bottomColor:"bottom-color-01", socks:"socks-01", shoes:"shoes-01", shoeColor:"shoe-color-01", headwear:"headwear-none", bag:"bag-none" });
+export const AVATAR_LEGACY_KEYS = Object.freeze(["version", ...Object.keys(AVATAR_ITEM_IDS).filter(key => !Object.hasOwn(AVATAR_BODY_DEFAULTS, key))]);
 
 export const AVATAR_CONFIG_KEYS = Object.freeze(["version", ...Object.keys(AVATAR_ITEM_IDS)]);
 const AVATAR_MODES = new Set(["photo", "character"]);
@@ -68,20 +80,20 @@ function assertExactKeys(value, allowed, required, field) {
   }
 }
 
-/** 완전한 version 1 설정을 검증하고 키 순서까지 정규화한 새 객체를 반환합니다. */
+/** Strict v1/v2 inputs. Legacy faces are upgraded on read, without bulk profile writes. */
 export function normalizeAvatarConfig(value) {
   if (!isPlainObject(value)) {
     throw new AvatarValidationError("config는 캐릭터 설정 객체여야 합니다.", "config");
   }
   assertPayloadSize(value);
-  assertExactKeys(value, AVATAR_CONFIG_KEY_SET, AVATAR_CONFIG_KEYS, "config");
-  if (value.version !== 1) {
+  if (value.version !== 1 && value.version !== 2) {
     throw new AvatarValidationError("지원하지 않는 캐릭터 설정 버전입니다.", "config.version");
   }
-
-  const normalized = { version: 1 };
+  const legacy = value.version === 1;
+  assertExactKeys(value, legacy ? new Set(AVATAR_LEGACY_KEYS) : AVATAR_CONFIG_KEY_SET, legacy ? AVATAR_LEGACY_KEYS : AVATAR_CONFIG_KEYS, "config");
+  const normalized = { version: 2 };
   for (const field of Object.keys(AVATAR_ITEM_IDS)) {
-    const itemId = value[field];
+    const itemId = legacy && Object.hasOwn(AVATAR_BODY_DEFAULTS, field) ? AVATAR_BODY_DEFAULTS[field] : value[field];
     if (typeof itemId !== "string" || !AVATAR_ID_SETS[field].has(itemId)) {
       throw new AvatarValidationError(`지원하지 않는 ${field} 항목입니다.`, `config.${field}`);
     }
@@ -149,6 +161,11 @@ export function normalizeAvatarPatch(payload, currentProfile = {}) {
     avatarConfig = null;
   } else {
     avatarConfig = normalizeAvatarConfig(payload.config);
+    // An older installed client must not erase clothes it cannot edit or display.
+    if (payload.config.version === 1) {
+      const current = avatarFields(currentProfile).avatarConfig;
+      if (current) for (const key of Object.keys(AVATAR_BODY_DEFAULTS)) avatarConfig[key] = current[key];
+    }
   }
 
   return { avatarMode: payload.mode, avatarConfig };
