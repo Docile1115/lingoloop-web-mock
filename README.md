@@ -16,7 +16,8 @@ TimoTalk은 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화를
 | --- | --- |
 | 로그인 | PC·Android 웹은 Google, iOS 웹은 Apple만 노출하고 Firebase Admin 세션 쿠키로 서버 세션을 유지. 각 소셜 공급자는 운영 자격정보 설정 후 활성화 |
 | 프로필 | 이름, 소개, 모국어, 학습 언어와 전신 캐릭터를 Firestore에 저장·수정. 얼굴·헤어·상의·하의·양말·신발·모자·가방 등 19개 항목을 웹·Expo 앱에서 편집 |
-| 마이룸 | 캐릭터가 사는 작은 방. 가구·소품 12종 배치·방향 전환·제거, 벽지 5종·바닥 4종, 추천 인테리어 3종. 웹·Expo 앱에서 편집하고 다른 사용자 프로필에서 조회 |
+| 마이룸 | 가구·소품 16종, 벽지 5종·바닥 4종. 팔로워·팔로잉 집 방문, 즐겨찾기, 공개 범위, 집주인 상태, 화이트보드 방명록·답글·좋아요·번역, 오늘의 질문, 사진 액자 3개, 무료 인사·선물. 웹·Expo 앱이 같은 API 사용 |
+| 알림 | 커뮤니티·대화·팔로우와 방명록·답글·방명록 좋아요·방문 인사를 영속 저장. 웹 알림함, 앱의 친구 집 화면에서 해당 집으로 이동 |
 | 매칭 | 실제 가입자 프로필과 저장된 선호 조건으로 일일 추천 생성·저장 |
 | 커뮤니티 | 게시물 작성·조회·좋아요를 Firestore에 영속 저장 |
 | 대화 | 대화방 생성, 메시지 전송·조회, 재로그인 후 복원 |
@@ -39,8 +40,8 @@ API 성공 응답에는 다음 메타데이터가 포함됩니다.
 
 - 음성 대화(보이스룸, WebRTC/SFU). Phase 1 범위에서 제외했습니다.
 - 전화번호·신분증 인증. 현재는 소셜 공급자가 확인한 계정 정보만 사용
-- 모바일 푸시 알림과 네이티브 앱
-- 영어·일본어 UI. 운영 데이터 전환 화면은 현재 한국어 MVP이며 기존 다국어 사전과 통합 예정
+- OS 모바일 푸시 알림, 네이티브 앱 스토어 출시. Expo iOS·Android 코드는 구현되어 있으나 배포 웹과 별도로 앱 빌드·심사 필요
+- 실시간 동시 입장·캐릭터 이동. 친구 집은 비동기 방문 방식이며 온라인 상태를 실시간 접속으로 표시하지 않음
 - 결제, VIP 권한, 광고 보상. 초기 제품 정책에 따라 의도적으로 제외
 - 운영자용 신고 심사 화면, 자동 제재, 이의제기·긴급 대응 워크플로
 - WebSocket 기반 실시간 전달. 현재 대화 화면은 주기적으로 새 메시지를 조회
@@ -60,7 +61,7 @@ flowchart LR
 
     subgraph Clients["클라이언트"]
         Web["PC · 모바일 반응형 웹"]
-        Native["향후 React Native 앱"]
+        Native["Expo React Native 앱\n스토어 출시 전"]
     end
 
     subgraph GCP["Google Cloud"]
@@ -82,7 +83,7 @@ flowchart LR
     Build -->|"API 성공 후 웹"| WebRun
     Web -->|"HTTPS"| WebRun
     Web -->|"로그인 팝업 · 단기 ID 토큰"| Identity
-    Native -.->|"향후 HTTPS API"| ApiRun
+    Native -->|"HTTPS · 같은 API 프록시"| WebRun
     WebRun -->|"same-origin /api/*\n내부 공유 비밀"| ApiRun
     ApiRun --> Identity
     ApiRun --> Firestore
@@ -96,6 +97,8 @@ flowchart LR
 브라우저의 일반 데이터 요청은 모두 웹 서비스의 same-origin `/api/*` 프록시를 거쳐 API 서비스로 전달됩니다. 소셜 로그인 때만 Firebase 웹 SDK가 Identity Platform에서 짧게 유효한 ID 토큰을 받고, 이를 API가 최대 14일의 `HttpOnly` 세션 쿠키로 교환합니다. Firebase 웹 API 키와 프로젝트 식별자는 공개 클라이언트 설정이며 인증 비밀이 아닙니다. OAuth Client Secret, Gemini 키와 프록시 공유 비밀은 브라우저에 노출하지 않습니다. API 서비스만 전용 서비스 계정으로 Firestore를 사용합니다.
 
 ## 데이터 모델
+
+친구 집의 접근 정책·업로드 제한·API·검증 범위는 [소셜 마이룸 설계](docs/social-homes.md)에 정리했습니다.
 
 주요 Firestore 컬렉션은 다음과 같습니다.
 
@@ -115,6 +118,13 @@ dmPolicies/{uid}
 blocks/{blockerUid_blockedUid}
 reports/{reportId}
 aiUsage/{uid}/days/{yyyy-mm-dd}
+homes/{ownerUid}
+homes/{ownerUid}/entries/{entryId}
+homes/{ownerUid}/entries/{entryId}/hearts/{uid}
+homes/{ownerUid}/photos/{frame|frame2|frame3}
+homes/{ownerUid}/stamps/{visitorUid}
+homeFavorites/{uid}/items/{ownerUid}
+homeQuotas/{uid}
 ```
 
 - 사용자 문서는 Identity Platform의 `uid`를 기준으로 연결합니다.

@@ -15,6 +15,7 @@ import {
 import { decideDmRoute, spamSignals } from "./policy.mjs";
 import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-limit.mjs";
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
+import { registerHomeRoutes } from "./homes.mjs";
 import {
   AvatarValidationError,
   avatarFields,
@@ -301,6 +302,7 @@ function profileForOthers(profile) {
   if (!shown) return shown;
   // 설정값 자체도 남에게 알릴 이유가 없습니다.
   const { hideLocation, ...rest } = shown;
+  delete rest.roomConfig; // A house is readable only through its privacy-checked API.
   return hideLocation ? { ...rest, city: "" } : rest;
 }
 
@@ -985,6 +987,7 @@ const ATTACHMENT_ROUTES = [
   "/api/messages",
   "/api/profile",
   /^\/api\/conversations\/[^/]+\/messages$/,
+  /^\/api\/homes\/[^/]+\/photos\/[^/]+$/,
 ];
 app.use((req, res, next) => {
   const carriesFile = ATTACHMENT_ROUTES.some((route) =>
@@ -1196,6 +1199,8 @@ app.post("/api/notifications/read-all", requireUser, async (req, res) => {
   const hasMore = !remaining.empty;
   return success(res, req, { updated, readAt, hasMore });
 });
+
+registerHomeRoutes(app, { db, requireUser, success, ApiError, assertNotBlockedInTransaction, profileForOthers, putNotification, removeNotification, nowIso, todayInSeoul });
 
 app.patch("/api/profile/room", requireUser, async (req, res) => {
   if (!req.body || Object.keys(req.body).length !== 1 || !Object.hasOwn(req.body, "config")) {

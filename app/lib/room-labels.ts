@@ -1,6 +1,7 @@
 import { msg } from './i18n/core';
 
 export const ROOM_LABELS = {
+  whiteboard: msg("화이트보드"), frame: msg("액자 1"), frame2: msg("액자 2"), frame3: msg("액자 3"),
   sofa: msg("소파"), desk: msg("책상"), bed: msg("침대"), shelf: msg("책장"),
   plant: msg("화분"), lamp: msg("스탠드"), rug: msg("러그"), table: msg("티 테이블"),
   cat: msg("고양이 쿠션"), speaker: msg("스피커"), cushion: msg("쿠션"), flowers: msg("꽃병"),

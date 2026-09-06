@@ -84,6 +84,7 @@ import {
 import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
 import { SignIn } from "./SignIn";
 import { ProfileRoom } from "./ProfileRoom";
+import { HomeDialog, HomeDirectory } from "./SocialHome";
 import type { RoomConfig } from "../lib/room";
 import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, type ApiNotification, type ApiNotificationPage, matchReasonText, type MatchReasonCode } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
@@ -531,6 +532,7 @@ function LingoLoopScreens({
 }) {
   setSignedInId(me.id);
   const [section, setSection] = useState<Section>("discover");
+  const [visitingHome, setVisitingHome] = useState<string|null>(null);
   const [modal, setModal] = useState<ModalState>(null);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   /* 내 글은 피드와 다른 목록입니다. 상수로 두면 좋아요·삭제가 화면에 남지 않습니다. */
@@ -1645,6 +1647,7 @@ function LingoLoopScreens({
 
   const openNotification = async (notification: ApiNotification) => {
     setModal(null);
+    if(notification.homeOwnerId) { setVisitingHome(notification.homeOwnerId); return; }
 
     if (notification.postId) {
       let post = posts.find((item) => item.id === notification.postId);
@@ -2187,6 +2190,7 @@ function LingoLoopScreens({
 
   return (
     <div className={`app-root section-${section}`}>
+      {visitingHome?<HomeDialog key={visitingHome} ownerId={visitingHome} onProfileUpdated={profile=>onProfileUpdated({...me,...profile})} onClose={()=>setVisitingHome(null)} onChat={profile=>{setVisitingHome(null);void startChat(toPartner(profile));}}/>:null}
       <a className="skip-link" href="#main-content">{t("본문으로 건너뛰기")}</a>
       <aside className="desktop-sidebar" aria-label={t("주요 메뉴")}>
         <button className="brand" type="button" onClick={() => goToSection("discover")} aria-label={t("TimoTalk 홈")}>
@@ -2489,6 +2493,7 @@ function LingoLoopScreens({
 
             {detail?.kind === "profile" ? (
               <ProfileDetailView
+                onVisitHome={setVisitingHome}
                 partner={detail.partner}
                 onStartChat={startChat}
                 following={followingIds.includes(detail.partner.id)}
@@ -2611,6 +2616,7 @@ function LingoLoopScreens({
             ) : null}
             {!detail && section === "learn" ? (
               <LearnView
+                onVisitHome={setVisitingHome}
                 onSaveRoom={async (config) => {
                   const updated = await api<ApiProfile>("/api/profile/room", { method: "PATCH", body: JSON.stringify({ config }) });
                   onProfileUpdated(updated);
@@ -3392,6 +3398,7 @@ function PostDetailView({
 
 /** 파트너 프로필 상세 화면. */
 function ProfileDetailView({
+  onVisitHome,
   partner,
   onStartChat,
   following,
@@ -3406,6 +3413,7 @@ function ProfileDetailView({
   card,
 }: {
   partner: Partner;
+  onVisitHome:(id:string)=>void;
   /* 뒤로가기·이름·신고/차단 메뉴는 상단 줄이 그립니다 — 다른 화면과 같은 자리입니다. */
   onStartChat: (partner: Partner) => void;
   /* 예전에는 "관심 파트너 저장" 이 따로 있었는데 어디에도 남지 않았습니다.
@@ -3472,7 +3480,7 @@ function ProfileDetailView({
 
       <p className="profile-head-bio">{partner.bio}</p>
 
-      <ProfileRoom name={partner.name} value={partner.roomConfig} avatar={partner.avatarConfig} />
+      <ProfileRoom name={partner.name} value={partner.roomConfig} avatar={partner.avatarConfig} onVisit={()=>onVisitHome(partner.id)} />
 
       <div className="profile-head-stats">
         <span><strong>{counts ? counts.posts : posts.length}</strong> {t("게시물")}</span>
@@ -5297,6 +5305,7 @@ function SettingsModal({
 }
 
 function LearnView({
+  onVisitHome,
   onSaveRoom,
   counts,
   onToast,
@@ -5320,6 +5329,7 @@ function LearnView({
   counts?: { following: number; followers: number; posts: number };
   onEditProfile: () => void;
   onSaveRoom: (room: RoomConfig) => Promise<void>;
+  onVisitHome:(id:string)=>void;
   onEditAvatar: () => void;
   savedItems: SavedPhrase[];
   onSavePhrase: (item: SavedPhrase) => void;
@@ -5347,7 +5357,8 @@ function LearnView({
 
   return (
     <div className="view learn-view compact-learn">
-      <ProfileRoom name={profileName} value={me.roomConfig} avatar={me.avatarConfig} onSave={onSaveRoom} />
+      <ProfileRoom name={profileName} value={me.roomConfig} avatar={me.avatarConfig} onSave={onSaveRoom} onVisit={()=>onVisitHome(me.id)} />
+      <HomeDirectory onVisit={onVisitHome}/>
       <header className="profile-head">
         <div className="profile-head-id">
           <span className="profile-head-name">{profileName}<AgeGender age={me.age} gender={me.gender} /><BadgeCheck size={18} className="verified" /></span>
@@ -5758,6 +5769,10 @@ function notificationCategory(type: ApiNotification["type"]): Exclude<Notificati
 function notificationPresentation(notification: ApiNotification): { icon: LucideIcon; accent: Accent; title: string } {
   const name = notification.actor?.name || t("알 수 없는 상대");
   switch (notification.type) {
+    case "home_entry": return {icon:MessageCircle,accent:"mint",title:t("{name}님이 방명록을 남겼어요",{name})};
+    case "home_reply": return {icon:MessageCircle,accent:"violet",title:t("{name}님이 방명록에 답했어요",{name})};
+    case "home_visit": return {icon:Heart,accent:"coral",title:t("{name}님이 집에 인사를 남겼어요",{name})};
+    case "home_heart": return {icon:Heart,accent:"coral",title:t("{name}님이 방명록을 좋아해요",{name})};
     case "post_like":
       return { icon: Heart, accent: "coral", title: t("{name}님이 내 글을 좋아해요", { name }) };
     case "post_reply":

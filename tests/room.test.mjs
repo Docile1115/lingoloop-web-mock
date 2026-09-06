@@ -23,7 +23,7 @@ test('editing adds, moves, flips and removes furniture without mutating saved la
     draft = room.addRoomItem(draft,id);
     assert.deepEqual(backend.validateRoomConfig(draft),draft);
   }
-  assert.equal(draft.items.length,12);
+  assert.equal(draft.items.length,16);
   assert.equal(room.addRoomItem(draft,'sofa'),draft);
   assert.equal(room.moveRoomItem(draft,'sofa',2,3),draft);
   assert.equal(room.moveRoomItem(draft,'sofa',-1,0),draft);
@@ -66,6 +66,16 @@ test('interactive SVG marks only curated furniture and never interpolates select
   assert.equal((svg.match(/data-room-item=/g)||[]).length,6);
   assert.equal((svg.match(/fill-opacity=".3"/g)||[]).length,1);
   assert.doesNotMatch(room.renderRoomSvg(room.DEFAULT_ROOM,undefined,'" onload="alert(1)'),/onload|alert/);
+});
+
+test('photo furniture only embeds bounded JPEG data and curated colors, never remote or SVG content', () => {
+  const config=room.addRoomItem(room.DEFAULT_ROOM,'frame');
+  const photo={id:'frame',image:'data:image/jpeg;base64,YWJj',shape:'portrait',color:'rose'};
+  const svg=room.renderRoomSvg(config,undefined,null,[photo]);
+  assert.match(svg,/<image href="data:image\/jpeg;base64,YWJj"/);
+  assert.match(svg,/#cc91a4/);
+  for(const image of ['https://evil.invalid/pixel','data:image/svg+xml;base64,PHN2Zz4=','" onload="alert(1)','data:image/jpeg;base64,'+'a'.repeat(410000)])assert.equal(room.roomPhotoShape({...photo,image}),'');
+  assert.doesNotMatch(room.roomPhotoShape({...photo,color:'__proto__',shape:'" onload="bad'}),/Object|onload|bad/);
 });
 
 test('web editor supports pointer cancellation and removes overlapping hotspots and forced scrolling', async () => {
