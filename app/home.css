@@ -1,4 +1,38 @@
 .home-directory { margin: 12px 0 20px; border:1px solid var(--line); border-radius:18px; padding:16px; }
+.social-home-dialog { width:min(1160px,calc(100vw - 32px))!important; height:90dvh; }
+.social-home-body { position:relative; }
+.room-play-canvas { width:min(100%,calc((100dvh - 320px)*600/460)); margin-inline:auto; aspect-ratio:600/460; cursor:crosshair; outline-offset:3px; }
+.room-play-canvas svg { display:block; width:100%; height:100%; }
+.room-play-canvas>div{width:100%;height:100%;}
+.room-style-controls summary{min-height:44px;cursor:pointer;padding:12px 0;}
+.room-style-controls>div{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;}
+.room-style-controls button span{width:16px;height:16px;border-radius:50%;border:1px solid var(--line);}
+.room-style-controls button[aria-pressed=true]{border-color:var(--primary-ink);background:var(--primary-soft);}
+.room-play-tools,.room-utility-tools,.room-object-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.room-play-tools span { flex:1; color:var(--muted); font-size:13px; }
+.room-object-actions { padding:12px; background:var(--primary-soft); border-radius:14px; }
+.room-furniture-tray { display:flex; gap:8px; overflow-x:auto; padding:8px 0 16px; }
+.room-furniture-tray button { flex:0 0 92px; flex-direction:column; font-size:12px; }
+.room-furniture-tray img { width:64px; height:60px; object-fit:contain; }
+.room-furniture-tray button[aria-pressed=true] { border-color:var(--primary-ink); background:var(--primary-soft); }
+.room-accessible-items { font-size:13px; color:var(--muted); margin-top:12px; }
+.room-accessible-items summary { min-height:44px; display:flex; align-items:center; cursor:pointer; }
+.home-object-sheet { position:fixed; right:max(24px,calc((100vw - 1100px)/2)); top:15vh; bottom:8vh; width:370px; overflow:auto; padding:16px; background:var(--surface); border:1px solid var(--line); border-radius:20px; box-shadow:0 20px 70px #0005; z-index:10; }
+.home-object-sheet>header { display:flex; justify-content:space-between; align-items:center; gap:8px; position:sticky; top:-16px; padding:8px 0; background:var(--surface); z-index:1; }
+.home-object-sheet h3 { margin:0; }
+.social-home-dialog:has(.home-object-sheet) .room-playground { margin-right:390px; }
+.social-home-dialog .home-report,.social-home-dialog .home-confirm { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:min(440px,calc(100vw - 40px)); max-height:80dvh; overflow:auto; z-index:20; box-shadow:0 0 0 100vmax #0006; }
+.room-walking { animation:room-step .24s ease-in-out infinite alternate; transform-box:fill-box; transform-origin:50% 100%; }
+.room-dancing { animation:room-dance .5s ease-in-out infinite alternate; transform-box:fill-box; transform-origin:50% 100%; }
+@keyframes room-step { to { transform:translateY(-6px) rotate(2deg); } }
+@keyframes room-dance { from { transform:rotate(-8deg); } to { transform:rotate(8deg) translateY(-8px); } }
+@media(prefers-reduced-motion:reduce) { .room-walking,.room-dancing { animation:none; } }
+@media(max-width:720px) {
+  .room-play-canvas { width:100%; }
+  .social-home-dialog { width:100%!important; height:100dvh; }
+  .social-home-dialog:has(.home-object-sheet) .room-playground { margin-right:0; }
+  .home-object-sheet { left:0; right:0; bottom:0; top:36dvh; width:auto; border-radius:22px 22px 0 0; padding-bottom:max(24px,env(safe-area-inset-bottom)); }
+}
 .home-directory h3 { margin:0 0 12px; font-size:16px; }
 .home-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
 .home-tabs button,.social-home-dialog button,.home-directory button,.home-visit-button { min-height:44px; border:1px solid var(--line); padding:8px 12px; border-radius:12px; color:var(--ink); background:var(--surface); display:inline-flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; }

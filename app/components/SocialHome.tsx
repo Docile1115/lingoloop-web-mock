@@ -9,7 +9,9 @@ import { t, currentLocaleSnapshot } from '../lib/i18n';
 import { useHome } from '../lib/use-home';
 import { HOME_FRAMES, HOME_GIFTS, HOME_GIFT_ICONS, HOME_SCOPES, HOME_STATUSES, type HomeData, type HomeDirectory as Directory, type HomeEntry, type HomePhoto, type HomeSettings } from '../lib/home';
 import { HOME_SCOPE_LABELS, HOME_STATUS_LABELS, HOME_GIFT_LABELS, HOME_FRAME_LABELS, HOME_SHAPE_LABELS, HOME_COLOR_LABELS } from '../lib/home-labels';
-import { addRoomItem, normalizeRoom, renderRoomSvg, type RoomItemId } from '../lib/room';
+import { addRoomItem, normalizeRoom, type RoomConfig, type RoomItemId } from '../lib/room';
+
+import { RoomPlayground } from './RoomPlayground';
 
 export function HomeDirectory({onVisit}:{onVisit:(id:string)=>void}) {
   const [kind,setKind]=useState<'following'|'followers'|'favorites'>('following');
@@ -25,25 +27,30 @@ export function HomeDirectory({onVisit}:{onVisit:(id:string)=>void}) {
 }
 
 /** A native dialog provides focus trapping; drafts are never saved by closing the house. */
-export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated}:{ownerId:string;onClose:()=>void;onChat:(profile:ApiProfile)=>void;onProfileUpdated?:(profile:ApiProfile)=>void}) {
+export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated,visitorAvatar}:{ownerId:string;onClose:()=>void;onChat:(profile:ApiProfile)=>void;onProfileUpdated?:(profile:ApiProfile)=>void;visitorAvatar?:unknown}) {
   const home=useHome(ownerId,api),data=home.data;
-  const [tab,setTab]=useState<'board'|'photos'|'gifts'|'settings'>('board');
+  const [tab,setTab]=useState<'board'|'photos'|'gifts'|'settings'|null>(null);
   const [localBusy,setLocalBusy]=useState(false),[localError,setLocalError]=useState('');
   const [confirm,setConfirm]=useState<null|(()=>Promise<void>)>(null);
   const [confirmLabel,setConfirmLabel]=useState('');
   const [report,setReport]=useState<{kind:string;id:string}|null>(null),[reason,setReason]=useState('');
   const [notice,setNotice]=useState('');
+  const [roomDirty,setRoomDirty]=useState(false);
+  const [frameId,setFrameId]=useState<HomePhoto['id']>('frame');
+  const saveRoom=async(config:RoomConfig)=>{if(guard.current||busy)return false;guard.current=true;setLocalBusy(true);setLocalError('');try{const profile=await api<ApiProfile>('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});onProfileUpdated?.(profile);await home.reload();return true;}catch(e){setLocalError(e instanceof Error?e.message:t("방을 저장하지 못했어요. 다시 시도해 주세요."));return false;}finally{guard.current=false;setLocalBusy(false);}};
   const dialog=useRef<HTMLDialogElement>(null), title=useId();
   const busy=home.busy||localBusy;
-  const guard=useRef(false); useEffect(()=>{guard.current=busy;},[busy]);
+  const guard=useRef(false);
   useEffect(()=>{const el=dialog.current!,focus=document.activeElement as HTMLElement|null;const overflow=document.body.style.overflow;document.body.style.overflow='hidden';el.showModal();return()=>{el.close();document.body.style.overflow=overflow;focus?.focus();};},[]);
-  const run=async(task:()=>Promise<unknown>)=>{if(guard.current)return;guard.current=true;setLocalBusy(true);setLocalError('');try{await task();await home.reload();}catch(e){setLocalError(e instanceof Error?e.message:t("요청을 처리하지 못했어요."));}finally{guard.current=false;setLocalBusy(false);}};
+  const run=async(task:()=>Promise<unknown>)=>{if(guard.current||busy)return;guard.current=true;setLocalBusy(true);setLocalError('');try{await task();await home.reload();}catch(e){setLocalError(e instanceof Error?e.message:t("요청을 처리하지 못했어요."));}finally{guard.current=false;setLocalBusy(false);}};
   const install=async(id:RoomItemId)=>{if(!data)return;await run(async()=>{const initial=normalizeRoom(data.roomConfig),config=addRoomItem(initial,id);if(config===initial&&!initial.items.some(item=>item.id===id))throw new Error(t("가구를 하나 치운 뒤 설치해 주세요."));const profile=await api<ApiProfile>('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});onProfileUpdated?.(profile);});};
   const boardInstalled=normalizeRoom(data?.roomConfig).items.some(item=>item.id==='whiteboard');
   const ask=(action:()=>Promise<void>,label=t("삭제하면 되돌릴 수 없어요. 삭제할까요?"))=>{setConfirmLabel(label);setConfirm(()=>action);};
   useEffect(()=>{if(confirm||report)dialog.current?.querySelector('.home-confirm, .home-report')?.scrollIntoView({block:'center'});},[confirm,report]);
-  return <dialog className="social-home-dialog" ref={dialog} aria-labelledby={title} onCancel={event=>{event.preventDefault();if(!guard.current)onClose();}}>
-    <header className="social-home-header"><div><small>TIMO HOME</small><h2 id={title}>{data?t("{name}님의 마이룸",{name:data.owner.name}):t("친구 집")}</h2></div><button type="button" className="home-icon" disabled={busy} onClick={onClose} aria-label={t("닫기")}><X/></button></header>
+  const closeHome=()=>{if(roomDirty)ask(async()=>onClose(),t("저장하지 않은 변경 사항이 있어요. 나갈까요?"));else onClose();};
+  useEffect(()=>{if(tab)dialog.current?.querySelector<HTMLButtonElement>('.home-object-sheet>header button')?.focus();},[tab,frameId]);
+  return <dialog className="social-home-dialog" ref={dialog} aria-labelledby={title} onCancel={event=>{event.preventDefault();if(!guard.current&&!busy)closeHome();}}>
+    <header className="social-home-header"><div><small>TIMO HOME</small><h2 id={title}>{data?t("{name}님의 마이룸",{name:data.owner.name}):t("친구 집")}</h2></div><button type="button" className="home-icon" disabled={busy} onClick={closeHome} aria-label={t("닫기")}><X/></button></header>
     <div className="social-home-body">
       {home.error||localError?<p className="home-error" role="alert">{home.error||localError}<button type="button" disabled={busy} onClick={()=>void home.reload()}>{t("다시 시도")}</button></p>:null}
       {home.loading?<p role="status">{t("불러오는 중…")}</p>:null}
@@ -52,14 +59,11 @@ export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated}:{ownerId:st
         <div className="home-door"><button type="button" disabled={busy} onClick={()=>void home.reload()}>{t("새로고침")}</button><span className={`home-status status-${data.settings.status}`}>● {t(HOME_STATUS_LABELS[data.settings.status])}</span><span>{t(HOME_SCOPE_LABELS[data.settings.visibility])}</span>
           {!data.own?<button type="button" disabled={busy} aria-pressed={data.favorite} onClick={()=>void home.act('/favorite','PUT',{favorite:!data.favorite})}><Star size={16}/>{t("즐겨찾기")}</button>:null}
         </div>
-        <HomeScene data={data} onBoard={()=>setTab('board')} onPhoto={()=>setTab('photos')}/>
+        <RoomPlayground visitorAvatar={visitorAvatar} data={data} busy={busy} onSave={saveRoom} onDirtyChange={setRoomDirty} onObject={id=>{if(id==='whiteboard')setTab('board');else if(HOME_FRAMES.includes(id as HomePhoto['id'])){setFrameId(id as HomePhoto['id']);setTab('photos');}}}/>
         {data.displayedGift?<div className="home-displayed-gift"><span>{HOME_GIFT_ICONS[data.displayedGift.gift]}</span><div><strong>{t("소중한 선물")}</strong><p>{data.displayedGift.note||t(HOME_GIFT_LABELS[data.displayedGift.gift])}</p><small>{data.displayedGift.author?.name}</small></div>{data.own?<button type="button" disabled={busy} onClick={()=>void home.act('/settings','PATCH',{displayedGiftId:''})}>{t("전시 해제")}</button>:null}</div>:null}
-        <div className="home-tabs" role="group" aria-label={t("마이룸 메뉴")}>
-          <button type="button" aria-pressed={tab==='board'} onClick={()=>setTab('board')}>{t("화이트보드")}</button>
-          <button type="button" aria-pressed={tab==='photos'} onClick={()=>setTab('photos')}>{t("사진 액자")}</button>
-          <button type="button" aria-pressed={tab==='gifts'} onClick={()=>setTab('gifts')}>{t("인사와 선물")}</button>
-          {data.own?<button type="button" aria-pressed={tab==='settings'} onClick={()=>setTab('settings')}>{t("집 설정")}</button>:<button type="button" disabled={busy} onClick={()=>onChat(data.owner)}><MessageCircle size={15}/>{t("대화하기")}</button>}
-        </div>
+        <div className="room-utility-tools"><button type="button" onClick={()=>setTab('gifts')}>{t("인사와 선물")}</button>{data.own?<button type="button" onClick={()=>setTab('settings')}>{t("집 설정")}</button>:<button type="button" disabled={busy} onClick={()=>onChat(data.owner)}><MessageCircle size={15}/>{t("대화하기")}</button>}</div>
+        {tab?<section className="home-object-sheet" aria-label={tab==='photos'?t(HOME_FRAME_LABELS[frameId]):tab==='board'?t("화이트보드"):tab==='gifts'?t("인사와 선물"):t("집 설정")}><header><h3>{tab==='photos'?t(HOME_FRAME_LABELS[frameId]):tab==='board'?t("화이트보드"):tab==='gifts'?t("인사와 선물"):t("집 설정")}</h3><button type="button" disabled={busy} onClick={()=>setTab(null)} aria-label={t("방으로 돌아가기")}><X/></button></header>
+        {home.error||localError?<p role="alert">{home.error||localError}</p>:null}
         {notice?<p role="status" className="home-hint">{notice}</p>:null}
         {tab==='board'?<>
           {!boardInstalled?<div className="home-empty"><h3>{t("화이트보드를 설치해 주세요")}</h3>{data.own?<button type="button" disabled={busy} onClick={()=>void install('whiteboard')}>{t("화이트보드 설치")}</button>:<p>{t("아직 방명록을 받지 않는 집이에요.")}</p>}</div>:null}
@@ -67,7 +71,7 @@ export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated}:{ownerId:st
           {boardInstalled?<HomeComposer data={data} busy={busy} act={home.act}/>:null}
           <HomeEntries key={ownerId} data={data} busy={busy} act={home.act} ask={ask} report={setReport} block={id=>run(()=>api(`/api/partners/${encodeURIComponent(id)}/block`,{method:'POST',body:'{}'}))}/>
         </>:null}
-        {tab==='photos'?<HomePhotos data={data} busy={busy} act={home.act} install={install} report={setReport} ask={ask}/>:null}
+        {tab==='photos'?<HomePhotos key={frameId} frameId={frameId} data={data} busy={busy} act={home.act} report={setReport} ask={ask}/>:null}
         {tab==='gifts'?<>
           {!data.own?<HomeGreeting data={data} busy={busy} act={home.act}/>:<p className="home-hint">{t("친구가 남긴 인사와 선물을 모았어요.")}</p>}
           {!data.own&&!data.settings.showVisitors?<p className="home-hint">{t("방문 기록은 집주인만 볼 수 있어요.")}</p>:null}
@@ -75,20 +79,12 @@ export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated}:{ownerId:st
           {data.own&&!data.visitors.length?<p className="home-hint">{t("아직 받은 인사나 선물이 없어요.")}</p>:null}
         </>:null}
         {tab==='settings'&&data.own?<HomeSettingsForm key={JSON.stringify(data.settings)} settings={data.settings} busy={busy} act={home.act}/>:null}
+        </section>:null}
       </>:null}
       {confirm?<section className="home-confirm" role="alert"><p>{confirmLabel}</p><button type="button" disabled={busy} onClick={()=>setConfirm(null)}>{t("취소")}</button><button type="button" disabled={busy} onClick={()=>{const action=confirm;setConfirm(null);void action();}}>{t("확인")}</button></section>:null}
       {report?<form className="home-report" onSubmit={event=>{event.preventDefault();void run(async()=>{const result=await api(`/api/homes/${encodeURIComponent(ownerId)}/reports`,{method:'POST',body:JSON.stringify({...report,reason})});setReport(null);setReason('');setNotice(t("신고를 접수했어요. 신고만으로 계정이 정지되지는 않아요."));return result;});}}><label>{t("신고 사유")}<textarea required maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><button type="button" disabled={busy} onClick={()=>setReport(null)}>{t("취소")}</button><button type="submit" disabled={busy||!reason.trim()}>{t("신고 보내기")}</button></form>:null}
     </div>
   </dialog>;
-}
-
-function HomeScene({data,onBoard,onPhoto}:{data:HomeData;onBoard:()=>void;onPhoto:()=>void}) {
-  const svg=renderRoomSvg(data.roomConfig,data.owner.avatarConfig,null,data.photos);
-  return <div className="home-scene">
-    {/* Only the shared allowlisted renderer can generate this markup; photo URIs accept raster JPEG data only. */}
-    <button type="button" className="home-scene-surface" aria-label={t("화이트보드 또는 액자를 눌러보세요")} onClick={event=>{const id=(event.target as Element).closest('[data-room-item]')?.getAttribute('data-room-item');if(id?.startsWith('frame'))onPhoto();else onBoard();}}><span role="img" aria-label={t("{name}님의 마이룸",{name:data.owner.name})} dangerouslySetInnerHTML={{__html:svg}}/></button>
-
-  </div>;
 }
 
 type Actions={busy:boolean;act:(suffix:string,method:string,body?:unknown)=>Promise<boolean>};
@@ -152,19 +148,18 @@ async function compressPhoto(file:File) {
   const url=URL.createObjectURL(file);
   try {const image=new Image();image.src=url;await image.decode();const factor=Math.min(1,960/Math.max(image.width,image.height));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.width*factor));canvas.height=Math.max(1,Math.round(image.height*factor));const context=canvas.getContext('2d');if(!context)throw new Error(t("사진을 읽을 수 없어요."));context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);const result=canvas.toDataURL('image/jpeg',.72);if(result.length>520000)throw new Error(t("사진을 줄여도 너무 커요. 다른 사진을 골라주세요."));return result;}finally{URL.revokeObjectURL(url);}
 }
-function HomePhotos({data,busy,act,install,report,ask}:{data:HomeData;install:(id:RoomItemId)=>Promise<void>;report:(target:{kind:string;id:string})=>void;ask:(action:()=>Promise<void>)=>void}&Actions) {
-  const [selected,setSelected]=useState<HomePhoto['id']>('frame'),[draft,setDraft]=useState<HomePhoto|null>(null),[error,setError]=useState(''),[processing,setProcessing]=useState(false),[large,setLarge]=useState<HomePhoto|null>(null);
+function HomePhotos({data,busy,act,frameId,report,ask}:{data:HomeData;frameId:HomePhoto['id'];report:(target:{kind:string;id:string})=>void;ask:(action:()=>Promise<void>)=>void}&Actions) {
+  const selected=frameId;
+  const [draft,setDraft]=useState<HomePhoto|null>(null),[error,setError]=useState(''),[processing,setProcessing]=useState(false),[large,setLarge]=useState<HomePhoto|null>(null);
   const saved=data.photos.find(photo=>photo.id===selected);
   const current=draft||saved||{id:selected,image:'',caption:'',visibility:'everyone' as const,shape:'square' as const,color:'oak' as const};
   const update=(patch:Partial<HomePhoto>)=>setDraft({...current,...patch});
   const choose=async(file?:File)=>{if(!file)return;setProcessing(true);setError('');try{update({image:await compressPhoto(file)});}catch(e){setError(e instanceof Error?e.message:t("사진을 읽을 수 없어요."));}finally{setProcessing(false);}};
-  return <section className="home-photos"><div className="home-photo-gallery">{data.photos.map(photo=><article key={photo.id}><button type="button" onClick={()=>setLarge(photo)}>
+  return <section className="home-photos"><div className="home-photo-gallery">{data.photos.filter(photo=>photo.id===frameId).map(photo=><article key={photo.id}><button type="button" onClick={()=>setLarge(photo)}>
     <img className={`home-photo frame-${photo.color} shape-${photo.shape}`} src={photo.image} alt={photo.caption||t(HOME_FRAME_LABELS[photo.id])}/><span>{photo.caption}</span></button>{!data.own?<button type="button" onClick={()=>report({kind:'photo',id:photo.id})}>{t("신고")}</button>:null}</article>)}</div>
-    {!data.photos.length?<p className="home-hint">{t("아직 걸어둔 사진이 없어요.")}</p>:null}
+    {!data.photos.some(photo=>photo.id===selected)?<p className="home-hint">{t("아직 걸어둔 사진이 없어요.")}</p>:null}
     {large?<div className="home-photo-large"><button type="button" onClick={()=>setLarge(null)}>{t("큰 사진 닫기")}</button><img src={large.image} alt={large.caption||t("사진")}/><p>{large.caption}</p></div>:null}
     {data.own?<form onSubmit={e=>{e.preventDefault();void act(`/photos/${selected}`,'PUT',{image:current.image,caption:current.caption,visibility:current.visibility,shape:current.shape,color:current.color}).then(ok=>{if(ok)setDraft(null);});}}>
-      <Choices label={t("꾸밀 액자")} values={HOME_FRAMES} value={selected} onChange={value=>{setSelected(value);setDraft(null);setError('');}} labels={Object.fromEntries(HOME_FRAMES.map(key=>[key,t(HOME_FRAME_LABELS[key])])) as Record<HomePhoto['id'],string>} disabled={busy||processing}/>
-      {!normalizeRoom(data.roomConfig).items.some(item=>item.id===selected)?<p className="home-hint">{t("사진을 방 안에 보이게 하려면 액자를 설치해 주세요.")} <button type="button" disabled={busy||processing} onClick={()=>void install(selected)}>{t("액자 설치")}</button></p>:null}
       <label>{t("사진 고르기")}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy||processing} onChange={e=>void choose(e.target.files?.[0])}/></label>
       {current.image? <div><img className={`home-photo-preview home-photo frame-${current.color} shape-${current.shape}`} src={current.image} alt={t("사진 미리보기")}/></div>:null}
       <label>{t("사진 설명")}<input value={current.caption} maxLength={160} disabled={busy||processing} onChange={e=>update({caption:e.target.value})}/></label>

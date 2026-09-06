@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { SvgXml } from 'react-native-svg';
+import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { useFocusEffect, useNavigation, usePreventRemove } from '@react-navigation/native';
+import { NativeRoomPlayground } from '../ui/RoomPlayground';
 import * as ImagePicker from 'expo-image-picker';
 import * as Crypto from 'expo-crypto';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useHome } from '@shared/use-home';
 import { HOME_FRAMES, HOME_GIFTS, HOME_GIFT_ICONS, HOME_SCOPES, HOME_STATUSES, type HomeData, type HomeDirectory, type HomeEntry, type HomePhoto, type HomeSettings } from '@shared/home';
 import { HOME_SCOPE_LABELS, HOME_STATUS_LABELS, HOME_GIFT_LABELS, HOME_FRAME_LABELS, HOME_SHAPE_LABELS, HOME_COLOR_LABELS } from '@shared/home-labels';
-import { addRoomItem, normalizeRoom, renderRoomSvg, type RoomItemId } from '@shared/room';
+import { addRoomItem, normalizeRoom, type RoomConfig, type RoomItemId } from '@shared/room';
 import { currentLocaleSnapshot } from '@shared/i18n/core';
 import { toPartner, type ApiNotification, type ApiProfile } from '@shared/live-data';
 import type { Partner } from '@shared/demo-data';
@@ -58,26 +58,34 @@ export function HomesScreen({onVisit}:{onVisit:(id:string)=>void}) {
 
 type HomeActions={act:(suffix:string,method:string,body?:unknown)=>Promise<boolean>;busy:boolean};
 export function HomeScreen({ownerId,onStartChat}:{ownerId:string;onStartChat:(partner:Partner)=>void}) {
-  const c=useTheme(),{refresh}=useSession(),home=useHome(ownerId,api),data=home.data;
-  const [tab,setTab]=useState<'board'|'photos'|'gifts'|'settings'>('board'),[error,setError]=useState(''),[localBusy,setLocalBusy]=useState(false);
+  const c=useTheme(),{refresh,me}=useSession(),home=useHome(ownerId,api),data=home.data;
+  const [tab,setTab]=useState<'board'|'photos'|'gifts'|'settings'|null>(null),[error,setError]=useState(''),[localBusy,setLocalBusy]=useState(false);
   const [report,setReport]=useState<{kind:string;id:string}|null>(null),[reason,setReason]=useState(''),[notice,setNotice]=useState('');
   const lock=useRef(false),scroll=useRef<ScrollView>(null);const busy=home.busy||localBusy;
   const run=async(task:()=>Promise<unknown>)=>{if(lock.current||home.busy)return;lock.current=true;setLocalBusy(true);setError('');try{await task();await home.reload();}catch(e){setError(errorText(e));}finally{lock.current=false;setLocalBusy(false);}};
   const install=async(id:RoomItemId)=>{if(!data)return;await run(async()=>{const initial=normalizeRoom(data.roomConfig),config=addRoomItem(initial,id);if(config===initial&&!initial.items.some(item=>item.id===id))throw new Error(t("가구를 하나 치운 뒤 설치해 주세요."));await api('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});await refresh();});};
+  const [frameId,setFrameId]=useState<HomePhoto['id']>('frame');
+  const saveRoom=async(config:RoomConfig)=>{if(lock.current||home.busy)return false;lock.current=true;setLocalBusy(true);try{await api('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});await refresh();await home.reload();return true;}catch(e){setError(errorText(e));return false;}finally{lock.current=false;setLocalBusy(false);}};
+  const [dragging,setDragging]=useState(false),[roomDirty,setRoomDirty]=useState(false),[leaveApproved,setLeaveApproved]=useState(false);
+  const navigation=useNavigation(),pendingLeave=useRef<(()=>void)|null>(null);
+  useEffect(()=>{if(leaveApproved){const leave=pendingLeave.current;pendingLeave.current=null;leave?.();}},[leaveApproved]);
+  usePreventRemove(!leaveApproved&&(roomDirty||busy),({data:route})=>{if(busy)return;Alert.alert(t("저장하지 않은 변경 사항이 있어요. 나갈까요?"),undefined,[{text:t("취소"),style:'cancel'},{text:t("확인"),onPress:()=>{pendingLeave.current=()=>navigation.dispatch(route.action);setLeaveApproved(true);}}]);});
   const actions={busy,act:home.act};
-  return <KeyboardAvoidingView style={{flex:1,backgroundColor:c.bg}} behavior={Platform.OS==='ios'?'padding':undefined} keyboardVerticalOffset={100}><ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,gap:16,paddingBottom:48}} onContentSizeChange={()=>{if(report)scroll.current?.scrollToEnd({animated:true});}}>
+  return <KeyboardAvoidingView style={{flex:1,backgroundColor:c.bg}} behavior={Platform.OS==='ios'?'padding':undefined} keyboardVerticalOffset={100}><ScrollView ref={scroll} scrollEnabled={!dragging} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,gap:16,paddingBottom:48}} onContentSizeChange={()=>{if(report)scroll.current?.scrollToEnd({animated:true});}}>
     {home.error||error?<Copy>{home.error||error}</Copy>:null}{home.loading?<Copy>{t("불러오는 중…")}</Copy>:null}
     {!data&&!home.loading?<Button disabled={busy} onPress={()=>void home.reload()}>{t("다시 시도")}</Button>:null}
     {data?<>
       <Copy>{t("{name}님의 마이룸",{name:data.owner.name})}</Copy><Button disabled={busy} onPress={()=>void home.reload()}>{t("새로고침")}</Button><Copy>● {t(HOME_STATUS_LABELS[data.settings.status])} · {t(HOME_SCOPE_LABELS[data.settings.visibility])}</Copy>
-      <View accessible accessibilityRole="image" accessibilityLabel={t("{name}님의 마이룸",{name:data.owner.name})} style={{width:'100%',aspectRatio:600/460}}><SvgXml xml={renderRoomSvg(data.roomConfig,data.owner.avatarConfig,null,data.photos)} width="100%" height="100%"/></View>
+      <NativeRoomPlayground visitorAvatar={me?.avatarConfig} data={data} busy={busy} onSave={saveRoom} onDirtyChange={setRoomDirty} onDragChange={setDragging} onObject={id=>{if(id==='whiteboard')setTab('board');else if(HOME_FRAMES.includes(id as HomePhoto['id'])){setFrameId(id as HomePhoto['id']);setTab('photos');}}}/>
       {!data.own?<Row><Button selected={data.favorite} disabled={busy} onPress={()=>void home.act('/favorite','PUT',{favorite:!data.favorite})}>{t("즐겨찾기")}</Button><Button disabled={busy} onPress={()=>onStartChat(toPartner(data.owner as ApiProfile))}>{t("대화하기")}</Button></Row>:null}
       {data.displayedGift?<Card><Copy>{t("소중한 선물")} {HOME_GIFT_ICONS[data.displayedGift.gift]}</Copy><Copy>{data.displayedGift.note} · {data.displayedGift.author?.name}</Copy>{data.own?<Button disabled={busy} onPress={()=>void home.act('/settings','PATCH',{displayedGiftId:''})}>{t("전시 해제")}</Button>:null}</Card>:null}
-      <Row><Button selected={tab==='board'} onPress={()=>setTab('board')}>{t("화이트보드")}</Button><Button selected={tab==='photos'} onPress={()=>setTab('photos')}>{t("사진 액자")}</Button><Button selected={tab==='gifts'} onPress={()=>setTab('gifts')}>{t("인사와 선물")}</Button>{data.own?<Button selected={tab==='settings'} onPress={()=>setTab('settings')}>{t("집 설정")}</Button>:null}</Row>
-      {tab==='board'?<NativeBoard data={data} {...actions} install={()=>install('whiteboard')} report={setReport} block={id=>run(()=>api(`/api/partners/${encodeURIComponent(id)}/block`,{method:'POST',body:'{}'}))}/>:null}
-      {tab==='photos'?<NativePhotos data={data} {...actions} install={install} report={setReport}/>:null}
-      {tab==='gifts'?<NativeGifts data={data} {...actions} report={setReport}/>:null}
+      <Row><Button onPress={()=>setTab('gifts')}>{t("인사와 선물")}</Button>{data.own?<Button onPress={()=>setTab('settings')}>{t("집 설정")}</Button>:null}{tab?<Button onPress={()=>setTab(null)}>{t("방으로 돌아가기")}</Button>:null}</Row>
+      <Modal visible={tab!==null} transparent animationType="slide" onRequestClose={()=>{if(!busy)setTab(null);}}><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={{flex:1,justifyContent:'flex-end',backgroundColor:'#0005'}}><View style={{maxHeight:'70%',backgroundColor:c.surface,borderTopLeftRadius:24,borderTopRightRadius:24,padding:16}}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{gap:14,paddingBottom:30}}>{home.error||error?<Copy>{home.error||error}</Copy>:null}<Copy>{tab==='photos'?t(HOME_FRAME_LABELS[frameId]):tab==='board'?t("화이트보드"):tab==='gifts'?t("인사와 선물"):t("집 설정")}</Copy><Button disabled={busy} onPress={()=>setTab(null)}>{t("방으로 돌아가기")}</Button>
+      {tab==='board'?<NativeBoard data={data} {...actions} install={()=>install('whiteboard')} report={target=>{setTab(null);setReport(target);}} block={id=>run(()=>api(`/api/partners/${encodeURIComponent(id)}/block`,{method:'POST',body:'{}'}))}/>:null}
+      {tab==='photos'?<NativePhotos key={frameId} frameId={frameId} data={data} {...actions} report={target=>{setTab(null);setReport(target);}}/>:null}
+      {tab==='gifts'?<NativeGifts data={data} {...actions} report={target=>{setTab(null);setReport(target);}}/>:null}
       {tab==='settings'&&data.own?<NativeSettings key={JSON.stringify(data.settings)} value={data.settings} {...actions}/>:null}
+      </ScrollView></View></KeyboardAvoidingView></Modal>
     </>:null}
     {notice?<Copy>{notice}</Copy>:null}
     {report?<Card><Field label={t("신고 사유")} value={reason} onChange={setReason} disabled={busy}/><Row><Button disabled={busy} onPress={()=>setReport(null)}>{t("취소")}</Button><Button disabled={busy||!reason.trim()} onPress={()=>void run(async()=>{await api(`/api/homes/${encodeURIComponent(ownerId)}/reports`,{method:'POST',body:JSON.stringify({...report,reason})});setReport(null);setReason('');setNotice(t("신고를 접수했어요. 신고만으로 계정이 정지되지는 않아요."));})}>{t("신고 보내기")}</Button></Row></Card>:null}
@@ -133,16 +141,16 @@ function NativeGifts({data,busy,act,report}:{data:HomeData;report:(target:{kind:
   </View>;
 }
 
-function NativePhotos({data,busy,act,install,report}:{data:HomeData;install:(id:RoomItemId)=>Promise<void>;report:(target:{kind:string;id:string})=>void}&HomeActions) {
-  const [selected,setSelected]=useState<HomePhoto['id']>('frame'),[draft,setDraft]=useState<HomePhoto|null>(null),[error,setError]=useState(''),[processing,setProcessing]=useState(false),[large,setLarge]=useState<HomePhoto|null>(null);
+function NativePhotos({data,busy,act,frameId,report}:{data:HomeData;frameId:HomePhoto['id'];report:(target:{kind:string;id:string})=>void}&HomeActions) {
+  const selected=frameId;
+  const [draft,setDraft]=useState<HomePhoto|null>(null),[error,setError]=useState(''),[processing,setProcessing]=useState(false),[large,setLarge]=useState<HomePhoto|null>(null);
   const saved=data.photos.find(photo=>photo.id===selected),current=draft||saved||{id:selected,image:'',caption:'',visibility:'everyone' as const,shape:'square' as const,color:'oak' as const};
   const update=(patch:Partial<HomePhoto>)=>setDraft({...current,...patch});const disabled=busy||processing;
   const choose=async()=>{if(disabled)return;setProcessing(true);setError('');try{const picked=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsMultipleSelection:false,quality:1});if(picked.canceled)return;const asset=picked.assets[0];if((asset.fileSize||0)>12000000)throw new Error(t("12MB 이하의 JPG, PNG, WebP 사진을 골라주세요."));const context=ImageManipulator.manipulate(asset.uri);if(Math.max(asset.width,asset.height)>960)context.resize(asset.width>=asset.height?{width:960}:{height:960});const rendered=await context.renderAsync();const result=await rendered.saveAsync({format:SaveFormat.JPEG,compress:.72,base64:true});if(!result.base64||result.base64.length>519970)throw new Error(t("사진을 줄여도 너무 커요. 다른 사진을 골라주세요."));update({image:`data:image/jpeg;base64,${result.base64}`});}catch(e){setError(errorText(e));}finally{setProcessing(false);}};
-  return <View style={{gap:16}}>{data.photos.map(photo=><Card key={photo.id}><Pressable accessibilityRole="button" accessibilityLabel={photo.caption||t(HOME_FRAME_LABELS[photo.id])} onPress={()=>setLarge(photo)}><Image source={{uri:photo.image}} style={{height:200,width:'100%',borderRadius:12}} resizeMode="contain"/></Pressable><Copy>{photo.caption}</Copy>{!data.own?<Button onPress={()=>report({kind:'photo',id:photo.id})}>{t("신고")}</Button>:null}</Card>)}
+  return <View style={{gap:16}}>{data.photos.filter(photo=>photo.id===frameId).map(photo=><Card key={photo.id}><Pressable accessibilityRole="button" accessibilityLabel={photo.caption||t(HOME_FRAME_LABELS[photo.id])} onPress={()=>setLarge(photo)}><Image source={{uri:photo.image}} style={{height:200,width:'100%',borderRadius:12}} resizeMode="contain"/></Pressable><Copy>{photo.caption}</Copy>{!data.own?<Button onPress={()=>report({kind:'photo',id:photo.id})}>{t("신고")}</Button>:null}</Card>)}
     {!data.photos.length?<Copy>{t("아직 걸어둔 사진이 없어요.")}</Copy>:null}
     {large?<Card><Image source={{uri:large.image}} style={{width:'100%',height:420}} resizeMode="contain"/><Copy>{large.caption}</Copy><Button onPress={()=>setLarge(null)}>{t("큰 사진 닫기")}</Button></Card>:null}
-    {data.own?<Card><Choices label={t("꾸밀 액자")} values={HOME_FRAMES} value={selected} onChange={value=>{setSelected(value);setDraft(null);}} labels={Object.fromEntries(HOME_FRAMES.map(key=>[key,t(HOME_FRAME_LABELS[key])])) as Record<HomePhoto['id'],string>} disabled={disabled}/>
-      {!normalizeRoom(data.roomConfig).items.some(item=>item.id===selected)?<><Copy>{t("사진을 방 안에 보이게 하려면 액자를 설치해 주세요.")}</Copy><Button disabled={disabled} onPress={()=>void install(selected)}>{t("액자 설치")}</Button></>:null}
+    {data.own?<Card>
       <Button disabled={disabled} onPress={()=>void choose()}>{processing?t("처리 중…"):t("사진 고르기")}</Button>
       {current.image?<Image accessibilityLabel={t("사진 미리보기")} source={{uri:current.image}} style={{width:'100%',height:200}} resizeMode="contain"/>:null}
       <Field label={t("사진 설명")} value={current.caption} onChange={caption=>update({caption})} max={160} disabled={disabled}/>
