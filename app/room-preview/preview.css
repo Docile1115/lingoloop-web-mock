@@ -1,0 +1,562 @@
+.r3-preview {
+  --r3-ink: #303d33;
+  --r3-green: #45644e;
+  --r3-line: #dadcd1;
+  min-height: 100dvh;
+  background: #f8f8f2;
+  color: var(--r3-ink);
+  font-family: Arial, "Noto Sans KR", sans-serif;
+  padding: 0 32px 16px;
+  color-scheme: light;
+}
+.r3-preview * {
+  box-sizing: border-box;
+}
+.r3-preview button,
+.r3-preview a {
+  touch-action: manipulation;
+}
+.r3-preview button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 42px;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.r3-preview button:hover {
+  background: #e9ecdf;
+}
+.r3-preview button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.r3-preview button:focus-visible,
+.r3-preview a:focus-visible,
+.r3-preview textarea:focus-visible,
+.r3-preview summary:focus-visible {
+  outline: 3px solid #8caa76;
+  outline-offset: 3px;
+}
+.r3-header {
+  height: 86px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.r3-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--r3-line);
+  border-radius: 50%;
+  color: inherit;
+}
+.r3-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.r3-brand > span {
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.7px;
+}
+.r3-brand em {
+  font-size: 11px;
+  letter-spacing: 2px;
+  font-style: normal;
+  font-weight: 500;
+  margin-left: 7px;
+  color: #78846e;
+}
+.r3-brand small {
+  font-size: 11px;
+  color: #7d8376;
+}
+.r3-badge {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #77806c;
+  border: 1px solid var(--r3-line);
+  border-radius: 30px;
+  padding: 9px 14px;
+}
+.r3-stage {
+  position: relative;
+  height: calc(100dvh - 205px);
+  min-height: 480px;
+  max-height: 1000px;
+  overflow: hidden;
+  border: 1px solid #dfded2;
+  border-radius: 22px;
+  background: #e8e5db;
+}
+.r3-canvas {
+  position: absolute;
+  inset: 0;
+}
+.r3-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.r3-scene-title {
+  position: absolute;
+  left: 27px;
+  top: 27px;
+  pointer-events: none;
+  z-index: 1;
+}
+.r3-scene-title > span {
+  font-size: 9px;
+  letter-spacing: 2.1px;
+  color: #747d67;
+}
+.r3-scene-title h1 {
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -1px;
+  margin: 9px 0;
+}
+.r3-scene-title p {
+  font-size: 12px;
+  margin: 0;
+  color: #727865;
+}
+.r3-modes {
+  position: absolute;
+  right: 22px;
+  top: 22px;
+  background: #fafbf2ed;
+  display: flex;
+  padding: 5px;
+  gap: 4px;
+  border: 1px solid #fff8;
+  border-radius: 16px;
+  box-shadow: 0 4px 18px #384b2710;
+}
+.r3-modes button {
+  padding: 0 15px;
+  min-height: 39px;
+}
+.r3-modes button[aria-pressed="true"] {
+  background: var(--r3-green);
+  color: white;
+  box-shadow: 0 2px 5px #0001;
+}
+.r3-camera {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  display: flex;
+  flex-direction: column;
+  background: #fafbf2ed;
+  border: 1px solid #fff8;
+  border-radius: 14px;
+  padding: 3px;
+  gap: 2px;
+}
+.r3-status {
+  position: absolute;
+  bottom: 23px;
+  left: 24px;
+  font-size: 12px;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  background: #fafbf2e8;
+  padding: 12px 16px;
+  border-radius: 40px;
+  pointer-events: none;
+}
+.r3-status > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7a9166;
+}
+.r3-status > span.moving {
+  animation: r3-pulse 1s ease infinite;
+}
+.r3-context {
+  position: absolute;
+  bottom: 25px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fffef8f5;
+  padding: 12px 14px 12px 20px;
+  box-shadow: 0 8px 30px #37422320;
+  border: 1px solid #fff;
+  border-radius: 18px;
+  max-width: calc(100% - 135px);
+}
+.r3-context > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 72px;
+  margin-right: 10px;
+}
+.r3-context small {
+  font-size: 10px;
+  color: #87907c;
+}
+.r3-context strong {
+  font-size: 15px;
+  white-space: nowrap;
+}
+.r3-preview .r3-primary {
+  background: var(--r3-green);
+  color: #fff;
+  padding: 0 17px;
+  white-space: nowrap;
+}
+.r3-preview .r3-primary:hover {
+  background: #324e3a;
+}
+.r3-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #e8e5dbed;
+  padding: 40px;
+  text-align: center;
+  font-size: 14px;
+  z-index: 5;
+}
+.r3-spin {
+  animation: r3-spin 1s linear infinite;
+}
+.r3-toolbar {
+  min-height: 74px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 4px;
+}
+.r3-hint {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.r3-hint small {
+  color: #8b9283;
+  font-size: 11px;
+}
+.r3-preview .r3-secondary {
+  border-color: var(--r3-line);
+  padding: 0 16px;
+  white-space: nowrap;
+}
+.r3-catalog {
+  display: flex;
+  gap: 8px;
+  overflow: auto;
+  padding-bottom: 3px;
+}
+.r3-catalog button {
+  border: 1px solid var(--r3-line);
+  padding: 0 17px;
+  white-space: nowrap;
+  background: #fffef8;
+}
+.r3-preview-note {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10px;
+  color: #8b9283;
+  padding: 0 4px;
+  line-height: 1.6;
+}
+.r3-access {
+  margin: 12px 4px 0;
+  color: #7a826f;
+  font-size: 11px;
+}
+.r3-access summary {
+  cursor: pointer;
+  width: max-content;
+}
+.r3-access > div {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.r3-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #202c2560;
+  backdrop-filter: blur(5px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.r3-modal {
+  width: 420px;
+  max-width: 100%;
+  max-height: 85dvh;
+  overflow: auto;
+  background: #fafaf4;
+  border-radius: 24px;
+  padding: 25px;
+  box-shadow: 0 24px 70px #14220c40;
+}
+.r3-modal-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.r3-modal-top > span {
+  width: 48px;
+  height: 48px;
+  background: #e7ecde;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  color: #58714e;
+}
+.r3-modal h2 {
+  font-size: 21px;
+  letter-spacing: -0.6px;
+  margin: 22px 0 9px;
+}
+.r3-modal > p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #848d7b;
+}
+.r3-upload {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 13px;
+  min-height: 190px;
+  border: 1px dashed #adb99f;
+  border-radius: 16px;
+  margin-top: 22px;
+  background: #eff1e6;
+  color: #69815a;
+  cursor: pointer;
+}
+.r3-upload strong {
+  font-size: 14px;
+}
+.r3-upload span {
+  font-size: 11px;
+  color: #8b957f;
+}
+.r3-upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+.r3-upload:focus-within {
+  outline: 3px solid #8caa76;
+  outline-offset: 3px;
+}
+.r3-modal textarea {
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+  border: 1px solid #d2d9c7;
+  border-radius: 13px;
+  background: #fffef8;
+  color: #334333;
+  padding: 14px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.r3-form-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 9px;
+}
+.r3-form-bottom small {
+  color: #8c9581;
+  font-size: 11px;
+}
+.r3-notes {
+  max-height: 210px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  margin: 20px 0;
+}
+.r3-notes p {
+  margin: 0;
+  padding: 17px;
+  border-radius: 2px 14px 14px;
+  background: #e7ead9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.r3-modal-backdrop {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: var(--r3-ink);
+}
+.r3-modal-backdrop::backdrop {
+  background: transparent;
+}
+@keyframes r3-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes r3-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .r3-preview * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+@media (max-width: 700px) {
+  .r3-preview {
+    padding: 0 12px 16px;
+  }
+  .r3-header {
+    height: 72px;
+    gap: 12px;
+  }
+  .r3-brand > span {
+    font-size: 20px;
+  }
+  .r3-badge {
+    font-size: 8px;
+    letter-spacing: 1px;
+    padding: 8px;
+  }
+  .r3-stage {
+    height: calc(100dvh - 240px);
+    min-height: 460px;
+    border-radius: 18px;
+  }
+  .r3-scene-title {
+    left: 18px;
+    top: 19px;
+  }
+  .r3-scene-title h1 {
+    font-size: 22px;
+  }
+  .r3-scene-title p {
+    font-size: 10px;
+  }
+  .r3-modes {
+    top: 110px;
+    left: 17px;
+    right: auto;
+    padding: 3px;
+    border-radius: 13px;
+  }
+  .r3-modes button {
+    min-height: 37px;
+    font-size: 11px;
+    padding: 0 11px;
+  }
+  .r3-camera {
+    right: 12px;
+    bottom: 16px;
+  }
+  .r3-status {
+    bottom: 17px;
+    left: 13px;
+    max-width: calc(100% - 80px);
+    padding: 10px 12px;
+    font-size: 10px;
+  }
+  .r3-context {
+    bottom: 68px;
+    left: 12px;
+    transform: none;
+    max-width: calc(100% - 74px);
+    gap: 3px;
+    padding: 10px 8px 10px 13px;
+  }
+  .r3-context > div {
+    min-width: 44px;
+    margin-right: 4px;
+  }
+  .r3-context strong {
+    font-size: 13px;
+  }
+  .r3-context button {
+    min-width: 36px;
+    padding: 0 9px !important;
+    font-size: 11px;
+  }
+  .r3-toolbar {
+    min-height: 87px;
+    gap: 9px;
+  }
+  .r3-hint {
+    gap: 8px;
+    font-size: 10px;
+  }
+  .r3-hint small {
+    font-size: 9px;
+    line-height: 1.7;
+  }
+  .r3-preview .r3-secondary {
+    font-size: 11px;
+    padding: 0 10px;
+  }
+  .r3-preview-note {
+    flex-direction: column;
+    gap: 1px;
+    font-size: 9px;
+  }
+  .r3-catalog {
+    padding: 4px 0 8px;
+  }
+  .r3-modal {
+    padding: 22px;
+  }
+  .r3-modal h2 {
+    font-size: 19px;
+  }
+}

@@ -12,6 +12,7 @@ import { HOME_SCOPE_LABELS, HOME_STATUS_LABELS, HOME_GIFT_LABELS, HOME_FRAME_LAB
 import { addRoomItem, normalizeRoom, type RoomConfig, type RoomItemId } from '../lib/room';
 
 import { RoomPlayground } from './RoomPlayground';
+import { Room3DHome } from './Room3DHome';
 
 export function HomeDirectory({onVisit}:{onVisit:(id:string)=>void}) {
   const [kind,setKind]=useState<'following'|'followers'|'favorites'>('following');
@@ -36,6 +37,8 @@ export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated,visitorAvata
   const [report,setReport]=useState<{kind:string;id:string}|null>(null),[reason,setReason]=useState('');
   const [notice,setNotice]=useState('');
   const [roomDirty,setRoomDirty]=useState(false);
+  const [dimension,setDimension]=useState<'auto'|'2d'|'3d'>('auto');
+  const show3d=dimension==='3d'||(dimension==='auto'&&!!(data?.room3d||data?.own));
   const [frameId,setFrameId]=useState<HomePhoto['id']>('frame');
   const saveRoom=async(config:RoomConfig)=>{if(guard.current||busy)return false;guard.current=true;setLocalBusy(true);setLocalError('');try{const profile=await api<ApiProfile>('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});onProfileUpdated?.(profile);await home.reload();return true;}catch(e){setLocalError(e instanceof Error?e.message:t("방을 저장하지 못했어요. 다시 시도해 주세요."));return false;}finally{guard.current=false;setLocalBusy(false);}};
   const dialog=useRef<HTMLDialogElement>(null), title=useId();
@@ -44,7 +47,7 @@ export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated,visitorAvata
   useEffect(()=>{const el=dialog.current!,focus=document.activeElement as HTMLElement|null;const overflow=document.body.style.overflow;document.body.style.overflow='hidden';el.showModal();return()=>{el.close();document.body.style.overflow=overflow;focus?.focus();};},[]);
   const run=async(task:()=>Promise<unknown>)=>{if(guard.current||busy)return;guard.current=true;setLocalBusy(true);setLocalError('');try{await task();await home.reload();}catch(e){setLocalError(e instanceof Error?e.message:t("요청을 처리하지 못했어요."));}finally{guard.current=false;setLocalBusy(false);}};
   const install=async(id:RoomItemId)=>{if(!data)return;await run(async()=>{const initial=normalizeRoom(data.roomConfig),config=addRoomItem(initial,id);if(config===initial&&!initial.items.some(item=>item.id===id))throw new Error(t("가구를 하나 치운 뒤 설치해 주세요."));const profile=await api<ApiProfile>('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});onProfileUpdated?.(profile);});};
-  const boardInstalled=normalizeRoom(data?.roomConfig).items.some(item=>item.id==='whiteboard');
+  const boardInstalled=data?.room3d?data.room3d.items.some(item=>item.kind==='board'):normalizeRoom(data?.roomConfig).items.some(item=>item.id==='whiteboard');
   const ask=(action:()=>Promise<void>,label=t("삭제하면 되돌릴 수 없어요. 삭제할까요?"))=>{setConfirmLabel(label);setConfirm(()=>action);};
   useEffect(()=>{if(confirm||report)dialog.current?.querySelector('.home-confirm, .home-report')?.scrollIntoView({block:'center'});},[confirm,report]);
   const closeHome=()=>{if(roomDirty)ask(async()=>onClose(),t("저장하지 않은 변경 사항이 있어요. 나갈까요?"));else onClose();};
@@ -56,12 +59,13 @@ export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated,visitorAvata
       {home.loading?<p role="status">{t("불러오는 중…")}</p>:null}
       {!data&&!home.loading?<div className="home-locked"><LockKeyhole/><p>{t("공개 설정 또는 연결 상태를 확인해 주세요.")}</p></div>:null}
       {data?<>
-        <div className="home-door"><button type="button" disabled={busy} onClick={()=>void home.reload()}>{t("새로고침")}</button><span className={`home-status status-${data.settings.status}`}>● {t(HOME_STATUS_LABELS[data.settings.status])}</span><span>{t(HOME_SCOPE_LABELS[data.settings.visibility])}</span>
+        <div className="home-door"><button type="button" disabled={busy||roomDirty} onClick={()=>void home.reload()}>{t("새로고침")}</button><span className={`home-status status-${data.settings.status}`}>● {t(HOME_STATUS_LABELS[data.settings.status])}</span><span>{t(HOME_SCOPE_LABELS[data.settings.visibility])}</span>
           {!data.own?<button type="button" disabled={busy} aria-pressed={data.favorite} onClick={()=>void home.act('/favorite','PUT',{favorite:!data.favorite})}><Star size={16}/>{t("즐겨찾기")}</button>:null}
         </div>
-        <RoomPlayground visitorAvatar={visitorAvatar} data={data} busy={busy} onSave={saveRoom} onDirtyChange={setRoomDirty} onObject={id=>{if(id==='whiteboard')setTab('board');else if(HOME_FRAMES.includes(id as HomePhoto['id'])){setFrameId(id as HomePhoto['id']);setTab('photos');}}}/>
-        {data.displayedGift?<div className="home-displayed-gift"><span>{HOME_GIFT_ICONS[data.displayedGift.gift]}</span><div><strong>{t("소중한 선물")}</strong><p>{data.displayedGift.note||t(HOME_GIFT_LABELS[data.displayedGift.gift])}</p><small>{data.displayedGift.author?.name}</small></div>{data.own?<button type="button" disabled={busy} onClick={()=>void home.act('/settings','PATCH',{displayedGiftId:''})}>{t("전시 해제")}</button>:null}</div>:null}
-        <div className="room-utility-tools"><button type="button" onClick={()=>setTab('gifts')}>{t("인사와 선물")}</button>{data.own?<button type="button" onClick={()=>setTab('settings')}>{t("집 설정")}</button>:<button type="button" disabled={busy} onClick={()=>onChat(data.owner)}><MessageCircle size={15}/>{t("대화하기")}</button>}</div>
+        <div className="home-tabs"><button type="button" aria-pressed={show3d} disabled={busy||roomDirty||(!data.own&&!data.room3d)} onClick={()=>{setDimension('3d');setTab(null);}}>{t("3D 공간")}</button><button type="button" aria-pressed={!show3d} disabled={busy||roomDirty} onClick={()=>{setDimension('2d');setTab(null);}}>{t("기존 2D 방")}</button></div>
+        {show3d?<Room3DHome data={data} busy={busy} suspended={!!tab||!!confirm||!!report} onSave={(config,revision)=>home.act('/room3d','PUT',{config,revision})} onDirtyChange={setRoomDirty} onObject={id=>{if(id==='whiteboard')setTab('board');else if(HOME_FRAMES.includes(id as HomePhoto['id'])){setFrameId(id as HomePhoto['id']);setTab('photos');}}}/>:<RoomPlayground visitorAvatar={visitorAvatar} data={data} busy={busy} onSave={saveRoom} onDirtyChange={setRoomDirty} onObject={id=>{if(id==='whiteboard')setTab('board');else if(HOME_FRAMES.includes(id as HomePhoto['id'])){setFrameId(id as HomePhoto['id']);setTab('photos');}}}/>}
+        {data.displayedGift?<div className="home-displayed-gift"><span>{HOME_GIFT_ICONS[data.displayedGift.gift]}</span><div><strong>{t("소중한 선물")}</strong><p>{data.displayedGift.note||t(HOME_GIFT_LABELS[data.displayedGift.gift])}</p><small>{data.displayedGift.author?.name}</small></div>{data.own?<button type="button" disabled={busy||roomDirty} onClick={()=>void home.act('/settings','PATCH',{displayedGiftId:''})}>{t("전시 해제")}</button>:null}</div>:null}
+        <div className="room-utility-tools"><button type="button" disabled={busy||roomDirty} onClick={()=>setTab('gifts')}>{t("인사와 선물")}</button>{data.own?<button type="button" disabled={busy||roomDirty} onClick={()=>setTab('settings')}>{t("집 설정")}</button>:<button type="button" disabled={busy} onClick={()=>onChat(data.owner)}><MessageCircle size={15}/>{t("대화하기")}</button>}</div>
         {tab?<section className="home-object-sheet" aria-label={tab==='photos'?t(HOME_FRAME_LABELS[frameId]):tab==='board'?t("화이트보드"):tab==='gifts'?t("인사와 선물"):t("집 설정")}><header><h3>{tab==='photos'?t(HOME_FRAME_LABELS[frameId]):tab==='board'?t("화이트보드"):tab==='gifts'?t("인사와 선물"):t("집 설정")}</h3><button type="button" disabled={busy} onClick={()=>setTab(null)} aria-label={t("방으로 돌아가기")}><X/></button></header>
         {home.error||localError?<p role="alert">{home.error||localError}</p>:null}
         {notice?<p role="status" className="home-hint">{notice}</p>:null}
