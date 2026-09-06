@@ -213,8 +213,7 @@ function Tabs() {
           <MeScreen
             onEdit={() => navigation.navigate("EditProfile")}
             onEditAvatar={() => navigation.navigate("AvatarEditor")}
-            onEditRoom={() => navigation.navigate("RoomEditor")}
-            onHomes={() => navigation.navigate("Homes")}
+            onHomes={(ownerId) => ownerId?navigation.navigate("Home",{ownerId}):navigation.navigate("Homes")}
             onOpenPost={(post) => navigation.navigate("PostDetail", { post })}
           />
         )}

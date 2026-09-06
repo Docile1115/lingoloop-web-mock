@@ -4,13 +4,13 @@ import { useRef, useState, type PointerEvent } from 'react';
 import { Move } from 'lucide-react';
 import { t } from '../lib/i18n';
 import { ROOM_LABELS } from '../lib/room-labels';
-import { canPlaceRoomItem, moveRoomItem, renderRoomSvg, roomCell, roomPoint, type RoomConfig, type RoomItemId } from '../lib/room';
+import { canPlaceRoomItem, moveRoomItem, renderRoomSvg, roomCell, roomPoint, type RoomConfig, type RoomItemId, type RoomPhoto } from '../lib/room';
 import type { AvatarConfig } from '../lib/avatar';
 
-type Props = { value: RoomConfig; avatar?: AvatarConfig | null; selected: RoomItemId | null; disabled: boolean; onSelect: (id: RoomItemId) => void; onChange: (value: RoomConfig) => void; onBlocked: () => void };
+type Props = { value: RoomConfig; avatar?: AvatarConfig | null; photos?:readonly RoomPhoto[]; selected: RoomItemId | null; disabled: boolean; onSelect: (id: RoomItemId) => void; onChange: (value: RoomConfig) => void; onBlocked: () => void };
 type Gesture = { pointerId: number; id: RoomItemId; startX: number; startY: number; originX: number; originY: number; width: number; moved: boolean; x: number; y: number };
 
-export function RoomCanvas({ value, avatar, selected, disabled, onSelect, onChange, onBlocked }: Props) {
+export function RoomCanvas({ value, avatar, photos, selected, disabled, onSelect, onChange, onBlocked }: Props) {
   const gesture = useRef<Gesture | null>(null);
   const [preview, setPreview] = useState<{ id: RoomItemId; x: number; y: number } | null>(null);
   const valid = preview ? canPlaceRoomItem(value, preview.id, preview.x, preview.y) : true;
@@ -53,7 +53,7 @@ export function RoomCanvas({ value, avatar, selected, disabled, onSelect, onChan
   return <div className={`room-live-scene room-interactive-scene${preview ? ' dragging' : ''}`} role="group" aria-label={t("가구 배치 위치")}
     onPointerDown={start} onPointerMove={update} onPointerUp={event => end(event)} onPointerCancel={event => end(event, true)} onLostPointerCapture={event => end(event, true)}>
     {/* Only the deterministic, validated local catalogue renderer supplies markup. No user SVG/HTML is accepted. */}
-    <div className="room-svg-art" aria-hidden="true" dangerouslySetInnerHTML={{ __html: renderRoomSvg(shown, avatar, selected) }} />
+    <div className="room-svg-art" aria-hidden="true" dangerouslySetInnerHTML={{ __html: renderRoomSvg(shown, avatar, selected, photos) }} />
     {p && chosen ? <button type="button" className="room-drag-handle" data-room-item={chosen.id} disabled={disabled}
       aria-label={t("{item} 이동", { item: t(ROOM_LABELS[chosen.id]) })} style={{ left: `${p.x / 6}%`, top: `${(p.y - 15) / 4.6}%` }}
       onKeyDown={event => {

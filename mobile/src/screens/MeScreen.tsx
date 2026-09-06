@@ -15,14 +15,12 @@ import { RoomCard } from "../ui/RoomCard";
 export function MeScreen({
   onEdit,
   onEditAvatar,
-  onEditRoom,
   onHomes,
   onOpenPost,
 }: {
   onEdit: () => void;
   onEditAvatar: () => void;
-  onEditRoom: () => void;
-  onHomes: () => void;
+  onHomes: (ownerId?:string) => void;
   onOpenPost: (row: FeedPost) => void;
 }) {
   const c = useTheme();
@@ -64,8 +62,8 @@ export function MeScreen({
       }
       ListHeaderComponent={
         <View style={{ gap: space.md }}>
-          <RoomCard name={me.name} value={me.roomConfig} avatar={me.avatarConfig} onEdit={onEditRoom} onVisit={onHomes} />
-          <Pressable onPress={onHomes} accessibilityRole="button" style={{minHeight:48,padding:12}}><Text style={{color:c.primaryStrong}}>{t("친구 집 둘러보기")}</Text></Pressable>
+          <RoomCard name={me.name} value={me.roomConfig} avatar={me.avatarConfig} onEdit={()=>onHomes(me.id)} onVisit={()=>onHomes(me.id)} />
+          <Pressable onPress={()=>onHomes()} accessibilityRole="button" style={{minHeight:48,padding:12}}><Text style={{color:c.primaryStrong}}>{t("친구 집 둘러보기")}</Text></Pressable>
           <View style={styles.head}>
             <Pressable
               onPress={onEditAvatar}
