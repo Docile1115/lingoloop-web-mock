@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import {
   Armchair,
   ArrowLeft,
@@ -147,9 +146,11 @@ function Preview() {
   return (
     <main className="r3-preview">
       <header className="r3-header">
-        <Link className="r3-back" href="/" aria-label={t("돌아가기")}>
+        {/* Full document navigation also tears down the standalone WebGL preview. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a className="r3-back" href="/" aria-label={t("돌아가기")}>
           <ArrowLeft size={20} />
-        </Link>
+        </a>
         <div className="r3-brand">
           <span>
             TimoTalk <em>HOME</em>

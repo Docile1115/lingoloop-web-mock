@@ -4,6 +4,12 @@ import test from "node:test";
 import ts from "typescript";
 import { validateRoom3D, ROOM3D_SIZES } from "../backend/room3d.mjs";
 
+test("standalone 3D preview exits with full document navigation", async () => {
+  const page = await readFile(new URL("../app/room-preview/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /<a className="r3-back" href="\/"/);
+  assert.doesNotMatch(page, /from ["']next\/link["']/);
+});
+
 const modelSource = ts
   .transpileModule(await readFile(new URL("../app/lib/room3d/models.ts", import.meta.url), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
