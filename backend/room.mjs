@@ -1,8 +1,8 @@
 /** Only catalogue IDs and bounded grid coordinates cross the persistence boundary. */
 export const ROOM_WALLS = ['cream', 'sage', 'rose', 'sky', 'night'];
 export const ROOM_FLOORS = ['oak', 'walnut', 'ivory', 'slate'];
-export const ROOM_ITEMS = ['sofa', 'desk', 'bed', 'shelf', 'plant', 'lamp', 'rug', 'table', 'cat', 'speaker', 'cushion', 'flowers'];
-export const ROOM_LIMIT = 12;
+export const ROOM_ITEMS = ['sofa', 'desk', 'bed', 'shelf', 'plant', 'lamp', 'rug', 'table', 'cat', 'speaker', 'cushion', 'flowers', 'whiteboard', 'frame', 'frame2', 'frame3'];
+export const ROOM_LIMIT = 16;
 
 export class RoomValidationError extends Error {}
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)

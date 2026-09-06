@@ -9,7 +9,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from "@react-navigation/
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, View, useColorScheme } from "react-native";
+import { Alert, Pressable, View, useColorScheme } from "react-native";
 import type { FeedPost, Conversation, Partner } from "@shared/demo-data";
 import { post as apiPost } from "./lib/api";
 import { t } from "./lib/i18n";
@@ -28,6 +28,7 @@ import { FiltersScreen } from "./screens/FiltersScreen";
 import { LikesScreen } from "./screens/LikesScreen";
 import { SearchScreen } from "./screens/SearchScreen";
 import { ThreadScreen } from "./screens/ThreadScreen";
+import { HomeScreen, HomesScreen } from "./screens/HomesScreen";
 
 export type RootParams = {
   Tabs: undefined;
@@ -38,6 +39,8 @@ export type RootParams = {
   EditProfile: undefined;
   AvatarEditor: undefined;
   RoomEditor: undefined;
+  Homes: undefined;
+  Home: {ownerId:string};
   Filters: undefined;
   Likes: undefined;
   Search: undefined;
@@ -76,7 +79,8 @@ async function openConversation(partner: Partner): Promise<Conversation | null> 
       language: partner.learning,
       messages: [],
     } as Conversation;
-  } catch {
+  } catch (error) {
+    Alert.alert(t("요청을 처리하지 못했어요."),error instanceof Error?error.message:undefined);
     return null;
   }
 }
@@ -210,6 +214,7 @@ function Tabs() {
             onEdit={() => navigation.navigate("EditProfile")}
             onEditAvatar={() => navigation.navigate("AvatarEditor")}
             onEditRoom={() => navigation.navigate("RoomEditor")}
+            onHomes={() => navigation.navigate("Homes")}
             onOpenPost={(post) => navigation.navigate("PostDetail", { post })}
           />
         )}
@@ -247,10 +252,18 @@ export function Navigation() {
       >
         <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
 
+        <Stack.Screen name="Homes" options={{title:t("친구 집 둘러보기")}}>
+          {({navigation})=><HomesScreen onVisit={ownerId=>navigation.push('Home',{ownerId})}/>}
+        </Stack.Screen>
+        <Stack.Screen name="Home" options={{title:t("친구 집")}}>
+          {({route,navigation})=><HomeScreen key={route.params.ownerId} ownerId={route.params.ownerId} onStartChat={async partner=>{const conversation=await openConversation(partner);if(conversation)navigation.navigate('Thread',{conversation});}}/>}
+        </Stack.Screen>
+
         <Stack.Screen name="PartnerProfile" options={{ title: t("프로필") }}>
           {({ route, navigation }) => (
             <PartnerProfileScreen
               partnerId={route.params.partnerId}
+              onVisitHome={(ownerId) => navigation.navigate("Home", {ownerId})}
               onOpenProfile={(partnerId) => navigation.push("PartnerProfile", { partnerId })}
               onOpenPost={(post) => navigation.navigate("PostDetail", { post })}
               onStartChat={async (partner) => {

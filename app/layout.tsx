@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { SITE_METADATA } from "./lib/i18n/metadata";
 import "./globals.css";
 import "./room.css";
+import "./home.css";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

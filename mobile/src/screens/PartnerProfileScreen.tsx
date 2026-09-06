@@ -46,11 +46,13 @@ export function PartnerProfileScreen({
   onOpenProfile,
   onOpenPost,
   onStartChat,
+  onVisitHome,
 }: {
   partnerId: string;
   onOpenProfile: (id: string) => void;
   onOpenPost: (row: FeedPost) => void;
   onStartChat: (partner: Partner) => void;
+  onVisitHome: (id:string) => void;
 }) {
   const c = useTheme();
   const [tab, setTab] = useState<"profile" | "posts">("profile");
@@ -131,7 +133,7 @@ export function PartnerProfileScreen({
       </View>
 
       {partner.bio ? <Text style={[styles.bio, { color: c.muted }]}>{partner.bio}</Text> : null}
-      <RoomCard name={partner.name} value={partner.roomConfig} avatar={partner.avatarConfig} />
+      <RoomCard name={partner.name} value={partner.roomConfig} avatar={partner.avatarConfig} onVisit={()=>onVisitHome(partner.id)} />
 
       {counts.data ? (
         <View style={styles.stats}>

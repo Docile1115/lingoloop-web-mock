@@ -12,8 +12,8 @@ import {
 } from '../lib/room';
 import type { AvatarConfig } from '../lib/avatar';
 
-type Props = { name: string; value?: RoomConfig | null; avatar?: AvatarConfig | null; onSave?: (room: RoomConfig) => Promise<void> };
-export function ProfileRoom({ name, value, avatar, onSave }: Props) {
+type Props = { name: string; value?: RoomConfig | null; avatar?: AvatarConfig | null; onSave?: (room: RoomConfig) => Promise<void>; onVisit?:()=>void };
+export function ProfileRoom({ name, value, avatar, onSave, onVisit }: Props) {
   const [editing, setEditing] = useState(false);
   return <section className="profile-room">
     <header className="room-card-heading">
@@ -21,7 +21,8 @@ export function ProfileRoom({ name, value, avatar, onSave }: Props) {
       {onSave ? <button className="secondary-button" type="button" onClick={() => setEditing(true)}><Armchair size={16} />{t("방 꾸미기")}</button> : null}
     </header>
     {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img className="room-scene-image" src={roomDataUri(value, avatar)} alt={t("{name}님의 마이룸", { name })} />
+    {onSave ? <img className="room-scene-image" src={roomDataUri(value, avatar)} alt={t("{name}님의 마이룸", { name })} /> : null}
+    {onVisit?<button type="button" className="home-visit-button" onClick={onVisit}><Home size={18}/>{onSave?t("내 집 방문·방명록"):t("집 놀러 가기")}</button>:null}
     {!value && onSave ? <p className="room-starter-note">{t("기본 방이에요. 취향에 맞게 꾸며보세요.")}</p> : null}
     {editing && onSave ? <RoomEditor name={name} value={value} avatar={avatar} onSave={onSave} onClose={() => setEditing(false)} /> : null}
   </section>;
@@ -115,7 +116,7 @@ function RoomEditor({ value, avatar, onSave, onClose }: Props & { onSave: (room:
           </div>
         </details> : null}
         <div className="room-tool-tabs" role="group" aria-label={t("꾸밀 항목")}>
-          <button type="button" aria-pressed={tab==='furniture'} onClick={() => setTab('furniture')}>{t("가구와 소품")}<small>{draft.items.length}/12</small></button>
+          <button type="button" aria-pressed={tab==='furniture'} onClick={() => setTab('furniture')}>{t("가구와 소품")}<small>{draft.items.length}/16</small></button>
           <button type="button" aria-pressed={tab==='style'} onClick={() => setTab('style')}>{t("방 분위기")}</button>
         </div>
         {tab==='furniture' ? <div className="room-catalogue">{ROOM_ITEMS.map((id) => {

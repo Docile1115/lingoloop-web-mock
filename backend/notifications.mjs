@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 export const NOTIFICATION_TYPES = new Set([
+  "home_entry", "home_reply", "home_visit", "home_heart",
   "post_like",
   "post_reply",
   "post_correction",
@@ -64,6 +65,7 @@ export function buildNotification({
   postId = "",
   replyId = "",
   conversationId = "",
+  homeOwnerId = "",
   eventId = "",
   excerpt = "",
   createdAt,
@@ -81,6 +83,7 @@ export function buildNotification({
     postId,
     replyId,
     conversationId,
+    ...(homeOwnerId ? { homeOwnerId } : {}),
     eventId: normalizedEventId,
     excerpt: notificationExcerpt(excerpt),
     createdAt,

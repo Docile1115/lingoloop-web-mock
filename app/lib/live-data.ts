@@ -473,6 +473,7 @@ export interface ApiReceivedLike {
 }
 
 export type ApiNotificationType =
+  | "home_entry" | "home_reply" | "home_visit" | "home_heart"
   | "post_like"
   | "post_reply"
   | "post_correction"
@@ -485,6 +486,7 @@ export type ApiNotificationType =
   | "message";
 
 export interface ApiNotification {
+  homeOwnerId?:string;
   id: string;
   type: ApiNotificationType;
   actorId: string;

@@ -2,11 +2,11 @@ import { renderFullBodyAvatarSvg } from './avatar';
 
 export const ROOM_WALLS = ['cream', 'sage', 'rose', 'sky', 'night'] as const;
 export const ROOM_FLOORS = ['oak', 'walnut', 'ivory', 'slate'] as const;
-export const ROOM_ITEMS = ['sofa', 'desk', 'bed', 'shelf', 'plant', 'lamp', 'rug', 'table', 'cat', 'speaker', 'cushion', 'flowers'] as const;
+export const ROOM_ITEMS = ['sofa', 'desk', 'bed', 'shelf', 'plant', 'lamp', 'rug', 'table', 'cat', 'speaker', 'cushion', 'flowers', 'whiteboard', 'frame', 'frame2', 'frame3'] as const;
 export type RoomItemId = typeof ROOM_ITEMS[number];
 export type RoomItem = { id: RoomItemId; x: number; y: number; flipped: boolean };
 export type RoomConfig = { version: 1; wall: typeof ROOM_WALLS[number]; floor: typeof ROOM_FLOORS[number]; items: RoomItem[] };
-export const ROOM_LIMIT = 12;
+export const ROOM_LIMIT = 16;
 export const RESIDENT = { x: 2, y: 3 };
 const piece = (id: RoomItemId, x: number, y: number): RoomItem => ({ id, x, y, flipped: false });
 export const ROOM_PRESETS: RoomConfig[] = [
@@ -60,6 +60,10 @@ export const FLOOR_COLOURS = { oak: '#d4aa7f', walnut: '#956b53', ivory: '#e9dfc
 
 // Original vector furniture: no uploaded SVG, external references or user markup.
 const SHAPES: Record<RoomItemId, string> = {
+  whiteboard: '<path d="M-30 0l6-48m54 48-6-48" stroke="#879790" stroke-width="6"/><rect x="-45" y="-107" width="90" height="66" rx="5" fill="#eaf1e9" stroke="#9cafa3" stroke-width="5"/><path d="M-30-87h44m-44 13h58m-58 13h36" stroke="#5b8e77" stroke-width="3"/><path d="M-38-39h78" stroke="#81968a" stroke-width="5"/>',
+  frame: '<path d="M-21 0l9-43m33 43-9-43" stroke="#9b7d5f" stroke-width="5"/><rect x="-30" y="-100" width="60" height="62" fill="#f0d8b5" stroke="#9b7d5f" stroke-width="6"/><circle cy="-79" r="10" fill="#deb690"/><path d="M-25-44l17-25 14 13 13-10 9 22Z" fill="#82a18c"/>',
+  frame2: '<path d="M-21 0l9-43m33 43-9-43" stroke="#919e9e" stroke-width="5"/><rect x="-30" y="-100" width="60" height="62" fill="#dae8ee" stroke="#fff" stroke-width="6"/><circle cy="-79" r="10" fill="#ebd6a1"/><path d="M-25-44l17-25 14 13 13-10 9 22Z" fill="#8aa0b4"/>',
+  frame3: '<path d="M-21 0l9-43m33 43-9-43" stroke="#917583" stroke-width="5"/><rect x="-30" y="-100" width="60" height="62" fill="#f0dbe4" stroke="#c78b9e" stroke-width="6"/><circle cy="-79" r="10" fill="#f5dba8"/><path d="M-25-44l17-25 14 13 13-10 9 22Z" fill="#b796ad"/>',
   sofa: '<ellipse cy="3" rx="59" ry="20" fill="#000" opacity=".1"/><path d="M-52-12v-55q0-12 12-12h75q12 0 12 12v49" fill="#78998a"/><path d="M-52-18l20-15 77 5 13 14-24 23-86-10Z" fill="#aac4ad"/><path d="M-53-18v21l86 14 25-26v-17L33-3Z" fill="#577c6b"/><rect x="-58" y="-42" width="16" height="40" rx="7" fill="#8dab98"/><rect x="40" y="-40" width="17" height="37" rx="7" fill="#8dab98"/><path d="M-25-51l22 2-3 24-23-3Z" fill="#f0d1ab"/><path d="M8-50l23 1-1 26-25-3Z" fill="#dfe7cf"/>',
   desk: '<path d="M-40-5v-48m73 48v-48" stroke="#815f47" stroke-width="7"/><path d="M-50-53l20-13 79 13-21 18Z" fill="#ead2ad"/><path d="M-50-53v8l78 17v-7Z" fill="#bb956e"/><path d="M-13-57v-35l42 4v35Z" fill="#677d77"/><path d="M-8-63v-23l31 3v25Z" fill="#c9e4dd"/><path d="M-17-49l33 6 12-7-33-6Z" fill="#e9ede7"/><rect x="-39" y="-68" width="12" height="17" rx="3" fill="#d69d79"/>',
   bed: '<path d="M-45-24v-60q0-8 8-8h59q8 0 8 8v27" fill="#b88468"/><path d="M-45-46l70 10 28 34-28 20-74-17Z" fill="#cda986"/><path d="M-43-50l68 9 25 33-24 14-72-13Z" fill="#faf0df"/><path d="M-36-47l48 5 10 12-47-5Z" fill="#fffaf0"/><path d="M-40-23l67 10 23 5-24 14-72-13Z" fill="#c29eae"/><path d="M-42-16l63 12" stroke="#edd1d8" stroke-width="3"/>',
@@ -76,7 +80,15 @@ const SHAPES: Record<RoomItemId, string> = {
 export function roomItemSvg(id: RoomItemId) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-70 -125 140 155">${SHAPES[id] || ''}</svg>`;
 }
-export function renderRoomSvg(value: unknown, avatar?: unknown, selected?: RoomItemId | null): string {
+export type RoomPhoto = {id:string;image:string;shape:string;color:string};
+export function roomPhotoShape(photo?: RoomPhoto): string {
+  if(!photo || typeof photo.image!=='string' || photo.image.length>410000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(photo.image)) return '';
+  const [width,height]=photo.shape==='portrait'?[44,62]:photo.shape==='landscape'?[68,42]:[54,54];
+  const colors: Record<string,string>={oak:'#ae825b',white:'#fff',black:'#353d40',rose:'#cc91a4'};
+  const color=Object.hasOwn(colors,photo.color)?colors[photo.color]:colors.oak;
+  return `<path d="M-21 0l9-43m33 43-9-43" stroke="${color}" stroke-width="5"/><rect x="${-width/2-4}" y="${-70-height/2-4}" width="${width+8}" height="${height+8}" rx="2" fill="${color}"/><image href="${photo.image}" x="${-width/2}" y="${-70-height/2}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
+}
+export function renderRoomSvg(value: unknown, avatar?: unknown, selected?: RoomItemId | null, photos: readonly RoomPhoto[] = []): string {
   const room = normalizeRoom(value);
   const wall = WALL_COLOURS[room.wall];
   const floor = FLOOR_COLOURS[room.floor];
@@ -86,7 +98,7 @@ export function renderRoomSvg(value: unknown, avatar?: unknown, selected?: RoomI
   }).join('');
   const objects = room.items.map((item) => {
     const p = roomPoint(item.x, item.y);
-    return { depth: item.id === 'rug' ? -1 : item.x + item.y, svg: `<g data-room-item="${item.id}" transform="translate(${p.x} ${p.y}) scale(${item.flipped ? -1 : 1} 1)">${item.id === selected ? '<ellipse cy="4" rx="48" ry="23" fill="#5bdbaf" fill-opacity=".3" stroke="#157d57" stroke-width="3" pointer-events="none"/>' : ''}${SHAPES[item.id]}</g>` };
+    return { depth: item.id === 'rug' ? -1 : item.x + item.y, svg: `<g data-room-item="${item.id}" transform="translate(${p.x} ${p.y}) scale(${item.flipped ? -1 : 1} 1)">${item.id === selected ? '<ellipse cy="4" rx="48" ry="23" fill="#5bdbaf" fill-opacity=".3" stroke="#157d57" stroke-width="3" pointer-events="none"/>' : ''}${roomPhotoShape(photos.find(photo=>photo.id===item.id && ['frame','frame2','frame3'].includes(photo.id))) || SHAPES[item.id]}</g>` };
   });
   const resident = roomPoint(RESIDENT.x, RESIDENT.y);
   const figure = renderFullBodyAvatarSvg(avatar, true).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
