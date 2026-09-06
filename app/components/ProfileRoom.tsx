@@ -21,7 +21,7 @@ export function ProfileRoom({ name, value, avatar, onSave, onVisit }: Props) {
       {onSave ? <button className="secondary-button" type="button" onClick={() => onVisit ? onVisit() : setEditing(true)}><Armchair size={16} />{t("방 꾸미기")}</button> : null}
     </header>
     {/* eslint-disable-next-line @next/next/no-img-element */}
-    {onSave ? <img className="room-scene-image" src={roomDataUri(value, avatar)} alt={t("{name}님의 마이룸", { name })} /> : null}
+    {onSave && !onVisit ? <img className="room-scene-image" src={roomDataUri(value, avatar)} alt={t("{name}님의 마이룸", { name })} /> : null}
     {onVisit?<button type="button" className="home-visit-button" onClick={onVisit}><Home size={18}/>{onSave?t("내 집 방문·방명록"):t("집 놀러 가기")}</button>:null}
     {!value && onSave ? <p className="room-starter-note">{t("기본 방이에요. 취향에 맞게 꾸며보세요.")}</p> : null}
     {editing && onSave ? <RoomEditor name={name} value={value} avatar={avatar} onSave={onSave} onClose={() => setEditing(false)} /> : null}

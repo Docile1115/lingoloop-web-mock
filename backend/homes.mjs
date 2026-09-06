@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import sharp from 'sharp';
 import { roomFields } from './room.mjs';
+import { readRoom3D, validateRoom3D, Room3DError } from './room3d.mjs';
 
 export const HOME_SCOPES = ['everyone', 'followers', 'mutuals', 'private'];
 export const HOME_STATUSES = ['available', 'studying', 'voice', 'resting'];
@@ -123,7 +124,19 @@ export function registerHomeRoutes(app, {db, requireUser, success, ApiError, ass
     const decorated=await decorate(tx,visible.map((row,i)=>({...row,hearted:likes[i]?.exists||false})));
     const visitors=await decorate(tx,await visibleRows(tx,viewer,(stamps?.docs||[]).map(d=>({...d.data(),id:d.id}))));
     const displayed=display?.exists?(await decorate(tx,await visibleRows(tx,viewer,[{...display.data(),id:display.id}])))[0]||null:null;
-    return {viewerId:viewer,owner:profileForOthers(state.profile),roomConfig:roomFields(state.profile).roomConfig,settings:state.relation.own?state.settings:{...state.settings,displayedGiftId:''},own:state.relation.own,canWrite:canEnterHome(state.settings.writing,state.relation),favorite:favorite.exists,stampedToday:mine.data()?.day===todayInSeoul(),photos:photos.docs.map(d=>({...d.data(),id:d.id})).filter(p=>canEnterHome(p.visibility,state.relation)),entries:decorated,visitors,displayedGift:displayed,nextCursor:entries.size>20?entries.docs[19].id:null};
+    return {viewerId:viewer,owner:profileForOthers(state.profile),roomConfig:roomFields(state.profile).roomConfig,room3d:readRoom3D(state.home.room3d),room3dRevision:state.home.room3dRevision||0,settings:state.relation.own?state.settings:{...state.settings,displayedGiftId:''},own:state.relation.own,canWrite:canEnterHome(state.settings.writing,state.relation),favorite:favorite.exists,stampedToday:mine.data()?.day===todayInSeoul(),photos:photos.docs.map(d=>({...d.data(),id:d.id})).filter(p=>canEnterHome(p.visibility,state.relation)),entries:decorated,visitors,displayedGift:displayed,nextCursor:entries.size>20?entries.docs[19].id:null};
+  }));
+
+  route('put','/api/homes/:ownerId/room3d',req=>db.runTransaction(async tx=>{
+    const owner=uid(req.params.ownerId);
+    if(owner!==req.auth.uid)throw new HomeError('집주인만 변경할 수 있어요.',403);
+    exact(req.body,['config','revision']);
+    if(!Number.isSafeInteger(req.body.revision)||req.body.revision<0)throw new HomeError('방을 새로고침해 주세요.');
+    const state=await access(tx,req.auth.uid,owner),revision=state.home.room3dRevision||0;
+    if(req.body.revision!==revision)throw new HomeError('다른 기기에서 방이 변경되었어요. 새로고침 후 다시 편집해 주세요.',409);
+    let config;try{config=validateRoom3D(req.body.config);}catch(error){if(error instanceof Room3DError)throw new HomeError(error.message);throw error;}
+    tx.set(homeRef(owner),{room3d:config,room3dRevision:revision+1,updatedAt:nowIso()},{merge:true});
+    return {config,revision:revision+1};
   }));
 
   route('get','/api/homes/:ownerId/entries',req=>db.runTransaction(async tx=>{
@@ -146,7 +159,8 @@ export function registerHomeRoutes(app, {db, requireUser, success, ApiError, ass
 
   route('post','/api/homes/:ownerId/entries',req=>db.runTransaction(async tx=>{
     const owner=uid(req.params.ownerId),viewer=req.auth.uid; const state=await access(tx,viewer,owner,true);
-    if(!state.profile.roomConfig?.items?.some(item=>item.id==='whiteboard')) throw new HomeError('화이트보드를 먼저 설치해 주세요.');
+    const installed=state.home.room3d?readRoom3D(state.home.room3d)?.items?.some(item=>item.kind==='board'):state.profile.roomConfig?.items?.some(item=>item.id==='whiteboard');
+    if(!installed) throw new HomeError('화이트보드를 먼저 설치해 주세요.');
     exact(req.body,['text','kind','requestId']); const body=text(req.body.text,500,true); const kind=req.body.kind||'guestbook';
     if(!['guestbook','answer'].includes(kind)|| (kind==='answer'&&!state.settings.question)) throw new HomeError('답변할 질문을 확인해 주세요.');
     const requestId=uid(req.body.requestId); if(!/^[a-zA-Z0-9-]{16,64}$/.test(requestId)) throw new HomeError('요청 식별자를 확인해 주세요.');

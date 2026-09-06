@@ -10,6 +10,25 @@ TimoTalk은 언어 교환 파트너를 찾고, 커뮤니티 글과 1:1 대화를
 
 ## 현재 제공 범위
 
+### 3D 마이룸 (베타)
+
+3D 방 방향을 승인받아 프로필 집 방문 화면과 실제 저장 API를 연결했습니다.
+기존 2D 방을 자동으로 변환하거나 덮어쓰지 않습니다.
+집주인이 명시적으로 3D 배치를 저장한 뒤 방문자에게 표시됩니다.
+독립 디자인 미리보기는 `/room-preview`이며, 이 경로의 변경 사항은 저장되지 않습니다.
+캐릭터 외형은 아직 임시 모델입니다. [구현·검증·배포 순서](docs/room-3d-preview.md)를 참고하세요.
+
+```mermaid
+flowchart LR
+  Profile[프로필 / 친구 집 방문] --> UI[Room3DHome + 3D Scene]
+  UI -->|배치 저장 + revision| API[Cloud Run Home API]
+  API --> Policy[소유권 / 공개 범위 / 차단 / 충돌 검사]
+  Policy --> Store[(Firestore homes: room3d)]
+  UI --> Existing[기존 사진 / 방명록 API]
+  Existing --> Policy
+  Legacy[(profiles: 기존 2D roomConfig)] -. 별도 보존 .-> Profile
+```
+
 ### 실제 계정·영속 데이터로 동작
 
 | 영역 | 현재 동작 |

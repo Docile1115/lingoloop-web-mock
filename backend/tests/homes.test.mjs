@@ -57,6 +57,23 @@ async function fixture(t) {
 }
 const entry=(text='hello',requestId='request-1234567890')=>({text,kind:'guestbook',requestId});
 
+test('3D home persistence is owner-only, revision-checked and preserves legacy data',async t=>{
+  const {db,call}=await fixture(t),config={version:1,items:[{id:'whiteboard',kind:'board',x:-3,z:0,rotation:0}]};
+  const legacy=structuredClone(db.rows.get('profiles/owner').roomConfig);
+  assert.equal((await call('/owner/room3d','PUT',{config,revision:0},'friend')).status,403);
+  assert.equal((await call('/owner/room3d','PUT',{config,revision:0},null)).status,401);
+  assert.equal((await call('/owner/room3d','PUT',{config,revision:0},'owner')).status,200);
+  assert.deepEqual(db.rows.get('profiles/owner').roomConfig,legacy);
+  const read=await call('/owner');assert.deepEqual(read.data.room3d,config);assert.equal(read.data.room3dRevision,1);
+  assert.equal((await call('/owner/room3d','PUT',{config:{version:1,items:[]},revision:0},'owner')).status,409);
+  assert.deepEqual((await call('/owner')).data.room3d,config);
+  assert.equal((await call('/owner/entries','POST',entry())).status,200);
+  assert.equal((await call('/owner/room3d','PUT',{config:{version:1,items:[]},revision:1},'owner')).status,200);
+  assert.equal((await call('/owner/entries','POST',entry('blocked','request-0987654321'))).status,422);
+  await call('/owner/settings','PATCH',{visibility:'private'},'owner');
+  assert.equal((await call('/owner')).status,403);
+});
+
 test('home policy is deny-by-default for unknown scopes and always honors blocks',()=>{
   for(const scope of ['everyone','followers','mutuals','private','invalid'])assert.equal(canEnterHome(scope,{own:true,blocked:true}),false);
   assert.equal(canEnterHome('private',{own:true}),true);assert.equal(canEnterHome('private',{follows:true,followedBy:true}),false);
