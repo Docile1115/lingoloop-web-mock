@@ -5,11 +5,7 @@
 import type { MessageKey } from "./keys";
 
 export const en: Record<MessageKey, string> = {
-  "3D 공간": "3D room",
   "3D 배치를 먼저 저장해 주세요.": "Save the 3D layout first.",
-  "3D 배치를 저장하면 친구에게도 이 방이 보여요. 기존 2D 방은 보존됩니다.": "Save this 3D layout to show it to friends. Your original 2D room is preserved.",
-  "기존 2D 방": "Original 2D room",
-  "캐릭터 외형은 동작 검증용 모델입니다.": "This character is a temporary interaction model.",
   "3D 공간 미리보기": "3D room preview",
   "3D 화면을 불러오지 못했어요. WebGL을 지원하는 브라우저에서 다시 시도해주세요.": "Unable to load 3D. Please try again in a WebGL-compatible browser.",
   "가구 바로 선택": "Select furniture",
@@ -56,7 +52,6 @@ export const en: Record<MessageKey, string> = {
   "눕기": "Lie down",
   "물 주기": "Water",
   "바닥을 누르면 이동하고, 가구를 누르면 다가가요.": "Tap the floor to walk, or furniture to approach it.",
-  "방 안 이동": "Walk around the room",
   "방으로 돌아가기": "Back to room",
   "배치 저장": "Save layout",
   "불 켜기": "Switch on",
@@ -151,7 +146,6 @@ export const en: Record<MessageKey, string> = {
   "화이트": "White",
   "화이트보드": "Whiteboard",
   "화이트보드 설치": "Install whiteboard",
-  "화이트보드를 설치해 주세요": "Install a whiteboard",
   "가방": "Bag",
   "긴 양말": "Crew socks",
   "눈썹": "Eyebrows",
@@ -224,7 +218,6 @@ export const en: Record<MessageKey, string> = {
   "{index} / {total}": "{index} / {total}",
   "{interests} 관심사가 같아요": "Shares your interest in {interests}",
   "{interests}에 같이 관심이 있어요": "Into {interests} too",
-  "{item} 이동": "Move {item}",
   "{language} 연습": "Practising {language}",
   "{languages} 원어민 파트너예요": "Native {languages} speaker",
   "{languages}를 모국어로 쓰는 사람이에요": "Speaks {languages} natively",
@@ -1204,4 +1197,9 @@ export const en: Record<MessageKey, string> = {
   "학습 목표는 2자 이상 적어 주세요.": "Please enter a learning goal of at least 2 characters.",
   "배우는 말을 골라 주세요.": "Please choose a language you're learning.",
   "서버에 연결할 수 없어요. 연결을 확인해 주세요.": "Can't reach the server. Please check your connection.",
+  "화이트보드를 놓고 배치를 저장하면 방명록을 받을 수 있어요.": "Place a whiteboard and save the layout to receive guestbook notes.",
+  "액자를 놓고 배치를 저장하면 사진을 걸 수 있어요.": "Place a frame and save the layout to hang a photo.",
+  "거기로는 갈 수 없어요.": "You can't walk there.",
+  "집에서 할 수 있는 일": "Things to do here",
+  "가구 추가": "Add furniture",
 };

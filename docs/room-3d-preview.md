@@ -10,10 +10,12 @@ reload. The legacy persisted room schema is unchanged.
 
 ## Product integration (beta)
 
-`HomeDialog` now embeds `Room3DHome`. Owners can save a new 3D layout; existing
-visitors see the original 2D room until the owner explicitly saves the 3D room.
-Both modes remain available and existing profile `roomConfig` is never overwritten.
-The native app retains its original 2D renderer; 3D avatar customization is pending.
+`HomeDialog` is 3D only on the web: the room fills the dialog and every control
+(title, window buttons, shortcut dock, furniture card, camera, edit bar) floats over it.
+Homes without a saved layout show the starter room to everyone, and its whiteboard
+accepts guestbook notes (the server applies the same rule). Existing profile
+`roomConfig` is never overwritten. The native app retains its original 2D renderer;
+3D avatar customization is pending.
 
 - `GET /api/homes/:ownerId` includes `room3d` and `room3dRevision`, only after the
   existing transactional privacy, active-account and bidirectional-block checks.

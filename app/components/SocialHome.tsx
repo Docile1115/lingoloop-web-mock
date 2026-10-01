@@ -2,16 +2,13 @@
 /* Server-sanitized JPEG data URIs are already resized; no remote optimizer is needed. */
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useId, useRef, useState } from 'react';
-import { Heart, Home, LockKeyhole, MessageCircle, Star, X } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { Gift, Heart, Home, LockKeyhole, MessageCircle, RefreshCw, Settings, Star, X } from 'lucide-react';
 import { api, type ApiProfile } from '../lib/live-data';
 import { t, currentLocaleSnapshot } from '../lib/i18n';
 import { useHome } from '../lib/use-home';
 import { HOME_FRAMES, HOME_GIFTS, HOME_GIFT_ICONS, HOME_SCOPES, HOME_STATUSES, type HomeData, type HomeDirectory as Directory, type HomeEntry, type HomePhoto, type HomeSettings } from '../lib/home';
 import { HOME_SCOPE_LABELS, HOME_STATUS_LABELS, HOME_GIFT_LABELS, HOME_FRAME_LABELS, HOME_SHAPE_LABELS, HOME_COLOR_LABELS } from '../lib/home-labels';
-import { addRoomItem, normalizeRoom, type RoomConfig, type RoomItemId } from '../lib/room';
-
-import { RoomPlayground } from './RoomPlayground';
 import { Room3DHome } from './Room3DHome';
 
 export function HomeDirectory({onVisit}:{onVisit:(id:string)=>void}) {
@@ -27,8 +24,12 @@ export function HomeDirectory({onVisit}:{onVisit:(id:string)=>void}) {
   </section>;
 }
 
-/** A native dialog provides focus trapping; drafts are never saved by closing the house. */
-export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated,visitorAvatar}:{ownerId:string;onClose:()=>void;onChat:(profile:ApiProfile)=>void;onProfileUpdated?:(profile:ApiProfile)=>void;visitorAvatar?:unknown}) {
+/**
+ * A native dialog provides focus trapping; drafts are never saved by closing the house.
+ * The 3D room fills the dialog and every control floats inside it; the guestbook,
+ * photos, gifts and settings open as panels over the room instead of below it.
+ */
+export function HomeDialog({ownerId,onClose,onChat}:{ownerId:string;onClose:()=>void;onChat:(profile:ApiProfile)=>void}) {
   const home=useHome(ownerId,api),data=home.data;
   const [tab,setTab]=useState<'board'|'photos'|'gifts'|'settings'|null>(null);
   const [localBusy,setLocalBusy]=useState(false),[localError,setLocalError]=useState('');
@@ -37,57 +38,69 @@ export function HomeDialog({ownerId,onClose,onChat,onProfileUpdated,visitorAvata
   const [report,setReport]=useState<{kind:string;id:string}|null>(null),[reason,setReason]=useState('');
   const [notice,setNotice]=useState('');
   const [roomDirty,setRoomDirty]=useState(false);
-  const [dimension,setDimension]=useState<'auto'|'2d'|'3d'>('auto');
-  const show3d=dimension==='3d'||(dimension==='auto'&&!!(data?.room3d||data?.own));
   const [frameId,setFrameId]=useState<HomePhoto['id']>('frame');
-  const saveRoom=async(config:RoomConfig)=>{if(guard.current||busy)return false;guard.current=true;setLocalBusy(true);setLocalError('');try{const profile=await api<ApiProfile>('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});onProfileUpdated?.(profile);await home.reload();return true;}catch(e){setLocalError(e instanceof Error?e.message:t("방을 저장하지 못했어요. 다시 시도해 주세요."));return false;}finally{guard.current=false;setLocalBusy(false);}};
   const dialog=useRef<HTMLDialogElement>(null), title=useId();
   const busy=home.busy||localBusy;
   const guard=useRef(false);
   useEffect(()=>{const el=dialog.current!,focus=document.activeElement as HTMLElement|null;const overflow=document.body.style.overflow;document.body.style.overflow='hidden';el.showModal();return()=>{el.close();document.body.style.overflow=overflow;focus?.focus();};},[]);
   const run=async(task:()=>Promise<unknown>)=>{if(guard.current||busy)return;guard.current=true;setLocalBusy(true);setLocalError('');try{await task();await home.reload();}catch(e){setLocalError(e instanceof Error?e.message:t("요청을 처리하지 못했어요."));}finally{guard.current=false;setLocalBusy(false);}};
-  const install=async(id:RoomItemId)=>{if(!data)return;await run(async()=>{const initial=normalizeRoom(data.roomConfig),config=addRoomItem(initial,id);if(config===initial&&!initial.items.some(item=>item.id===id))throw new Error(t("가구를 하나 치운 뒤 설치해 주세요."));const profile=await api<ApiProfile>('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});onProfileUpdated?.(profile);});};
-  const boardInstalled=data?.room3d?data.room3d.items.some(item=>item.kind==='board'):normalizeRoom(data?.roomConfig).items.some(item=>item.id==='whiteboard');
+  // Without a saved layout the starter 3D room is shown, and it has a whiteboard (same rule as the server).
+  const boardInstalled=data?.room3d?data.room3d.items.some(item=>item.kind==='board'):true;
   const ask=(action:()=>Promise<void>,label=t("삭제하면 되돌릴 수 없어요. 삭제할까요?"))=>{setConfirmLabel(label);setConfirm(()=>action);};
-  useEffect(()=>{if(confirm||report)dialog.current?.querySelector('.home-confirm, .home-report')?.scrollIntoView({block:'center'});},[confirm,report]);
   const closeHome=()=>{if(roomDirty)ask(async()=>onClose(),t("저장하지 않은 변경 사항이 있어요. 나갈까요?"));else onClose();};
   useEffect(()=>{if(tab)dialog.current?.querySelector<HTMLButtonElement>('.home-object-sheet>header button')?.focus();},[tab,frameId]);
-  return <dialog className="social-home-dialog" ref={dialog} aria-labelledby={title} onCancel={event=>{event.preventDefault();if(!guard.current&&!busy)closeHome();}}>
-    <header className="social-home-header"><div><small>TIMO HOME</small><h2 id={title}>{data?t("{name}님의 마이룸",{name:data.owner.name}):t("친구 집")}</h2></div><button type="button" className="home-icon" disabled={busy} onClick={closeHome} aria-label={t("닫기")}><X/></button></header>
-    <div className="social-home-body">
-      {home.error||localError?<p className="home-error" role="alert">{home.error||localError}<button type="button" disabled={busy} onClick={()=>void home.reload()}>{t("다시 시도")}</button></p>:null}
-      {home.loading?<p role="status">{t("불러오는 중…")}</p>:null}
-      {!data&&!home.loading?<div className="home-locked"><LockKeyhole/><p>{t("공개 설정 또는 연결 상태를 확인해 주세요.")}</p></div>:null}
-      {data?<>
-        <div className="home-door"><button type="button" disabled={busy||roomDirty} onClick={()=>void home.reload()}>{t("새로고침")}</button><span className={`home-status status-${data.settings.status}`}>● {t(HOME_STATUS_LABELS[data.settings.status])}</span><span>{t(HOME_SCOPE_LABELS[data.settings.visibility])}</span>
-          {!data.own?<button type="button" disabled={busy} aria-pressed={data.favorite} onClick={()=>void home.act('/favorite','PUT',{favorite:!data.favorite})}><Star size={16}/>{t("즐겨찾기")}</button>:null}
-        </div>
-        <div className="home-tabs"><button type="button" aria-pressed={show3d} disabled={busy||roomDirty||(!data.own&&!data.room3d)} onClick={()=>{setDimension('3d');setTab(null);}}>{t("3D 공간")}</button><button type="button" aria-pressed={!show3d} disabled={busy||roomDirty} onClick={()=>{setDimension('2d');setTab(null);}}>{t("기존 2D 방")}</button></div>
-        {show3d?<Room3DHome data={data} busy={busy} suspended={!!tab||!!confirm||!!report} onSave={(config,revision)=>home.act('/room3d','PUT',{config,revision})} onDirtyChange={setRoomDirty} onObject={id=>{if(id==='whiteboard')setTab('board');else if(HOME_FRAMES.includes(id as HomePhoto['id'])){setFrameId(id as HomePhoto['id']);setTab('photos');}}}/>:<RoomPlayground visitorAvatar={visitorAvatar} data={data} busy={busy} onSave={saveRoom} onDirtyChange={setRoomDirty} onObject={id=>{if(id==='whiteboard')setTab('board');else if(HOME_FRAMES.includes(id as HomePhoto['id'])){setFrameId(id as HomePhoto['id']);setTab('photos');}}}/>}
-        {data.displayedGift?<div className="home-displayed-gift"><span>{HOME_GIFT_ICONS[data.displayedGift.gift]}</span><div><strong>{t("소중한 선물")}</strong><p>{data.displayedGift.note||t(HOME_GIFT_LABELS[data.displayedGift.gift])}</p><small>{data.displayedGift.author?.name}</small></div>{data.own?<button type="button" disabled={busy||roomDirty} onClick={()=>void home.act('/settings','PATCH',{displayedGiftId:''})}>{t("전시 해제")}</button>:null}</div>:null}
-        <div className="room-utility-tools"><button type="button" disabled={busy||roomDirty} onClick={()=>setTab('gifts')}>{t("인사와 선물")}</button>{data.own?<button type="button" disabled={busy||roomDirty} onClick={()=>setTab('settings')}>{t("집 설정")}</button>:<button type="button" disabled={busy} onClick={()=>onChat(data.owner)}><MessageCircle size={15}/>{t("대화하기")}</button>}</div>
-        {tab?<section className="home-object-sheet" aria-label={tab==='photos'?t(HOME_FRAME_LABELS[frameId]):tab==='board'?t("화이트보드"):tab==='gifts'?t("인사와 선물"):t("집 설정")}><header><h3>{tab==='photos'?t(HOME_FRAME_LABELS[frameId]):tab==='board'?t("화이트보드"):tab==='gifts'?t("인사와 선물"):t("집 설정")}</h3><button type="button" disabled={busy} onClick={()=>setTab(null)} aria-label={t("방으로 돌아가기")}><X/></button></header>
-        {home.error||localError?<p role="alert">{home.error||localError}</p>:null}
+  const openObject=useCallback((id:string)=>{if(id==='whiteboard')setTab('board');else if(HOME_FRAMES.includes(id as HomePhoto['id'])){setFrameId(id as HomePhoto['id']);setTab('photos');}},[]);
+  const error=home.error||localError;
+  const closeButton=<button type="button" className="home3d-icon" disabled={busy} onClick={closeHome} aria-label={t("닫기")}><X size={20}/></button>;
+  const sheetTitle=tab==='photos'?t(HOME_FRAME_LABELS[frameId]):tab==='board'?t("화이트보드"):tab==='gifts'?t("인사와 선물"):t("집 설정");
+  // Escape closes the innermost layer first: confirmation, then panel, then the house.
+  return <dialog className="social-home-dialog" ref={dialog} aria-labelledby={title} onCancel={event=>{event.preventDefault();if(guard.current||busy)return;if(confirm||report){setConfirm(null);setReport(null);}else if(tab)setTab(null);else closeHome();}}>
+    {data?<Room3DHome data={data} busy={busy} suspended={!!tab||!!confirm||!!report} onSave={(config,revision)=>home.act('/room3d','PUT',{config,revision})} onDirtyChange={setRoomDirty} onObject={openObject}
+      heading={<>
+        <small>TIMO HOME</small>
+        <h2 id={title}>{t("{name}님의 마이룸",{name:data.owner.name})}</h2>
+        <p className="home3d-chips"><span className={`home-status status-${data.settings.status}`}>● {t(HOME_STATUS_LABELS[data.settings.status])}</span><span>{t(HOME_SCOPE_LABELS[data.settings.visibility])}</span></p>
+        {data.displayedGift?<button type="button" className="home3d-gift" onClick={()=>setTab('gifts')}><span aria-hidden="true">{HOME_GIFT_ICONS[data.displayedGift.gift]}</span>{data.displayedGift.note||t(HOME_GIFT_LABELS[data.displayedGift.gift])}</button>:null}
+      </>}
+      windowActions={<>
+        {!data.own?<button type="button" className="home3d-icon" disabled={busy} aria-pressed={data.favorite} aria-label={t("즐겨찾기")} onClick={()=>void home.act('/favorite','PUT',{favorite:!data.favorite})}><Star size={19} fill={data.favorite?'currentColor':'none'}/></button>:null}
+        <button type="button" className="home3d-icon" disabled={busy||roomDirty} aria-label={t("새로고침")} onClick={()=>void home.reload()}><RefreshCw size={18}/></button>
+        {closeButton}
+      </>}
+      dock={[
+        {key:'gifts',label:t("인사와 선물"),icon:<Gift size={20}/>,onClick:()=>setTab('gifts'),disabled:busy||roomDirty},
+        data.own
+          ?{key:'settings',label:t("집 설정"),icon:<Settings size={20}/>,onClick:()=>setTab('settings'),disabled:busy||roomDirty}
+          :{key:'chat',label:t("대화하기"),icon:<MessageCircle size={20}/>,onClick:()=>onChat(data.owner),disabled:busy},
+      ]}>
+      {error&&!tab?<p className="home3d-error" role="alert">{error}<button type="button" disabled={busy} onClick={()=>void home.reload()}>{t("다시 시도")}</button></p>:null}
+      {tab?<section className="home-object-sheet" aria-label={sheetTitle}><header><h3>{sheetTitle}</h3><button type="button" disabled={busy} onClick={()=>setTab(null)} aria-label={t("방으로 돌아가기")}><X/></button></header>
+        {error?<p role="alert">{error}</p>:null}
         {notice?<p role="status" className="home-hint">{notice}</p>:null}
         {tab==='board'?<>
-          {!boardInstalled?<div className="home-empty"><h3>{t("화이트보드를 설치해 주세요")}</h3>{data.own?<button type="button" disabled={busy} onClick={()=>void install('whiteboard')}>{t("화이트보드 설치")}</button>:<p>{t("아직 방명록을 받지 않는 집이에요.")}</p>}</div>:null}
+          {!boardInstalled?<p className="home-hint">{t("아직 방명록을 받지 않는 집이에요.")}</p>:null}
           {data.settings.question?<blockquote className="home-question"><small>{t("오늘의 질문")}</small><p>{data.settings.question}</p></blockquote>:null}
           {boardInstalled?<HomeComposer data={data} busy={busy} act={home.act}/>:null}
           <HomeEntries key={ownerId} data={data} busy={busy} act={home.act} ask={ask} report={setReport} block={id=>run(()=>api(`/api/partners/${encodeURIComponent(id)}/block`,{method:'POST',body:'{}'}))}/>
         </>:null}
         {tab==='photos'?<HomePhotos key={frameId} frameId={frameId} data={data} busy={busy} act={home.act} report={setReport} ask={ask}/>:null}
         {tab==='gifts'?<>
+          {data.own&&data.displayedGift?<div className="home-displayed-gift"><span>{HOME_GIFT_ICONS[data.displayedGift.gift]}</span><div><strong>{t("소중한 선물")}</strong><p>{data.displayedGift.note||t(HOME_GIFT_LABELS[data.displayedGift.gift])}</p><small>{data.displayedGift.author?.name}</small></div><button type="button" disabled={busy||roomDirty} onClick={()=>void home.act('/settings','PATCH',{displayedGiftId:''})}>{t("전시 해제")}</button></div>:null}
           {!data.own?<HomeGreeting data={data} busy={busy} act={home.act}/>:<p className="home-hint">{t("친구가 남긴 인사와 선물을 모았어요.")}</p>}
           {!data.own&&!data.settings.showVisitors?<p className="home-hint">{t("방문 기록은 집주인만 볼 수 있어요.")}</p>:null}
           <div className="home-visitors">{data.visitors.map(stamp=><article key={stamp.id}><span className="home-gift-icon">{HOME_GIFT_ICONS[stamp.gift]}</span><div><strong>{stamp.author?.name||t("알 수 없는 상대")}</strong><p>{stamp.note||t(HOME_GIFT_LABELS[stamp.gift])}</p><small>{stamp.day}</small></div>{data.own&&stamp.gift!=='wave'?<button type="button" disabled={busy} onClick={()=>void home.act('/settings','PATCH',{displayedGiftId:stamp.id})}>{t("전시하기")}</button>:null}<button type="button" onClick={()=>setReport({kind:'stamp',id:stamp.id})}>{t("신고")}</button></article>)}</div>
           {data.own&&!data.visitors.length?<p className="home-hint">{t("아직 받은 인사나 선물이 없어요.")}</p>:null}
         </>:null}
         {tab==='settings'&&data.own?<HomeSettingsForm key={JSON.stringify(data.settings)} settings={data.settings} busy={busy} act={home.act}/>:null}
-        </section>:null}
-      </>:null}
-      {confirm?<section className="home-confirm" role="alert"><p>{confirmLabel}</p><button type="button" disabled={busy} onClick={()=>setConfirm(null)}>{t("취소")}</button><button type="button" disabled={busy} onClick={()=>{const action=confirm;setConfirm(null);void action();}}>{t("확인")}</button></section>:null}
-      {report?<form className="home-report" onSubmit={event=>{event.preventDefault();void run(async()=>{const result=await api(`/api/homes/${encodeURIComponent(ownerId)}/reports`,{method:'POST',body:JSON.stringify({...report,reason})});setReport(null);setReason('');setNotice(t("신고를 접수했어요. 신고만으로 계정이 정지되지는 않아요."));return result;});}}><label>{t("신고 사유")}<textarea required maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><button type="button" disabled={busy} onClick={()=>setReport(null)}>{t("취소")}</button><button type="submit" disabled={busy||!reason.trim()}>{t("신고 보내기")}</button></form>:null}
-    </div>
+      </section>:null}
+    </Room3DHome>
+    :<div className="home3d home3d-empty">
+      <header className="home3d-top"><div className="home3d-heading"><small>TIMO HOME</small><h2 id={title}>{t("친구 집")}</h2></div><div className="home3d-window">{closeButton}</div></header>
+      {home.loading?<div className="home3d-loading" role="status"><span className="home3d-spinner" aria-hidden="true"/><p>{t("불러오는 중…")}</p></div>
+        :<div className="home3d-loading home-locked"><LockKeyhole/><p>{error||t("공개 설정 또는 연결 상태를 확인해 주세요.")}</p><button type="button" className="home3d-primary" disabled={busy} onClick={()=>void home.reload()}>{t("다시 시도")}</button></div>}
+    </div>}
+    {confirm?<section className="home-confirm" role="alert"><p>{confirmLabel}</p><button type="button" disabled={busy} onClick={()=>setConfirm(null)}>{t("취소")}</button><button type="button" disabled={busy} onClick={()=>{const action=confirm;setConfirm(null);void action();}}>{t("확인")}</button></section>:null}
+    {report?<form className="home-report" onSubmit={event=>{event.preventDefault();void run(async()=>{const result=await api(`/api/homes/${encodeURIComponent(ownerId)}/reports`,{method:'POST',body:JSON.stringify({...report,reason})});setReport(null);setReason('');setNotice(t("신고를 접수했어요. 신고만으로 계정이 정지되지는 않아요."));return result;});}}><label>{t("신고 사유")}<textarea required maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><button type="button" disabled={busy} onClick={()=>setReport(null)}>{t("취소")}</button><button type="submit" disabled={busy||!reason.trim()}>{t("신고 보내기")}</button></form>:null}
   </dialog>;
 }
 
