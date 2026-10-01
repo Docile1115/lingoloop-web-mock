@@ -303,12 +303,18 @@ function profileForOthers(profile) {
   // 설정값 자체도 남에게 알릴 이유가 없습니다.
   const { hideLocation, ...rest } = shown;
   delete rest.roomConfig; // A house is readable only through its privacy-checked API.
-  return hideLocation ? { ...rest, city: "" } : rest;
+  delete rest.lastActiveAt; // 마지막 접속 시각은 본인만 봅니다.
+  // 이 설정이 생기기 전 프로필에는 값이 없습니다. 화면·PATCH처럼 "없음"도 숨김으로 봅니다.
+  return hideLocation === false ? rest : { ...rest, city: "" };
 }
 
 function defaultProfile(uid, email, name) {
-  const normalizedName = (name || email.split("@")[0] || "TimoTalk 사용자").trim().slice(0, 40);
-  const handleBase = normalizedName
+  // 표시 이름이 없으면 이메일 앞부분을 쓰지 않습니다 — 이름과 핸들은 모두에게 보여서
+  // 이메일 일부가 드러납니다. PATCH가 2자 이상을 요구하므로 1자 이름도 기본 이름으로 둡니다.
+  const providedName = (name || "").trim().slice(0, 40);
+  const hasName = providedName.length >= 2;
+  const normalizedName = hasName ? providedName : "TimoTalk 사용자";
+  const handleBase = (hasName ? providedName : "")
     .normalize("NFKD")
     .replace(/[^\p{L}\p{N}]+/gu, "")
     .toLocaleLowerCase()
@@ -481,6 +487,30 @@ function countryFromCode(code, fallback) {
   const found = COUNTRIES.find((item) => item.code === String(code).toLocaleUpperCase());
   if (!found) throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 국가입니다.", { field: "countryCode" });
   return found;
+}
+
+const LANGUAGE_CODES = new Set(LANGUAGES.map((language) => language.code));
+
+/** 프로필 언어는 서버 목록(LANGUAGES)에 있는 코드만 받습니다. */
+function supportedLanguageCode(code, field) {
+  if (!LANGUAGE_CODES.has(code)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 언어입니다.", { field });
+  }
+  return code;
+}
+
+/**
+ * 프로필 사진은 비우거나 기기에서 올린 이미지 데이터 URI만 받습니다.
+ * 외부 주소를 받으면 이 사진을 보는 모든 사람의 IP가 그 서버에 남습니다.
+ */
+const AVATAR_DATA_URL = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+function avatarUrlFrom(value) {
+  const avatarUrl = safeString(value, "avatarUrl", { min: 0, max: 520000 });
+  if (avatarUrl && !AVATAR_DATA_URL.test(avatarUrl)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "프로필 사진 형식을 확인해 주세요.", { field: "avatarUrl" });
+  }
+  return avatarUrl;
 }
 
 function preferenceVersion(preferences) {
@@ -1247,41 +1277,64 @@ app.patch("/api/profile/avatar", requireUser, async (req, res) => {
 
 app.patch("/api/profile", requireUser, async (req, res) => {
   const current = req.auth.profile;
+  const body = req.body || {};
   const allowedGenders = ["unspecified", "woman", "man", "nonbinary"];
-  if (req.body?.gender !== undefined && !allowedGenders.includes(req.body.gender)) {
+  if (body.gender !== undefined && !allowedGenders.includes(body.gender)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 성별 값입니다.", { field: "gender" });
   }
-  const patch = {
-    name: req.body?.name === undefined ? current.name : safeString(req.body.name, "name", { min: 2, max: 40 }),
-    bio: req.body?.bio === undefined ? current.bio : safeString(req.body.bio, "bio", { min: 0, max: 500 }),
-    city: req.body?.city === undefined ? current.city : safeString(req.body.city, "city", { min: 0, max: 80 }),
-    // 국가는 목록에 있는 코드만 받습니다 — 이름·국기를 사용자가 정하게 두면
-    // 매칭의 preferredCountries 와 어긋나고 아무 문자열이나 들어옵니다.
-    country: countryFromCode(req.body?.countryCode, current.country),
-    nativeLanguages: stringArray(req.body?.nativeLanguages, "nativeLanguages", current.nativeLanguages, 3, 10),
-    learningLanguages: Array.isArray(req.body?.learningLanguages)
-      ? req.body.learningLanguages.slice(0, 3).map((item) => ({
-          code: safeString(item?.code, "learningLanguages.code", { min: 2, max: 10 }),
+  /* 요청에 들어온 필드만 씁니다. 예전에는 읽어 둔 프로필 전체를 다시 써서, 겹친 두 PATCH
+     (위치 숨기기 토글과 프로필 저장)가 서로의 변경을 되돌릴 수 있었습니다. */
+  const patch = {};
+  if (body.name !== undefined) patch.name = safeString(body.name, "name", { min: 2, max: 40 });
+  if (body.bio !== undefined) patch.bio = safeString(body.bio, "bio", { min: 0, max: 500 });
+  if (body.city !== undefined) patch.city = safeString(body.city, "city", { min: 0, max: 80 });
+  // 국가는 목록에 있는 코드만 받습니다 — 이름·국기를 사용자가 정하게 두면
+  // 매칭의 preferredCountries 와 어긋나고 아무 문자열이나 들어옵니다.
+  if (body.countryCode !== undefined) patch.country = countryFromCode(body.countryCode, current.country);
+  if (body.nativeLanguages !== undefined) {
+    patch.nativeLanguages = stringArray(body.nativeLanguages, "nativeLanguages", [], 3, 10).map((code) =>
+      supportedLanguageCode(code, "nativeLanguages"),
+    );
+  }
+  const requestedLearning = Array.isArray(body.learningLanguages)
+    ? body.learningLanguages.slice(0, 3).map((item) => {
+        // 공백뿐인 목표는 비운 것으로 보고 기본값을 씁니다.
+        const goal = typeof item?.goal === "string" ? item.goal.trim() : item?.goal;
+        return {
+          code: supportedLanguageCode(
+            safeString(item?.code, "learningLanguages.code", { min: 2, max: 10 }),
+            "learningLanguages.code",
+          ),
           level: LEARNING_LEVELS.includes(item?.level) ? item.level : "beginner",
-          goal: safeString(item?.goal || "일상 대화", "learningLanguages.goal", { min: 2, max: 120 }),
-        }))
-      : current.learningLanguages,
-    interests: stringArray(req.body?.interests, "interests", current.interests, 12, 40),
-    availability: stringArray(req.body?.availability, "availability", current.availability, 4, 32),
-    intents: stringArray(req.body?.intents, "intents", current.intents, 4, 32),
-    age: integerInRange(req.body?.age, "age", { min: 18, max: 100, fallback: current.age }),
-    gender: req.body?.gender === undefined ? current.gender : req.body.gender,
-    avatarUrl: req.body?.avatarUrl === undefined ? current.avatarUrl || "" : safeString(req.body.avatarUrl, "avatarUrl", { min: 0, max: 520000 }),
-    hideLocation: optionalBoolean(
-      req.body?.hideLocation,
-      "hideLocation",
-      current.hideLocation === undefined ? true : Boolean(current.hideLocation),
-    ),
-    updatedAt: nowIso(),
-  };
-  if (!patch.nativeLanguages.length || !patch.learningLanguages.length) {
+          goal: safeString(goal || "일상 대화", "learningLanguages.goal", { min: 2, max: 120 }),
+        };
+      })
+    : undefined;
+  if (patch.nativeLanguages || requestedLearning) {
+    // 모국어와 겹치거나 같은 코드가 두 번 나온 학습 언어는 뺍니다(먼저 나온 것을 남깁니다).
+    const currentLearning = current.learningLanguages || [];
+    const seen = new Set(patch.nativeLanguages ?? current.nativeLanguages ?? []);
+    const learningLanguages = (requestedLearning ?? currentLearning).filter((item) => {
+      if (!item?.code || seen.has(item.code)) return false;
+      seen.add(item.code);
+      return true;
+    });
+    if (requestedLearning || learningLanguages.length !== currentLearning.length) {
+      patch.learningLanguages = learningLanguages;
+    }
+  }
+  if (body.interests !== undefined) patch.interests = stringArray(body.interests, "interests", [], 12, 40);
+  if (body.availability !== undefined) patch.availability = stringArray(body.availability, "availability", [], 4, 32);
+  if (body.intents !== undefined) patch.intents = stringArray(body.intents, "intents", [], 4, 32);
+  if (body.age !== undefined) patch.age = integerInRange(body.age, "age", { min: 18, max: 100, fallback: current.age });
+  if (body.gender !== undefined) patch.gender = body.gender;
+  if (body.avatarUrl !== undefined) patch.avatarUrl = avatarUrlFrom(body.avatarUrl);
+  if (body.hideLocation !== undefined) patch.hideLocation = optionalBoolean(body.hideLocation, "hideLocation", true);
+  const merged = { ...current, ...patch };
+  if (!merged.nativeLanguages?.length || !merged.learningLanguages?.length) {
     throw new ApiError(422, "VALIDATION_ERROR", "모국어와 학습 언어를 한 개 이상 선택해 주세요.");
   }
+  patch.updatedAt = nowIso();
   await db.collection("profiles").doc(req.auth.uid).update(patch);
   return success(res, req, { ...publicProfile({ ...current, ...patch }), email: req.auth.email, emailVerified: req.auth.emailVerified });
 });
@@ -1554,6 +1607,25 @@ app.get("/api/partners/:partnerId/follow-counts", requireUser, async (req, res) 
   return success(res, req, { following: following.length, followers: followers.length, posts: posts.length });
 });
 
+/**
+ * 글에 굳혀 둔 작성자 정보 위에 지금 프로필을 덮습니다 — 이름·국가·언어를 바꾸면
+ * 옛 글에도 반영됩니다. 프로필이 없으면 글에 남은 이름을 그대로 씁니다.
+ */
+function postAuthorView(post, author) {
+  return {
+    ...post.author,
+    ...(author ? { name: author.name, handle: author.handle, flag: author.country?.flag || "🌐" } : {}),
+    ...avatarPresentation(author),
+    countryCode: author?.country?.code || "",
+    age: author?.age || 0,
+    gender: author?.gender || "unspecified",
+    native: author?.nativeLanguages?.[0] || "",
+    learning: author?.learningLanguages?.[0]
+      ? { code: author.learningLanguages[0].code, level: author.learningLanguages[0].level }
+      : null,
+  };
+}
+
 app.get("/api/posts", requireUser, async (req, res) => {
   const [snapshot, partnerIds, blocked] = await Promise.all([
     db.collection("posts").orderBy("createdAt", "desc").limit(100).get(),
@@ -1578,21 +1650,8 @@ app.get("/api/posts", requireUser, async (req, res) => {
   const withReactions = posts.map((post, index) => ({
     ...post,
     liked: reactions[index].exists,
-    author: {
-      ...post.author,
-      // 글마다 굳히지 않고 지금 프로필을 씁니다 — 언어를 바꾸면 옛 글에도 반영됩니다.
-      ...avatarPresentation(authors.get(post.authorId)),
-      countryCode: authors.get(post.authorId)?.country?.code || "",
-      age: authors.get(post.authorId)?.age || 0,
-      gender: authors.get(post.authorId)?.gender || "unspecified",
-      native: authors.get(post.authorId)?.nativeLanguages?.[0] || "",
-      learning: authors.get(post.authorId)?.learningLanguages?.[0]
-        ? {
-            code: authors.get(post.authorId).learningLanguages[0].code,
-            level: authors.get(post.authorId).learningLanguages[0].level,
-          }
-        : null,
-    },
+    // 글마다 굳히지 않고 지금 프로필을 씁니다 — 언어를 바꾸면 옛 글에도 반영됩니다.
+    author: postAuthorView(post, authors.get(post.authorId)),
   }));
   return success(res, req, withReactions, 200, { pagination: { total: posts.length, nextCursor: null } });
 });
@@ -1685,17 +1744,7 @@ app.get("/api/posts/:postId", requireUser, async (req, res) => {
   return success(res, req, {
     ...post,
     liked: reaction.exists,
-    author: {
-      ...post.author,
-      ...avatarPresentation(author),
-      countryCode: author?.country?.code || "",
-      age: author?.age || 0,
-      gender: author?.gender || "unspecified",
-      native: author?.nativeLanguages?.[0] || "",
-      learning: author?.learningLanguages?.[0]
-        ? { code: author.learningLanguages[0].code, level: author.learningLanguages[0].level }
-        : null,
-    },
+    author: postAuthorView(post, author),
   });
 });
 
@@ -2299,9 +2348,10 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
   });
 
   // 내가 보낸 메시지에만 읽음 여부를 붙입니다 — 남이 내 걸 언제 읽었는지가 궁금한 것이지,
-  // 내가 남의 걸 읽었는지는 화면에 필요 없습니다.
+  // 내가 남의 걸 읽었는지는 화면에 필요 없습니다. 수락 전 요청은 읽음을 보여주지 않습니다.
   const partnerId = (conversation.memberIds || []).find((memberId) => memberId !== req.auth.uid);
-  const partnerReadAt = partnerId ? conversation.readAt?.[partnerId] : null;
+  const partnerReadAt =
+    partnerId && conversationStatus(conversation) === "accepted" ? conversation.readAt?.[partnerId] : null;
   const withRead = messages.map((message) =>
     message.senderId === req.auth.uid
       ? { ...message, readByPartner: Boolean(partnerReadAt && String(partnerReadAt) >= String(message.sentAt)) }
@@ -2619,10 +2669,7 @@ app.get("/api/search", requireUser, async (req, res) => {
   const postAuthors = await profilesByIds(posts.map((post) => post.authorId));
   const postsWithAvatars = posts.map((post) => ({
     ...post,
-    author: {
-      ...post.author,
-      ...avatarPresentation(postAuthors.get(post.authorId)),
-    },
+    author: postAuthorView(post, postAuthors.get(post.authorId)),
   }));
   return success(res, req, { partners, posts: postsWithAvatars }, 200, {
     total: partners.length + postsWithAvatars.length,
@@ -2663,7 +2710,13 @@ app.post("/api/translate", requireUser, async (req, res) => {
 app.post("/api/conversation-support", requireUser, async (req, res) => {
   const partnerId = safeString(req.body?.partnerId, "partnerId", { min: 4, max: 128 });
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
-  if (!partnerSnapshot.exists) throw new ApiError(404, "PARTNER_NOT_FOUND", "대화 상대를 찾을 수 없습니다.");
+  if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
+    throw new ApiError(404, "PARTNER_NOT_FOUND", "대화 상대를 찾을 수 없습니다.");
+  }
+  // 차단한 사이면 프로필도 AI 사용량도 쓰지 않습니다. 차단 여부가 드러나지 않게 404로 답합니다.
+  if (await isBlockedBetween(req.auth.uid, partnerId)) {
+    throw new ApiError(404, "PARTNER_NOT_FOUND", "대화 상대를 찾을 수 없습니다.");
+  }
   const stage = optionalString(req.body?.stage, "stage", 32) || "first-message";
   const draft = optionalString(req.body?.draft, "draft", 1000) || "";
   const partner = profileForOthers(partnerSnapshot.data());
