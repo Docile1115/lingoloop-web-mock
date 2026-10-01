@@ -74,6 +74,12 @@ test('3D home persistence is owner-only, revision-checked and preserves legacy d
   assert.equal((await call('/owner')).status,403);
 });
 
+test('without a saved 3D layout the starter room takes guestbook notes even if the old 2D room had no whiteboard',async t=>{
+  const {db,call}=await fixture(t);
+  db.rows.get('profiles/owner').roomConfig.items=[];
+  assert.equal((await call('/owner/entries','POST',entry())).status,200);
+});
+
 test('home policy is deny-by-default for unknown scopes and always honors blocks',()=>{
   for(const scope of ['everyone','followers','mutuals','private','invalid'])assert.equal(canEnterHome(scope,{own:true,blocked:true}),false);
   assert.equal(canEnterHome('private',{own:true}),true);assert.equal(canEnterHome('private',{follows:true,followedBy:true}),false);
@@ -122,7 +128,7 @@ test('guestbook writes are idempotent, quota-limited, owner replies notify and h
   assert.ok([...db.rows.values()].some(row=>row.type==='home_heart'));
   await call('/owner/entries/'+id,'PATCH',{hearted:false},'stranger');assert.equal(db.rows.get('homes/owner/entries/'+id).heartCount,0);
   assert.equal([...db.rows.values()].filter(row=>row.type==='home_heart').length,0);
-  resetQuota('friend');db.rows.get('profiles/owner').roomConfig.items=[];
+  resetQuota('friend');db.rows.set('homes/owner',{...(db.rows.get('homes/owner')||{}),room3d:{version:1,items:[]},room3dRevision:1});
   assert.equal((await call('/owner/entries','POST',entry('missing board','request-missingboard'))).status,422);
 });
 test('answers retain original questions; authors can delete after a block or private switch',async t=>{

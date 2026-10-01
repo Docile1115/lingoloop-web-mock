@@ -159,7 +159,8 @@ export function registerHomeRoutes(app, {db, requireUser, success, ApiError, ass
 
   route('post','/api/homes/:ownerId/entries',req=>db.runTransaction(async tx=>{
     const owner=uid(req.params.ownerId),viewer=req.auth.uid; const state=await access(tx,viewer,owner,true);
-    const installed=state.home.room3d?readRoom3D(state.home.room3d)?.items?.some(item=>item.kind==='board'):state.profile.roomConfig?.items?.some(item=>item.id==='whiteboard');
+    // The web home is 3D only: without a saved layout the starter room (which has a whiteboard) is shown.
+    const installed=state.home.room3d?readRoom3D(state.home.room3d)?.items?.some(item=>item.kind==='board'):true;
     if(!installed) throw new HomeError('화이트보드를 먼저 설치해 주세요.');
     exact(req.body,['text','kind','requestId']); const body=text(req.body.text,500,true); const kind=req.body.kind||'guestbook';
     if(!['guestbook','answer'].includes(kind)|| (kind==='answer'&&!state.settings.question)) throw new HomeError('답변할 질문을 확인해 주세요.');
