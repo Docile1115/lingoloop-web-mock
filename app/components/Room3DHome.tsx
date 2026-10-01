@@ -1,40 +1,82 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { Plus, Minus, RotateCw, Trash2, Maximize, Save } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ImageIcon, LayoutGrid, Maximize, MessageSquareText, Minus, Plus, RotateCw, Save, Trash2, X } from "lucide-react";
 import { t } from "../lib/i18n";
 import type { HomeData } from "../lib/home";
 import type { Room3DConfig } from "../lib/room3d/config";
 import type { Furnishing, Kind } from "../lib/room3d/models";
 import type { RoomScene3D } from "../lib/room3d/scene";
-import type { RoomItemId } from "../lib/room";
 
+export type HomeDockAction = { key: string; label: string; icon: ReactNode; onClick: () => void; disabled?: boolean };
+type Status = "idle" | "walking" | "sitting" | "blocked" | "editing";
 type Props = {
   data: HomeData;
   busy: boolean;
+  /** A sheet or confirmation floats over the room: input is locked and room controls step aside. */
   suspended: boolean;
   onSave: (config: Room3DConfig, revision: number) => Promise<boolean>;
   onDirtyChange: (dirty: boolean) => void;
-  onObject: (id: RoomItemId) => void;
+  /** The resident reached a frame or the whiteboard (or a shortcut asked for one). */
+  onObject: (id: string) => void;
+  /** Dialog-owned overlays: whose home this is (top left) and window buttons (top right). */
+  heading: ReactNode;
+  windowActions: ReactNode;
+  /** Dialog-owned shortcuts listed after the room's own ones (gifts, chat, settings). */
+  dock: HomeDockAction[];
+  /** Panels and messages that float over the room. */
+  children?: ReactNode;
 };
-export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObject }: Props) {
+
+const TURN = 2 * Math.PI;
+/** Same furniture in the same places, ignoring float noise and how a rotation is written (the server stores [0, 2π)). */
+function sameLayout(a: readonly Furnishing[], b: readonly Furnishing[]) {
+  return (
+    a.length === b.length &&
+    a.every((item, index) => {
+      const other = b[index],
+        angle = (((item.rotation - other.rotation) % TURN) + TURN) % TURN;
+      return (
+        other.id === item.id &&
+        other.kind === item.kind &&
+        Math.abs(other.x - item.x) < 1e-6 &&
+        Math.abs(other.z - item.z) < 1e-6 &&
+        Math.min(angle, TURN - angle) < 1e-6
+      );
+    })
+  );
+}
+
+/**
+ * The whole home is one 3D room; every control floats inside it like a game HUD
+ * instead of being stacked above and below the canvas.
+ */
+export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObject, heading, windowActions, dock, children }: Props) {
   const host = useRef<HTMLDivElement>(null),
     scene = useRef<RoomScene3D | null>(null),
-    callbacks = useRef({ onObject }),
-    saving = useRef(false);
+    saving = useRef(false),
+    mounted = useRef(true);
   const [ready, setReady] = useState(false),
     [failed, setFailed] = useState(false),
     [retry, setRetry] = useState(0),
     [editing, setEditing] = useState(false),
     [selected, setSelected] = useState<Furnishing | null>(null),
     [draft, setDraft] = useState<Furnishing[]>([]),
-    [status, setStatus] = useState("idle"),
-    [notice, setNotice] = useState("");
-  const [baseline, setBaseline] = useState("");
-  const mounted = useRef(true);
-  const [discard, setDiscard] = useState(false);
-  const saved = JSON.stringify(data.room3d?.items ?? null),
-    own = data.own;
-  const dirty = ready && own && JSON.stringify(draft) !== baseline;
+    [baseline, setBaseline] = useState<Furnishing[]>([]),
+    [status, setStatus] = useState<Status>("idle"),
+    [notice, setNotice] = useState(""),
+    [discard, setDiscard] = useState(false);
+  const own = data.own;
+  /* Rebuild the scene only when the server layout differs from what is on screen.
+     After the owner's own save they match, so the room does not flash a loading screen. */
+  const savedKey = JSON.stringify(data.room3d?.items ?? null);
+  const [seenKey, setSeenKey] = useState(savedKey);
+  const [buildKey, setBuildKey] = useState(savedKey);
+  if (savedKey !== seenKey) {
+    setSeenKey(savedKey);
+    if (data.room3d && ready && sameLayout(data.room3d.items, draft)) setBaseline(data.room3d.items);
+    else setBuildKey(savedKey);
+  }
+  const dirty = ready && own && !sameLayout(draft, baseline);
   const names: Record<Kind, string> = {
     sofa: t("소파"),
     table: t("테이블"),
@@ -57,6 +99,19 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
     window.addEventListener("beforeunload", unload);
     return () => window.removeEventListener("beforeunload", unload);
   }, [dirty, onDirtyChange]);
+  const callbacks = useRef({ open: (id: string) => onObject(id) });
+  useEffect(() => {
+    callbacks.current = {
+      open: (id) => {
+        // Photos and notes belong to saved furniture; an unsaved layout may not have it yet.
+        if (dirty) {
+          setNotice(t("3D 배치를 먼저 저장해 주세요."));
+          return;
+        }
+        onObject(id);
+      },
+    };
+  }, [onObject, dirty]);
   useEffect(() => {
     let cancelled = false;
     mounted.current = true;
@@ -68,8 +123,9 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
         setEditing(false);
         setSelected(null);
         setNotice("");
-        const items: Furnishing[] = JSON.parse(saved) ?? INITIAL_FURNITURE.map((item) => ({ ...item }));
-        setBaseline(JSON.stringify(items));
+        // Without a saved layout everyone sees the starter room (owner and visitors alike).
+        const items: Furnishing[] = (JSON.parse(buildKey) as Furnishing[] | null) ?? INITIAL_FURNITURE.map((item) => ({ ...item }));
+        setBaseline(items);
         setDraft(items);
         try {
           scene.current = new RoomScene3D(
@@ -80,7 +136,7 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
               select: setSelected,
               layout: setDraft,
               status: setStatus,
-              open: (item) => callbacks.current.onObject(item.id as RoomItemId),
+              open: (item) => callbacks.current.open(item.id),
             },
             { items, editable: own },
           );
@@ -97,35 +153,47 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
       scene.current?.dispose();
       scene.current = null;
     };
-  }, [saved, own, retry]);
+  }, [buildKey, own, retry]);
   useEffect(() => {
     scene.current?.setLocked(busy || suspended || discard);
   }, [busy, suspended, ready, discard]);
-  const surfaces = JSON.stringify({
-    photos: data.photos,
-    notes: data.entries.map((entry) => entry.text),
-    ids: data.room3d?.items.filter((item) => item.kind === "frame").map((item) => item.id) ?? ["frame"],
-  });
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 3600);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+  // Photos and the latest guestbook notes are painted onto the frames and the whiteboard.
+  const frameIds = draft.filter((item) => item.kind === "frame").map((item) => item.id).join(",");
+  const notes = JSON.stringify(data.entries.slice(0, 3).map((entry) => entry.text).reverse());
   useEffect(() => {
     if (!ready || !scene.current) return;
     const active = scene.current;
-    const value = JSON.parse(surfaces) as { photos: HomeData["photos"]; notes: string[]; ids: string[] };
-    for (const id of value.ids) {
+    for (const id of frameIds.split(",").filter(Boolean)) {
       active.resetPhoto(id);
-      const photo = value.photos.find((row) => row.id === id);
+      const photo = data.photos.find((row) => row.id === id);
       if (photo)
         void active.photo(id, photo.image).catch(() => {
           if (mounted.current) setNotice(t("사진을 읽을 수 없어요."));
         });
     }
-    active.notes("whiteboard", value.notes.slice(0, 3).reverse());
-  }, [ready, surfaces]);
+    active.notes("whiteboard", JSON.parse(notes) as string[]);
+  }, [ready, frameIds, data.photos, notes]);
+  const startEditing = () => {
+    if (scene.current?.setEditing(true)) setEditing(true);
+  };
+  const stopEditing = () => {
+    if (dirty) setDiscard(true);
+    else if (scene.current?.setEditing(false)) setEditing(false);
+  };
   async function save() {
     if (saving.current || busy || !ready || discard) return;
     saving.current = true;
     scene.current?.setLocked(true);
     try {
-      await onSave({ version: 1, items: draft }, data.room3dRevision ?? 0);
+      if (await onSave({ version: 1, items: draft }, data.room3dRevision ?? 0)) {
+        scene.current?.setEditing(false);
+        if (mounted.current) setEditing(false);
+      }
     } catch {
       if (mounted.current) setNotice(t("방을 저장하지 못했어요. 다시 시도해 주세요."));
     } finally {
@@ -133,33 +201,234 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
       if (mounted.current) scene.current?.setLocked(suspended);
     }
   }
-  function open(item: Furnishing) {
-    if (!data.room3d || dirty) {
+  /** Dock shortcut: walk to the whiteboard or a frame first, so things still happen in the room. */
+  const visit = (kind: "board" | "frame") => {
+    const item = draft.find((row) => row.kind === kind);
+    if (!item) {
+      if (own) {
+        if (scene.current?.setEditing(true)) {
+          setEditing(true);
+          scene.current.add(kind);
+        }
+        setNotice(
+          kind === "board"
+            ? t("화이트보드를 놓고 배치를 저장하면 방명록을 받을 수 있어요.")
+            : t("액자를 놓고 배치를 저장하면 사진을 걸 수 있어요."),
+        );
+      } else if (kind === "board") onObject("whiteboard");
+      else setNotice(t("아직 걸어둔 사진이 없어요."));
+      return;
+    }
+    if (dirty) {
       setNotice(t("3D 배치를 먼저 저장해 주세요."));
       return;
     }
-    callbacks.current.onObject(item.id as RoomItemId);
-  }
-  useEffect(() => {
-    callbacks.current = {
-      onObject: (id) => {
-        if (!data.room3d || dirty) {
-          setNotice(t("3D 배치를 먼저 저장해 주세요."));
-          return;
-        }
-        onObject(id);
-      },
-    };
-  }, [onObject, data.room3d, dirty]);
+    // If the way is blocked, open it right away rather than doing nothing.
+    if (!scene.current?.go(item.id)) callbacks.current.open(item.id);
+  };
+  const statusText = {
+    idle: t("바닥을 누르면 이동하고, 가구를 누르면 다가가요."),
+    walking: t("걸어가는 중"),
+    sitting: t("편안히 쉬는 중"),
+    blocked: editing ? t("공간이 부족해요. 다른 위치를 골라주세요.") : t("거기로는 갈 수 없어요."),
+    editing: t("가구를 끌어서 배치하세요"),
+  }[status];
+  const live = ready && !failed && !editing && !suspended;
+  const selectedAction = () => {
+    if (!selected) return;
+    if (selected.kind === "frame" || selected.kind === "board") callbacks.current.open(selected.id);
+    else scene.current?.action();
+  };
+  const selectedLabel = !selected
+    ? ""
+    : selected.kind === "frame"
+      ? own
+        ? t("사진 넣기")
+        : t("사진 보기")
+      : selected.kind === "board"
+        ? own
+          ? t("방명록")
+          : t("방명록 남기기")
+        : ["sofa", "chair"].includes(selected.kind)
+          ? status === "sitting"
+            ? t("일어나기")
+            : t("앉기")
+          : t("살펴보기");
+
   return (
-    <section className="live-room3d">
-      {dirty ? (
-        <button type="button" disabled={busy} onClick={() => setDiscard(true)}>
-          {t("변경 내용 버리기")}
-        </button>
+    <section className={editing ? "home3d editing" : "home3d"}>
+      <div className="home3d-canvas" ref={host} />
+      <header className="home3d-top">
+        {/* While arranging furniture the edit bar takes the title's place
+            (the title stays in the DOM, hidden, because it names the dialog). */}
+        <div className="home3d-heading">{heading}</div>
+        {editing ? (
+          <div className="home3d-editbar" role="toolbar" aria-label={t("가구 배치")}>
+            <span>
+              <strong>{t("가구 배치")}</strong>
+              <small role="status">{statusText}</small>
+            </span>
+            <button type="button" disabled={busy || suspended} onClick={stopEditing}>
+              {dirty ? t("취소") : t("완료")}
+            </button>
+            <button
+              type="button"
+              className="home3d-primary"
+              disabled={busy || suspended || !ready || failed || (!dirty && !!data.room3d)}
+              onClick={() => void save()}
+            >
+              <Save size={16} />
+              {busy ? t("저장 중…") : t("배치 저장")}
+            </button>
+          </div>
+        ) : null}
+        <div className="home3d-window">{windowActions}</div>
+      </header>
+
+      {live ? (
+        <nav className="home3d-dock" aria-label={t("집에서 할 수 있는 일")}>
+          {own ? (
+            <button type="button" disabled={busy} onClick={startEditing}>
+              <LayoutGrid size={20} />
+              <span>{t("가구 배치")}</span>
+            </button>
+          ) : null}
+          <button type="button" disabled={busy} onClick={() => visit("board")}>
+            <MessageSquareText size={20} />
+            <span>{t("방명록")}</span>
+          </button>
+          <button type="button" disabled={busy} onClick={() => visit("frame")}>
+            <ImageIcon size={20} />
+            <span>{t("사진")}</span>
+          </button>
+          {dock.map((action) => (
+            <button type="button" key={action.key} disabled={action.disabled} onClick={action.onClick}>
+              {action.icon}
+              <span>{action.label}</span>
+            </button>
+          ))}
+        </nav>
       ) : null}
+
+      {/* The hint steps aside while a piece of furniture card takes the bottom of the room. */}
+      {live && !selected ? (
+        <p className="home3d-status" role="status">
+          <span className={status === "walking" ? "moving" : ""} aria-hidden="true" />
+          {statusText}
+        </p>
+      ) : null}
+
+      <div className="home3d-bottom">
+        {selected && ready && !suspended ? (
+          <div className="home3d-card" role="group" aria-label={names[selected.kind]}>
+            <span>
+              <small>{editing ? t("선택한 가구") : t("가까이에서")}</small>
+              <strong>{names[selected.kind]}</strong>
+            </span>
+            {editing ? (
+              <>
+                <button type="button" className="home3d-round" disabled={busy} aria-label={t("회전")} onClick={() => scene.current?.rotate()}>
+                  <RotateCw size={18} />
+                </button>
+                <button type="button" className="home3d-round" disabled={busy} aria-label={t("삭제")} onClick={() => scene.current?.remove()}>
+                  <Trash2 size={18} />
+                </button>
+              </>
+            ) : (
+              <button type="button" className="home3d-primary" disabled={busy} onClick={selectedAction}>
+                {selectedLabel}
+              </button>
+            )}
+            <button type="button" className="home3d-round" aria-label={t("닫기")} onClick={() => scene.current?.select(null)}>
+              <X size={18} />
+            </button>
+          </div>
+        ) : null}
+        {editing && !suspended ? (
+          <div className="home3d-catalog" role="group" aria-label={t("가구 추가")}>
+            {(Object.keys(names) as Kind[]).map((kind) => (
+              <button
+                type="button"
+                key={kind}
+                disabled={
+                  busy ||
+                  draft.length >= 16 ||
+                  (kind === "frame" && draft.filter((item) => item.kind === "frame").length >= 3) ||
+                  (kind === "board" && draft.some((item) => item.kind === "board"))
+                }
+                onClick={() => scene.current?.add(kind)}
+              >
+                <Plus size={14} />
+                {names[kind]}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {ready && !failed && !suspended ? (
+        <div className="home3d-camera">
+          <button type="button" aria-label={t("확대")} onClick={() => scene.current?.zoom(0.82)}>
+            <Plus size={18} />
+          </button>
+          <button type="button" aria-label={t("축소")} onClick={() => scene.current?.zoom(1.2)}>
+            <Minus size={18} />
+          </button>
+          <button type="button" aria-label={t("시점 초기화")} onClick={() => scene.current?.resetCamera()}>
+            <Maximize size={17} />
+          </button>
+        </div>
+      ) : null}
+
+      {/* Keyboard route to every piece of furniture; it only shows up while focused. */}
+      {ready && !failed && !suspended ? (
+        <div className="home3d-keyboard" role="group" aria-label={t("가구 바로 선택")}>
+          {draft.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              disabled={busy}
+              onClick={() => (editing ? scene.current?.select(item.id) : scene.current?.go(item.id))}
+            >
+              {names[item.kind]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {notice ? (
+        <p className="home3d-notice" role="alert">
+          {notice}
+        </p>
+      ) : null}
+
+      {!ready || failed ? (
+        <div className="home3d-loading" role="status">
+          {failed ? (
+            <>
+              <p>{t("3D 화면을 불러오지 못했어요. WebGL을 지원하는 브라우저에서 다시 시도해주세요.")}</p>
+              <button
+                type="button"
+                className="home3d-primary"
+                onClick={() => {
+                  setBuildKey(savedKey);
+                  setRetry((value) => value + 1);
+                }}
+              >
+                {t("다시 시도")}
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="home3d-spinner" aria-hidden="true" />
+              <p>{t("방에 햇살을 들이는 중…")}</p>
+            </>
+          )}
+        </div>
+      ) : null}
+
       {discard ? (
-        <div className="home-confirm" role="alert">
+        <div className="home-confirm" role="alertdialog" aria-label={t("저장하지 않은 방 변경 내용을 버릴까요?")}>
           <p>{t("저장하지 않은 방 변경 내용을 버릴까요?")}</p>
           <button type="button" disabled={busy} onClick={() => setDiscard(false)}>
             {t("계속 편집")}
@@ -169,6 +438,7 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
             disabled={busy}
             onClick={() => {
               setDiscard(false);
+              setBuildKey(JSON.stringify(baseline));
               setRetry((value) => value + 1);
             }}
           >
@@ -176,141 +446,8 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
           </button>
         </div>
       ) : null}
-      <div className="live-room3d-tools">
-        <strong>3D HOME</strong>
-        {own ? (
-          <>
-            <button
-              type="button"
-              disabled={busy || !ready || failed}
-              aria-pressed={editing}
-              onClick={() => {
-                if (scene.current?.setEditing(!editing)) setEditing(!editing);
-              }}
-            >
-              {editing ? t("생활 모드") : t("가구 배치")}
-            </button>
-            <button
-              type="button"
-              disabled={busy || !ready || failed || (!dirty && !!data.room3d)}
-              onClick={() => void save()}
-            >
-              <Save size={16} />
-              {busy ? t("저장 중…") : t("배치 저장")}
-            </button>
-          </>
-        ) : null}
-        <span>{t("캐릭터 외형은 동작 검증용 모델입니다.")}</span>
-      </div>
-      {!data.room3d && own ? (
-        <p className="home-hint">{t("3D 배치를 저장하면 친구에게도 이 방이 보여요. 기존 2D 방은 보존됩니다.")}</p>
-      ) : null}
-      <div className="live-room3d-stage">
-        <div className="live-room3d-canvas" ref={host} />
-        <div className="live-room3d-camera">
-          <button type="button" aria-label={t("확대")} onClick={() => scene.current?.zoom(0.85)}>
-            <Plus size={18} />
-          </button>
-          <button type="button" aria-label={t("축소")} onClick={() => scene.current?.zoom(1.18)}>
-            <Minus size={18} />
-          </button>
-          <button type="button" aria-label={t("시점 초기화")} onClick={() => scene.current?.resetCamera()}>
-            <Maximize size={18} />
-          </button>
-        </div>
-        {!ready || failed ? (
-          <div className="live-room3d-loading" role="status">
-            {failed ? (
-              <>
-                <p>{t("3D 화면을 불러오지 못했어요. WebGL을 지원하는 브라우저에서 다시 시도해주세요.")}</p>
-                <button type="button" onClick={() => setRetry((v) => v + 1)}>
-                  {t("다시 시도")}
-                </button>
-              </>
-            ) : (
-              t("방에 햇살을 들이는 중…")
-            )}
-          </div>
-        ) : null}
-      </div>
-      <div className="room-object-actions">
-        <span role="status">
-          {status === "blocked"
-            ? t("공간이 부족해요. 다른 위치를 골라주세요.")
-            : status === "walking"
-              ? t("걸어가는 중")
-              : editing
-                ? t("가구를 끌어서 배치하세요")
-                : t("바닥을 누르면 이동하고, 가구를 누르면 다가가요.")}
-        </span>
-        {selected ? (
-          <>
-            <strong>{names[selected.kind]}</strong>
-            {editing ? (
-              <>
-                <button type="button" disabled={busy} aria-label={t("회전")} onClick={() => scene.current?.rotate()}>
-                  <RotateCw size={17} />
-                </button>
-                <button type="button" disabled={busy} aria-label={t("삭제")} onClick={() => scene.current?.remove()}>
-                  <Trash2 size={17} />
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => (["frame", "board"].includes(selected.kind) ? open(selected) : scene.current?.action())}
-              >
-                {selected.kind === "frame"
-                  ? t("사진")
-                  : selected.kind === "board"
-                    ? t("방명록")
-                    : ["sofa", "chair"].includes(selected.kind)
-                      ? status === "sitting"
-                        ? t("일어나기")
-                        : t("앉기")
-                      : t("살펴보기")}
-              </button>
-            )}
-          </>
-        ) : null}
-      </div>
-      {notice ? (
-        <p role="alert" className="home-hint">
-          {notice}
-        </p>
-      ) : null}
-      {editing ? (
-        <div className="live-room3d-catalog">
-          {(Object.keys(names) as Kind[]).map((kind) => (
-            <button
-              type="button"
-              key={kind}
-              disabled={
-                busy ||
-                draft.length >= 16 ||
-                (kind === "frame" && draft.filter((i) => i.kind === "frame").length >= 3) ||
-                (kind === "board" && draft.some((i) => i.kind === "board"))
-              }
-              onClick={() => scene.current?.add(kind)}
-            >
-              <Plus size={14} />
-              {names[kind]}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <details>
-          <summary>{t("가구 바로 선택")}</summary>
-          <div className="live-room3d-catalog">
-            {draft.map((item) => (
-              <button type="button" key={item.id} disabled={busy || !ready} onClick={() => scene.current?.go(item.id)}>
-                {names[item.kind]}
-              </button>
-            ))}
-          </div>
-        </details>
-      )}
+
+      {children}
     </section>
   );
 }

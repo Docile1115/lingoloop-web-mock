@@ -13,7 +13,7 @@ import {
   type Furnishing,
   type Kind,
 } from "./models";
-import { distance, findPath, placementFree, type Point } from "./navigation";
+import { distance, findPath, placementFree, smoothRoute, type Point } from "./navigation";
 
 type Hooks = {
   ready: () => void;
@@ -25,6 +25,13 @@ type Hooks = {
 };
 type Item = { data: Furnishing; model: T.Group };
 const Y_AXIS = new T.Vector3(0, 1, 0);
+/** Planted-foot speed of the bundled Walk clip in armature units per second (measured from casual.gltf). */
+const WALK_CLIP_SPEED = 1.1;
+const CRUISE_SPEED = 1.25;
+const DECELERATION = 2.4;
+const TURN_RATE = 7;
+const HOME_CAMERA = new T.Vector3(8.6, 7.1, 10.8);
+const HOME_TARGET = new T.Vector3(0, 0.7, -0.15);
 function disposeObject(root: T.Object3D) {
   const geometries = new Set<T.BufferGeometry>(),
     mats = new Set<T.Material>(),
@@ -97,6 +104,14 @@ export class RoomScene3D {
   private oneShot = false;
   private env: T.WebGLRenderTarget;
   private locked = false;
+  /** Ground speed at which the Walk clip's feet do not slide; set once the model is scaled. */
+  private walkGroundSpeed = WALK_CLIP_SPEED;
+  private heading = new T.Quaternion();
+  private markerAge = 0;
+  private hoverId: string | null = null;
+  private hoverPoint: { x: number; y: number } | null = null;
+  private zoomGoal: number | null = null;
+  private cameraGoal: { position: T.Vector3; target: T.Vector3 } | null = null;
   setLocked(value: boolean) {
     this.locked = value;
     if (value) this.cancel();
@@ -181,7 +196,10 @@ export class RoomScene3D {
     this.controls.mouseButtons.MIDDLE = T.MOUSE.DOLLY;
     this.controls.touches.ONE = T.TOUCH.ROTATE;
     this.controls.touches.TWO = T.TOUCH.DOLLY_PAN;
-    this.camera.position.set(8.6, 7.1, 10.8);
+    // A user drag always wins over an animated zoom or reset.
+    this.controls.addEventListener("start", this.stopCameraMotion);
+    this.camera.position.copy(HOME_CAMERA);
+    this.controls.target.copy(HOME_TARGET);
     this.controls.update();
     this.person.position.set(0, 0, 2.2);
     this.scene.add(this.person);
@@ -202,6 +220,7 @@ export class RoomScene3D {
     this.renderer.domElement.addEventListener("pointermove", this.move);
     this.renderer.domElement.addEventListener("pointerup", this.up);
     this.renderer.domElement.addEventListener("pointercancel", this.cancel);
+    this.renderer.domElement.addEventListener("pointerleave", this.leave);
     this.renderer.domElement.addEventListener("contextmenu", this.contextMenu);
     this.resize = new ResizeObserver(() => {
       if (this.disposed) return;
@@ -220,6 +239,15 @@ export class RoomScene3D {
     void this.loadPerson();
   }
   private contextMenu = (event: Event) => event.preventDefault();
+  private stopCameraMotion = () => {
+    this.zoomGoal = null;
+    this.cameraGoal = null;
+  };
+  private leave = () => {
+    this.hoverPoint = null;
+    this.hoverId = null;
+    this.renderer.domElement.style.cursor = "";
+  };
   private contextLost = (event: Event) => {
     event.preventDefault();
     this.hooks.error("webgl");
@@ -261,6 +289,7 @@ export class RoomScene3D {
         scale = 1.72 / size.y;
       this.model.scale.setScalar(scale);
       this.model.position.y = -bounds.min.y * scale;
+      this.walkGroundSpeed = WALK_CLIP_SPEED * scale;
       this.model.traverse((node) => {
         if (node instanceof T.Mesh) {
           node.castShadow = true;
@@ -353,9 +382,15 @@ export class RoomScene3D {
   };
   private move = (event: PointerEvent) => {
     const p = this.pointer;
-    if (!p || p.id !== event.pointerId) return;
+    if (!p) {
+      // Hover is resolved once per frame; raycasting every pointer event is wasted work.
+      if (event.pointerType === "mouse") this.hoverPoint = { x: event.clientX, y: event.clientY };
+      return;
+    }
+    if (p.id !== event.pointerId) return;
     if (Math.hypot(event.clientX - p.x, event.clientY - p.y) > 5) p.moved = true;
     if (!this.editing || !p.item || !p.moved) return;
+    this.renderer.domElement.style.cursor = "grabbing";
     this.setRay(event);
     if (!this.ray.ray.intersectPlane(this.plane, this.floorPoint)) return;
     const next = {
@@ -370,7 +405,8 @@ export class RoomScene3D {
     const p = this.pointer;
     if (!p || p.id !== event.pointerId) return;
     this.pointer = null;
-    this.controls.enabled = true;
+    this.controls.enabled = !this.locked;
+    if (event.pointerType === "mouse") this.hoverPoint = { x: event.clientX, y: event.clientY };
     if (this.renderer.domElement.hasPointerCapture(event.pointerId))
       this.renderer.domElement.releasePointerCapture(event.pointerId);
     if (this.editing) {
@@ -426,13 +462,14 @@ export class RoomScene3D {
     if (item) this.drawOutline(item.data, true);
     else this.outline.visible = false;
   }
-  go(target: Point | string) {
-    if (!this.model || this.editing || this.locked) return;
+  /** Walks to a floor point or beside a piece of furniture. Returns false when no route exists. */
+  go(target: Point | string): boolean {
+    if (!this.model || this.editing || this.locked) return false;
     this.facing = null;
     if (this.seated) {
       this.queuedTarget = target;
       this.leavingSeat = true;
-      return;
+      return true;
     }
     this.route = [];
     this.destination = null;
@@ -442,7 +479,7 @@ export class RoomScene3D {
     let route: Point[] | null = null;
     if (typeof target === "string") {
       const item = this.items.find((item) => item.data.id === target);
-      if (!item) return;
+      if (!item) return false;
       const d = CATALOG[item.data.kind];
       const candidates: Point[] = [];
       for (const [x, z] of [
@@ -474,15 +511,58 @@ export class RoomScene3D {
       this.speed = 0;
       this.play("Idle");
       this.status("blocked");
-      return;
+      return false;
     }
-    this.route = route;
+    this.route = smoothRoute(start, route, this.boxes());
     if (route.length) {
       const end = route.at(-1)!;
       this.marker.position.set(end.x, 0.065, end.z);
       this.marker.visible = true;
+      this.markerAge = 0;
       this.status("walking");
     } else this.arrive();
+    return true;
+  }
+  /** The point `lookahead` metres further along the remaining route. */
+  private pointAhead(lookahead: number): Point {
+    let from: Point = { x: this.person.position.x, z: this.person.position.z },
+      left = lookahead;
+    for (const point of this.route) {
+      const d = distance(from, point);
+      if (d >= left) return { x: from.x + ((point.x - from.x) * left) / d, z: from.z + ((point.z - from.z) * left) / d };
+      left -= d;
+      from = point;
+    }
+    return from;
+  }
+  private remainingDistance() {
+    let from: Point = { x: this.person.position.x, z: this.person.position.z },
+      total = 0;
+    for (const point of this.route) {
+      total += distance(from, point);
+      from = point;
+    }
+    return total;
+  }
+  /** Moves exactly along the route, carrying leftover distance past waypoints so speed never dips at them. */
+  private advance(step: number) {
+    const position = this.person.position;
+    while (step > 0 && this.route.length) {
+      const target = this.route[0],
+        dx = target.x - position.x,
+        dz = target.z - position.z,
+        d = Math.hypot(dx, dz);
+      if (d <= step) {
+        position.x = target.x;
+        position.z = target.z;
+        step -= d;
+        this.route.shift();
+      } else {
+        position.x += (dx / d) * step;
+        position.z += (dz / d) * step;
+        step = 0;
+      }
+    }
   }
   private facing: T.Quaternion | null = null;
   private arrive() {
@@ -550,7 +630,8 @@ export class RoomScene3D {
   rotate() {
     const item = this.items.find((item) => item.data.id === this.selected);
     if (!item || !this.editing || this.locked) return;
-    const next = { ...item.data, rotation: item.data.rotation + Math.PI / 2 };
+    // Same [0, 2π) range the server stores, so a saved layout compares equal to the one on screen.
+    const next = { ...item.data, rotation: (((item.data.rotation + Math.PI / 2) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) };
     if (!this.canPlace(next)) {
       this.status("blocked");
       return;
@@ -606,16 +687,52 @@ export class RoomScene3D {
   wave() {
     if (!this.route.length && !this.seated && !this.editing) this.play("Wave", true);
   }
+  /** Glides back to the default view instead of jumping. */
   resetCamera() {
-    this.camera.position.set(8.6, 7.1, 10.8);
-    this.controls.target.set(0, 0.7, -0.15);
-    this.controls.update();
+    this.zoomGoal = null;
+    this.cameraGoal = { position: HOME_CAMERA.clone(), target: HOME_TARGET.clone() };
   }
   zoom(factor: number) {
-    const delta = this.camera.position.clone().sub(this.controls.target);
-    delta.setLength(T.MathUtils.clamp(delta.length() * factor, 4.8, 17));
-    this.camera.position.copy(this.controls.target).add(delta);
-    this.controls.update();
+    this.cameraGoal = null;
+    const current = this.zoomGoal ?? this.camera.position.distanceTo(this.controls.target);
+    this.zoomGoal = T.MathUtils.clamp(current * factor, this.controls.minDistance, this.controls.maxDistance);
+  }
+  private moveCamera(dt: number) {
+    const blend = 1 - Math.exp(-9 * dt);
+    if (this.cameraGoal) {
+      this.camera.position.lerp(this.cameraGoal.position, blend);
+      this.controls.target.lerp(this.cameraGoal.target, blend);
+      if (
+        this.camera.position.distanceTo(this.cameraGoal.position) < 0.01 &&
+        this.controls.target.distanceTo(this.cameraGoal.target) < 0.01
+      )
+        this.cameraGoal = null;
+    }
+    if (this.zoomGoal !== null) {
+      const offset = this.camera.position.clone().sub(this.controls.target),
+        length = T.MathUtils.lerp(offset.length(), this.zoomGoal, blend);
+      this.camera.position.copy(this.controls.target).add(offset.setLength(length));
+      if (Math.abs(length - this.zoomGoal) < 0.01) this.zoomGoal = null;
+    }
+  }
+  /** Mouse hover: pointer cursor and a small lift on furniture that reacts to a click. */
+  private updateHover(dt: number) {
+    if (this.hoverPoint && !this.pointer) {
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      this.mouse.set(
+        ((this.hoverPoint.x - rect.left) / rect.width) * 2 - 1,
+        (-(this.hoverPoint.y - rect.top) / rect.height) * 2 + 1,
+      );
+      this.ray.setFromCamera(this.mouse, this.camera);
+      const item = this.locked ? null : this.hitItem();
+      this.hoverId = item?.data.id ?? null;
+      this.renderer.domElement.style.cursor = item ? (this.editing ? "grab" : "pointer") : "";
+      this.hoverPoint = null;
+    }
+    for (const item of this.items) {
+      const lifted = item.data.id === this.hoverId && !this.editing && !this.locked && !this.pointer;
+      item.model.scale.setScalar(T.MathUtils.damp(item.model.scale.x, lifted ? 1.035 : 1, 14, dt));
+    }
   }
   async photo(id: string, url: string) {
     const ticket = (this.photoTickets.get(id) || 0) + 1;
@@ -715,6 +832,21 @@ export class RoomScene3D {
         ankle.y = 0.12;
         this.aim(lower, ankle, b);
       }
+      // Rest the hands on the thighs; arms hanging straight through the seat looked broken.
+      for (const side of ["L", "R"]) {
+        const upperArm = this.model.getObjectByName("UpperArm" + side),
+          lowerArm = this.model.getObjectByName("LowerArm" + side),
+          thigh = this.model.getObjectByName("UpperLeg" + side);
+        if (!upperArm || !lowerArm || !thigh) continue;
+        const shoulder = upperArm.getWorldPosition(new T.Vector3()),
+          hip = thigh.getWorldPosition(new T.Vector3());
+        const elbow = shoulder.clone().addScaledVector(forward, 0.1);
+        elbow.y -= 0.24;
+        this.aim(upperArm, elbow, b);
+        const hand = hip.clone().addScaledVector(forward, 0.3);
+        hand.y = height + 0.13;
+        this.aim(lowerArm, hand, b);
+      }
     }
     if (this.leavingSeat && this.sitBlend === 0) {
       this.seated = null;
@@ -733,28 +865,32 @@ export class RoomScene3D {
     const dt = Math.min((time - this.previousTime) / 1000 || 0.016, 0.05);
     this.previousTime = time;
     if (this.route.length && !this.seated) {
-      const target = this.route[0],
-        dx = target.x - this.person.position.x,
-        dz = target.z - this.person.position.z,
-        d = Math.hypot(dx, dz);
-      const angle = Math.atan2(dx, dz),
-        turn = new T.Quaternion().setFromAxisAngle(Y_AXIS, angle);
-      this.person.quaternion.rotateTowards(turn, dt * 6);
-      const desired = Math.min(1.3, Math.sqrt(3.8 * d)) * (this.person.quaternion.angleTo(turn) > 0.65 ? 0.35 : 1);
-      this.speed = T.MathUtils.damp(this.speed, desired, 8, dt);
-      const step = Math.min(d, this.speed * dt);
-      if (d > 0.001) {
-        this.person.position.x += (dx / d) * step;
-        this.person.position.z += (dz / d) * step;
-      }
+      // Steer toward a point slightly ahead on the path so turns begin before corners.
+      const ahead = this.pointAhead(0.4),
+        dx = ahead.x - this.person.position.x,
+        dz = ahead.z - this.person.position.z;
+      if (Math.hypot(dx, dz) > 0.05) this.heading.setFromAxisAngle(Y_AXIS, Math.atan2(dx, dz));
+      this.person.quaternion.rotateTowards(this.heading, dt * TURN_RATE);
+      // Turn (almost) in place before setting off in a very different direction,
+      // then ease to a stop at the destination instead of halting abruptly.
+      const misalignment = this.person.quaternion.angleTo(this.heading),
+        alignment = T.MathUtils.clamp(1 - (misalignment - 0.45) / 1.1, 0, 1),
+        remaining = this.remainingDistance(),
+        desired = Math.max(Math.min(CRUISE_SPEED, Math.sqrt(2 * DECELERATION * remaining)), 0.15) * alignment;
+      this.speed = T.MathUtils.damp(this.speed, desired, 7, dt);
+      this.advance(this.speed * dt);
       this.play("Walk");
-      this.actions.get("Walk")?.setEffectiveTimeScale(Math.max(0.35, this.speed / 1.1));
-      if (d < 0.045) {
-        this.person.position.x = target.x;
-        this.person.position.z = target.z;
-        this.route.shift();
-        if (!this.route.length) this.arrive();
-      }
+      // Match the stride to the ground speed so the feet do not slide.
+      this.actions
+        .get("Walk")
+        ?.setEffectiveTimeScale(T.MathUtils.clamp(this.speed / this.walkGroundSpeed, 0.55, 1.6));
+      if (!this.route.length) this.arrive();
+    }
+    if (this.marker.visible) {
+      this.markerAge += dt;
+      const grow = Math.min(1, this.markerAge / 0.22);
+      this.marker.scale.setScalar(0.55 + 0.45 * (1 - (1 - grow) ** 3));
+      (this.marker.material as T.MeshBasicMaterial).opacity = 0.5 + 0.3 * Math.cos(this.markerAge * 5);
     }
     if (this.facing && !this.route.length && !this.seated) this.person.quaternion.rotateTowards(this.facing, dt * 4);
     this.mixer?.update(dt);
@@ -763,6 +899,8 @@ export class RoomScene3D {
       this.play("Idle");
     }
     this.seat(dt);
+    this.updateHover(dt);
+    this.moveCamera(dt);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this.diagnosticFrames++;
@@ -789,10 +927,12 @@ export class RoomScene3D {
       ["pointermove", this.move],
       ["pointerup", this.up],
       ["pointercancel", this.cancel],
+      ["pointerleave", this.leave],
       ["contextmenu", this.contextMenu],
       ["webglcontextlost", this.contextLost],
     ] as const)
       this.renderer.domElement.removeEventListener(type, listener as EventListener);
+    this.controls.removeEventListener("start", this.stopCameraMotion);
     disposeObject(this.scene);
     this.mat.woodMap.dispose();
     this.mat.weave.dispose();

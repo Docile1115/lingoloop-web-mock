@@ -56,6 +56,23 @@ test("3D paths avoid inflated furniture including corners", () => {
     previous = point;
   }
 });
+test("3D smoothed routes round corners without entering furniture", () => {
+  const start = { x: -3, z: 0 },
+    end = { x: 3, z: 0 };
+  const route = nav.findPath(start, end, [box]);
+  const smooth = nav.smoothRoute(start, route, [box]);
+  assert.deepEqual(smooth.at(-1), end);
+  assert.ok(smooth.length > route.length);
+  let previous = start;
+  for (const point of smooth) {
+    assert.ok(nav.visible(previous, point, [box]));
+    previous = point;
+  }
+});
+test("3D smoothing leaves straight and empty routes unchanged", () => {
+  assert.deepEqual(nav.smoothRoute({ x: 0, z: 0 }, [{ x: 1, z: 0 }], []), [{ x: 1, z: 0 }]);
+  assert.deepEqual(nav.smoothRoute({ x: 0, z: 0 }, [], []), []);
+});
 test("3D blocked, invalid and out-of-room targets cannot produce movement", () => {
   for (const end of [
     { x: 0, z: 0 },

@@ -78,13 +78,12 @@ test('photo furniture only embeds bounded JPEG data and curated colors, never re
   assert.doesNotMatch(room.roomPhotoShape({...photo,color:'__proto__',shape:'" onload="bad'}),/Object|onload|bad/);
 });
 
-test('web editor supports pointer cancellation and removes overlapping hotspots and forced scrolling', async () => {
-  const editor=await readFile(new URL('../app/components/ProfileRoom.tsx',import.meta.url),'utf8');
-  const canvas=await readFile(new URL('../app/components/RoomCanvas.tsx',import.meta.url),'utf8');
-  assert.doesNotMatch(editor,/scrollIntoView|room-hotspot|window\.confirm/);
-  assert.match(canvas,/setPointerCapture/);
-  assert.match(canvas,/onPointerCancel/);
-  assert.match(canvas,/onLostPointerCapture/);
-  assert.match(canvas,/canPlaceRoomItem/);
-  assert.match(canvas,/ArrowUp/);
+test('web home is 3D only and keeps pointer cancellation and keyboard access', async () => {
+  const scene=await readFile(new URL('../app/lib/room3d/scene.ts',import.meta.url),'utf8');
+  const room=await readFile(new URL('../app/components/Room3DHome.tsx',import.meta.url),'utf8');
+  const home=await readFile(new URL('../app/components/SocialHome.tsx',import.meta.url),'utf8');
+  assert.match(scene,/setPointerCapture/);
+  assert.match(scene,/pointercancel/);
+  assert.match(room,/가구 바로 선택/);
+  assert.doesNotMatch(home,/RoomPlayground|기존 2D 방/);
 });

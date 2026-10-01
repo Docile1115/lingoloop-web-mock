@@ -128,6 +128,59 @@ export function findPath(
   }
   return null;
 }
+/**
+ * Rounds the corners of a line-of-sight route so a walker turns while moving
+ * instead of stopping at every waypoint. Each corner becomes a quadratic curve
+ * from `radius` before the corner to `radius` after it; a corner stays sharp when
+ * its curve would touch an obstacle. Straight parts are sub-segments of the
+ * original (already visible) route, so the result never enters furniture.
+ * Returns the points after `start`, ending exactly at the route's endpoint.
+ */
+export function smoothRoute(
+  start: Point,
+  route: readonly Point[],
+  obstacles: readonly Obstacle[],
+  radius = 0.55,
+): Point[] {
+  const points = [start, ...route];
+  if (points.length < 3) return [...route];
+  const result: Point[] = [];
+  for (let i = 1; i < points.length - 1; i++) {
+    const before = points[i - 1],
+      corner = points[i],
+      after = points[i + 1];
+    const inLength = distance(before, corner),
+      outLength = distance(corner, after),
+      r = Math.min(radius, inLength / 2, outLength / 2);
+    if (r < 0.03) {
+      result.push(corner);
+      continue;
+    }
+    const from = {
+        x: corner.x + ((before.x - corner.x) * r) / inLength,
+        z: corner.z + ((before.z - corner.z) * r) / inLength,
+      },
+      to = {
+        x: corner.x + ((after.x - corner.x) * r) / outLength,
+        z: corner.z + ((after.z - corner.z) * r) / outLength,
+      };
+    const curve: Point[] = [];
+    for (let step = 0; step <= 8; step++) {
+      const t = step / 8,
+        a = (1 - t) * (1 - t),
+        b = 2 * (1 - t) * t,
+        c = t * t;
+      curve.push({
+        x: a * from.x + b * corner.x + c * to.x,
+        z: a * from.z + b * corner.z + c * to.z,
+      });
+    }
+    const clear = curve.every((point, index) => index === 0 || visible(curve[index - 1], point, obstacles));
+    result.push(...(clear ? curve : [corner]));
+  }
+  result.push(points[points.length - 1]);
+  return result;
+}
 export function placementFree(
   box: Obstacle,
   others: readonly Obstacle[],
