@@ -2292,7 +2292,7 @@ function LingoLoopScreens({
 
   return (
     <div className={`app-root section-${section}`}>
-      {visitingHome?<HomeDialog key={visitingHome} ownerId={visitingHome} onClose={()=>setVisitingHome(null)} onChat={profile=>{setVisitingHome(null);void startChat(toPartner(profile));}}/>:null}
+      {visitingHome?<HomeDialog key={visitingHome} ownerId={visitingHome} viewerGender={me.gender} onClose={()=>setVisitingHome(null)} onChat={profile=>{setVisitingHome(null);void startChat(toPartner(profile));}}/>:null}
       <a className="skip-link" href="#main-content">{t("본문으로 건너뛰기")}</a>
       <aside className="desktop-sidebar" aria-label={t("주요 메뉴")}>
         <button className="brand" type="button" onClick={() => goToSection("discover")} aria-label={t("TimoTalk 홈")}>

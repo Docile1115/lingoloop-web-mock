@@ -18,6 +18,8 @@ type Props = {
   onDirtyChange: (dirty: boolean) => void;
   /** The resident reached a frame or the whiteboard (or a shortcut asked for one). */
   onObject: (id: string) => void;
+  /** VRM avatar shown as the resident (the viewer's own character). */
+  avatar?: string;
   /** Dialog-owned overlays: whose home this is (top left) and window buttons (top right). */
   heading: ReactNode;
   windowActions: ReactNode;
@@ -50,7 +52,7 @@ function sameLayout(a: readonly Furnishing[], b: readonly Furnishing[]) {
  * The whole home is one 3D room; every control floats inside it like a game HUD
  * instead of being stacked above and below the canvas.
  */
-export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObject, heading, windowActions, dock, children }: Props) {
+export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObject, avatar, heading, windowActions, dock, children }: Props) {
   const host = useRef<HTMLDivElement>(null),
     scene = useRef<RoomScene3D | null>(null),
     saving = useRef(false),
@@ -138,7 +140,7 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
               status: setStatus,
               open: (item) => callbacks.current.open(item.id),
             },
-            { items, editable: own },
+            { items, editable: own, avatar },
           );
         } catch {
           setFailed(true);
@@ -153,7 +155,7 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
       scene.current?.dispose();
       scene.current = null;
     };
-  }, [buildKey, own, retry]);
+  }, [buildKey, own, retry, avatar]);
   useEffect(() => {
     scene.current?.setLocked(busy || suspended || discard);
   }, [busy, suspended, ready, discard]);

@@ -29,7 +29,9 @@ export function HomeDirectory({onVisit}:{onVisit:(id:string)=>void}) {
  * The 3D room fills the dialog and every control floats inside it; the guestbook,
  * photos, gifts and settings open as panels over the room instead of below it.
  */
-export function HomeDialog({ownerId,onClose,onChat}:{ownerId:string;onClose:()=>void;onChat:(profile:ApiProfile)=>void}) {
+export function HomeDialog({ownerId,viewerGender,onClose,onChat}:{ownerId:string;viewerGender?:string;onClose:()=>void;onChat:(profile:ApiProfile)=>void}) {
+  // The viewer walks around as their own character: the male avatar for men, the female one otherwise.
+  const avatar=viewerGender==='man'?'/room3d/avatars/male.vrm':'/room3d/avatars/female.vrm';
   const home=useHome(ownerId,api),data=home.data;
   const [tab,setTab]=useState<'board'|'photos'|'gifts'|'settings'|null>(null);
   const [localBusy,setLocalBusy]=useState(false),[localError,setLocalError]=useState('');
@@ -55,7 +57,7 @@ export function HomeDialog({ownerId,onClose,onChat}:{ownerId:string;onClose:()=>
   const sheetTitle=tab==='photos'?t(HOME_FRAME_LABELS[frameId]):tab==='board'?t("화이트보드"):tab==='gifts'?t("인사와 선물"):t("집 설정");
   // Escape closes the innermost layer first: confirmation, then panel, then the house.
   return <dialog className="social-home-dialog" ref={dialog} aria-labelledby={title} onCancel={event=>{event.preventDefault();if(guard.current||busy)return;if(confirm||report){setConfirm(null);setReport(null);}else if(tab)setTab(null);else closeHome();}}>
-    {data?<Room3DHome data={data} busy={busy} suspended={!!tab||!!confirm||!!report} onSave={(config,revision)=>home.act('/room3d','PUT',{config,revision})} onDirtyChange={setRoomDirty} onObject={openObject}
+    {data?<Room3DHome data={data} busy={busy} suspended={!!tab||!!confirm||!!report} onSave={(config,revision)=>home.act('/room3d','PUT',{config,revision})} onDirtyChange={setRoomDirty} onObject={openObject} avatar={avatar}
       heading={<>
         <small>TIMO HOME</small>
         <h2 id={title}>{t("{name}님의 마이룸",{name:data.owner.name})}</h2>

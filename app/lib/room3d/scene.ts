@@ -14,6 +14,8 @@ import {
   type Kind,
 } from "./models";
 import { distance, findPath, placementFree, smoothRoute, type Point } from "./navigation";
+import { Blinker, loadAvatar } from "./avatar";
+import type { VRM } from "@pixiv/three-vrm";
 
 type Hooks = {
   ready: () => void;
@@ -112,6 +114,15 @@ export class RoomScene3D {
   private hoverPoint: { x: number; y: number } | null = null;
   private zoomGoal: number | null = null;
   private cameraGoal: { position: T.Vector3; target: T.Vector3 } | null = null;
+  /** VRM avatar (when `options.avatar` is set); drives spring bones, blinking and eye contact. */
+  private vrm: VRM | null = null;
+  private blinker = new Blinker();
+  /** Seated hips position relative to the avatar root, from the authored sit clip. */
+  private sitHips: T.Vector3 | null = null;
+  private sitPhase: "approach" | "down" | "seated" | "up" | "leave" | null = null;
+  private sitFrom = new T.Vector3();
+  private sitTo = new T.Vector3();
+  private sitTimer = 0;
   setLocked(value: boolean) {
     this.locked = value;
     if (value) this.cancel();
@@ -124,7 +135,7 @@ export class RoomScene3D {
   constructor(
     private host: HTMLDivElement,
     private hooks: Hooks,
-    private options: { items?: Furnishing[]; editable?: boolean } = {},
+    private options: { items?: Furnishing[]; editable?: boolean; avatar?: string } = {},
   ) {
     this.renderer = new T.WebGLRenderer({
       antialias: true,
@@ -276,8 +287,48 @@ export class RoomScene3D {
     this.scene.add(model);
     this.items.push({ data, model });
   }
+  /** VRM avatar with authored humanoid clips (sit down/stand up, watering, nodding …). */
+  private async loadVrmPerson(url: string) {
+    const avatar = await loadAvatar(new GLTFLoader(), url, "/room3d/humanoid-clips.json");
+    if (this.disposed) {
+      disposeObject(avatar.vrm.scene);
+      return;
+    }
+    this.vrm = avatar.vrm;
+    this.model = avatar.vrm.scene;
+    this.walkGroundSpeed = avatar.walkSpeed;
+    this.sitHips = avatar.sitHips;
+    if (avatar.vrm.lookAt) avatar.vrm.lookAt.target = this.camera;
+    this.person.add(this.model);
+    this.mixer = new T.AnimationMixer(this.model);
+    const names: Record<string, string> = {
+      Idle: "idle",
+      Walk: "walk",
+      Wave: "nod",
+      Interact: "interact",
+      SitDown: "sitDown",
+      Sit: "sit",
+      StandUp: "standUp",
+      Water: "water",
+      PickUp: "pickUp",
+      Talk: "talk",
+    };
+    for (const [key, name] of Object.entries(names)) {
+      const clip = avatar.clips.get(name);
+      if (clip) this.actions.set(key, this.mixer.clipAction(clip));
+    }
+    this.play("Idle");
+    this.mixer.update(0);
+    this.vrm.update(0);
+    this.hooks.ready();
+    this.status("idle");
+  }
   private async loadPerson() {
     try {
+      if (this.options.avatar) {
+        await this.loadVrmPerson(this.options.avatar);
+        return;
+      }
       const gltf = await new GLTFLoader().loadAsync("/room3d/casual.gltf");
       if (this.disposed) {
         disposeObject(gltf.scene);
@@ -468,7 +519,7 @@ export class RoomScene3D {
     this.facing = null;
     if (this.seated) {
       this.queuedTarget = target;
-      this.leavingSeat = true;
+      this.stand();
       return true;
     }
     this.route = [];
@@ -586,7 +637,7 @@ export class RoomScene3D {
   setEditing(value: boolean) {
     if (this.locked || (value && this.options.editable === false)) return false;
     if (this.seated) {
-      this.leavingSeat = true;
+      this.stand();
       return false;
     }
     this.cancel();
@@ -673,16 +724,98 @@ export class RoomScene3D {
     if (item.data.kind === "sofa" || item.data.kind === "chair") {
       this.seated = item;
       this.sitOrigin = { x: this.person.position.x, z: this.person.position.z };
+      if (this.vrm && this.sitHips && this.actions.has("SitDown")) {
+        this.beginAuthoredSit(item);
+        return;
+      }
       this.sitBlend = 0;
       this.leavingSeat = false;
       this.play("Idle");
       this.status("sitting");
     } else {
-      this.play("Interact", true);
+      // Avatars with the full clip set water plants and pick things up instead of a generic gesture.
+      const special = ({ plant: "Water", table: "PickUp", shelf: "PickUp" } as Partial<Record<Kind, string>>)[item.data.kind];
+      this.play(special && this.actions.has(special) ? special : "Interact", true);
     }
   }
   stand() {
-    this.leavingSeat = true;
+    if (this.sitPhase === "seated" || this.sitPhase === "down" || this.sitPhase === "approach") {
+      this.sitPhase = "up";
+      this.sitTimer = 0;
+      this.play("StandUp", true);
+      return;
+    }
+    if (!this.sitPhase) this.leavingSeat = true;
+  }
+  /** Seat centre (along the seat's forward axis) and cushion height for the authored sit clips. */
+  private static SEATS: Partial<Record<Kind, { depth: number; top: number }>> = {
+    sofa: { depth: 0.1, top: 0.665 },
+    chair: { depth: 0.02, top: 0.54 },
+  };
+  private beginAuthoredSit(item: Item) {
+    const seat = RoomScene3D.SEATS[item.data.kind]!,
+      rotation = item.data.rotation,
+      forward = new T.Vector3(Math.sin(rotation), 0, Math.cos(rotation)),
+      hips = this.sitHips!.clone().applyAxisAngle(Y_AXIS, rotation);
+    // Stand where the clip lowers the hips onto the cushion, facing away from the backrest.
+    this.sitTo.set(
+      item.data.x + forward.x * seat.depth - hips.x,
+      Math.max(0, seat.top + 0.085 - this.sitHips!.y),
+      item.data.z + forward.z * seat.depth - hips.z,
+    );
+    this.sitFrom.copy(this.person.position);
+    this.facing = new T.Quaternion().setFromAxisAngle(Y_AXIS, rotation);
+    this.sitPhase = "approach";
+    this.sitTimer = 0;
+    this.play("Idle");
+    this.status("sitting");
+  }
+  private seatAuthored(dt: number) {
+    this.sitTimer += dt;
+    const ease = (t: number) => t * t * (3 - 2 * t);
+    if (this.sitPhase === "approach") {
+      const k = ease(Math.min(1, this.sitTimer / 0.35));
+      this.person.position.x = T.MathUtils.lerp(this.sitFrom.x, this.sitTo.x, k);
+      this.person.position.z = T.MathUtils.lerp(this.sitFrom.z, this.sitTo.z, k);
+      if (this.facing) this.person.quaternion.rotateTowards(this.facing, dt * 10);
+      if (this.sitTimer >= 0.35) {
+        this.sitPhase = "down";
+        this.sitTimer = 0;
+        this.play("SitDown", true);
+      }
+    } else if (this.sitPhase === "down") {
+      const duration = this.actions.get("SitDown")!.getClip().duration;
+      this.person.position.y = this.sitTo.y * ease(Math.min(1, this.sitTimer / duration));
+      if (!this.currentAction?.isRunning()) {
+        this.sitPhase = "seated";
+        this.oneShot = false;
+        this.play("Sit");
+      }
+    } else if (this.sitPhase === "up") {
+      const duration = this.actions.get("StandUp")!.getClip().duration;
+      this.person.position.y = this.sitTo.y * (1 - ease(Math.min(1, this.sitTimer / duration)));
+      if (!this.currentAction?.isRunning()) {
+        // The clip ends with the feet against the seat (inside its footprint): step back out first.
+        this.person.position.y = 0;
+        this.sitPhase = "leave";
+        this.sitTimer = 0;
+        this.sitTo.copy(this.person.position);
+        this.oneShot = false;
+        this.play("Idle");
+      }
+    } else if (this.sitPhase === "leave") {
+      const k = ease(Math.min(1, this.sitTimer / 0.3));
+      this.person.position.x = T.MathUtils.lerp(this.sitTo.x, this.sitFrom.x, k);
+      this.person.position.z = T.MathUtils.lerp(this.sitTo.z, this.sitFrom.z, k);
+      if (this.sitTimer >= 0.3) {
+        this.seated = null;
+        this.sitPhase = null;
+        this.status("idle");
+        const target = this.queuedTarget;
+        this.queuedTarget = null;
+        if (target) this.go(target);
+      }
+    }
   }
   wave() {
     if (!this.route.length && !this.seated && !this.editing) this.play("Wave", true);
@@ -893,12 +1026,18 @@ export class RoomScene3D {
       (this.marker.material as T.MeshBasicMaterial).opacity = 0.5 + 0.3 * Math.cos(this.markerAge * 5);
     }
     if (this.facing && !this.route.length && !this.seated) this.person.quaternion.rotateTowards(this.facing, dt * 4);
+    if (this.vrm) this.blinker.update(this.vrm, dt);
     this.mixer?.update(dt);
-    if (this.oneShot && this.currentAction && !this.currentAction.isRunning()) {
-      this.oneShot = false;
-      this.play("Idle");
+    if (this.sitPhase) this.seatAuthored(dt);
+    else {
+      if (this.oneShot && this.currentAction && !this.currentAction.isRunning()) {
+        this.oneShot = false;
+        this.play("Idle");
+      }
+      this.seat(dt);
     }
-    this.seat(dt);
+    // Normalized → raw bones, spring bones (hair/clothes sway), eye contact and expressions.
+    this.vrm?.update(dt);
     this.updateHover(dt);
     this.moveCamera(dt);
     this.controls.update();
