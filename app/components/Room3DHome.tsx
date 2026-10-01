@@ -4,6 +4,7 @@ import { ImageIcon, LayoutGrid, Maximize, MessageSquareText, Minus, Plus, Rotate
 import { t } from "../lib/i18n";
 import type { HomeData } from "../lib/home";
 import type { Room3DConfig } from "../lib/room3d/config";
+import type { AvatarKind } from "../lib/room3d/avatar";
 import type { Furnishing, Kind } from "../lib/room3d/models";
 import type { RoomScene3D } from "../lib/room3d/scene";
 
@@ -19,7 +20,7 @@ type Props = {
   /** The resident reached a frame or the whiteboard (or a shortcut asked for one). */
   onObject: (id: string) => void;
   /** VRM avatar shown as the resident (the viewer's own character). */
-  avatar?: string;
+  avatar?: AvatarKind;
   /** Dialog-owned overlays: whose home this is (top left) and window buttons (top right). */
   heading: ReactNode;
   windowActions: ReactNode;
@@ -58,6 +59,7 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
     saving = useRef(false),
     mounted = useRef(true);
   const [ready, setReady] = useState(false),
+    [progress, setProgress] = useState(0),
     [failed, setFailed] = useState(false),
     [retry, setRetry] = useState(0),
     [editing, setEditing] = useState(false),
@@ -121,6 +123,7 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
       .then(([{ RoomScene3D }, { INITIAL_FURNITURE }]) => {
         if (cancelled || !host.current) return;
         setReady(false);
+        setProgress(0);
         setFailed(false);
         setEditing(false);
         setSelected(null);
@@ -139,6 +142,8 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
               layout: setDraft,
               status: setStatus,
               open: (item) => callbacks.current.open(item.id),
+              // 2% steps: unchanged values skip the re-render.
+              progress: (fraction) => setProgress(Math.round(fraction * 50) / 50),
             },
             { items, editable: own, avatar },
           );
@@ -424,6 +429,12 @@ export function Room3DHome({ data, busy, suspended, onSave, onDirtyChange, onObj
             <>
               <span className="home3d-spinner" aria-hidden="true" />
               <p>{t("방에 햇살을 들이는 중…")}</p>
+              {/* The character download is most of the wait; the bar stays out of the live region's way. */}
+              {progress > 0 ? (
+                <span className="home3d-progress" aria-hidden="true">
+                  <span style={{ transform: `scaleX(${progress})` }} />
+                </span>
+              ) : null}
             </>
           )}
         </div>

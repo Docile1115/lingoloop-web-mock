@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
+import { VRMHumanBoneName } from "@pixiv/three-vrm";
 import { validateRoom3D, ROOM3D_SIZES } from "../backend/room3d.mjs";
 
 test("standalone 3D preview exits with full document navigation", async () => {
@@ -91,10 +92,44 @@ test("furniture placement protects room bounds, neighbors and resident", () => {
   assert.equal(nav.placementFree({ ...box, x: 4 }, [], { x: 0, z: 0 }), false);
   assert.equal(nav.placementFree({ ...box, x: NaN }, [], { x: 0, z: 0 }), false);
 });
-test("bundled prototype model contains required skeletal animation clips and no remote resources", async () => {
-  const gltf = JSON.parse(await readFile(new URL("../public/room3d/casual.gltf", import.meta.url), "utf8"));
-  for (const name of ["Idle", "Walk", "Wave", "Interact"])
-    assert.ok(gltf.animations.some((clip) => clip.name === name));
-  assert.ok(gltf.skins.length > 0);
-  for (const buffer of gltf.buffers) assert.ok(buffer.uri.startsWith("data:"));
+function glbJson(bytes) {
+  assert.equal(bytes.readUInt32LE(0), 0x46546c67, "GLB magic");
+  return JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString("utf8"));
+}
+test("bundled VRM avatars are self-contained CC0 models with one draw call per material", async () => {
+  for (const name of ["female", "male"]) {
+    const json = glbJson(await readFile(new URL(`../public/room3d/avatars/${name}.vrm`, import.meta.url)));
+    const vrm = json.extensions.VRM;
+    assert.equal(vrm.meta.licenseName, "CC0", name);
+    assert.equal(vrm.meta.commercialUssageName, "Allow", name);
+    for (const resource of [...json.buffers, ...json.images]) assert.equal(resource.uri, undefined, name);
+    for (const bone of ["hips", "leftUpperLeg", "rightLowerLeg", "leftFoot", "rightFoot", "head"])
+      assert.ok(vrm.humanoid.humanBones.some((row) => row.bone === bone), `${name} ${bone}`);
+    // scripts/room3d/vrm-shrink.mjs merges same-material primitives (VRoid hair strands).
+    for (const mesh of json.meshes) {
+      const materials = mesh.primitives.map((primitive) => primitive.material);
+      assert.equal(new Set(materials).size, materials.length, `${name} ${mesh.name}`);
+    }
+  }
+});
+test("baked humanoid clips match exactly what the room plays", async () => {
+  const data = JSON.parse(await readFile(new URL("../public/room3d/humanoid-clips.json", import.meta.url), "utf8"));
+  assert.equal(data.format, "timotalk-humanoid-clips");
+  assert.equal(data.version, 1);
+  assert.ok(data.walkSpeed > 0.5 && data.walkSpeed < 2);
+  const scene = await readFile(new URL("../app/lib/room3d/scene.ts", import.meta.url), "utf8");
+  const played = [...scene.match(/const names: Record<string, string> = \{([^}]+)\}/)[1].matchAll(/"(\w+)"/g)].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(data.clips.map((clip) => clip.name).sort(), played.sort());
+  const bones = new Set(Object.values(VRMHumanBoneName));
+  for (const clip of data.clips) {
+    assert.ok(clip.duration > 0, clip.name);
+    for (const track of clip.tracks) {
+      assert.ok(bones.has(track.bone), `${clip.name} ${track.bone}`);
+      if (track.type === "position") assert.equal(track.bone, "hips");
+      assert.equal(track.values.length, track.times.length * (track.type === "quaternion" ? 4 : 3));
+      assert.ok(track.values.every(Number.isFinite), `${clip.name} ${track.bone}`);
+    }
+  }
 });

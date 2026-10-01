@@ -15,7 +15,8 @@ reload. The legacy persisted room schema is unchanged.
 Homes without a saved layout show the starter room to everyone, and its whiteboard
 accepts guestbook notes (the server applies the same rule). Existing profile
 `roomConfig` is never overwritten. The native app retains its original 2D renderer;
-3D avatar customization is pending.
+3D avatar customization is pending. The viewer walks around as a default VRM avatar
+picked by their profile gender (male avatar for `man`, the female one otherwise).
 
 - `GET /api/homes/:ownerId` includes `room3d` and `room3dRevision`, only after the
   existing transactional privacy, active-account and bidirectional-block checks.
@@ -53,12 +54,22 @@ Sims 3-level completeness**. No EA/Sims artwork, animation or code is used.
   explicit zoom/reset controls. Portrait field of view fits the room horizontally.
 - Sculpted, rounded furniture geometry, material roughness, fabric bump mapping,
   generated wood grain, environment lighting and directional shadows.
-- A skinned character with Idle/Walk/Wave/Interact clips, acceleration, gradual
-  turning and animation cross-fades. The CC0 character is temporary validation art.
+- VRM avatars (official CC0 VRoid samples, `@pixiv/three-vrm`) with spring-bone
+  hair/clothes, blinking and eye contact. Authored CC0 humanoid clips (idle, walk,
+  nod, interact, water, pick up, sit down/sit/stand up) are retargeted offline to the
+  VRM humanoid. Avatars taller than 1.76 m are scaled down at load time.
 - Continuous floor destinations, inflated furniture collision footprints, A*
   navigation and line-of-sight path smoothing. Approaches stop beside furniture.
-- Sofa/chair sitting uses a blended procedural leg pose; standing restores the
-  prior free position. This is not yet a finished authored sit/stand animation.
+- Sitting plays the authored sit-down/stand-up clips. At load time the sit pose is
+  measured on the avatar (seat contact, soles, back of the body, back of the calves),
+  so each avatar rests on the 0.5 m cushions with its feet on the floor and its back
+  near the backrest; standing up steps back out of the seat's footprint.
+- Rendering cost: each furniture piece and the room shell are merged into one mesh
+  per material (picture canvases stay separate), small bevels use fewer segments, and
+  the avatars ship with one primitive per material. Touch devices (`pointer: coarse`)
+  use a lite tier: no toon outlines, a blob shadow under the avatar, a 1024 shadow map
+  redrawn only when furniture moves, and a 1.5 pixel-ratio cap.
+- The loading screen shows the avatar download progress when the size is known.
 - Layout mode supports pointer capture, fine-grid drag, cancellation, 90-degree
   rotation, add/remove, and rejection of overlapping/out-of-bounds placements.
 - Clicking a frame/board walks there and opens its photo/guestbook dialog.
@@ -73,11 +84,17 @@ Sims 3-level completeness**. No EA/Sims artwork, animation or code is used.
 | --- | --- |
 | `app/room-preview/page.tsx` | Prototype UI and in-memory photo/guestbook drafts |
 | `app/room-preview/preview.css` | Responsive, room-first control layout |
-| `app/lib/room3d/scene.ts` | Renderer, input, animation and lifecycle |
-| `app/lib/room3d/models.ts` | Original furniture geometry and materials |
+| `app/lib/room3d/scene.ts` | Renderer, quality tier, input, animation and lifecycle |
+| `app/lib/room3d/avatar.ts` | VRM loading, clip conversion, sit-pose measurement |
+| `app/lib/room3d/models.ts` | Original furniture geometry, seats, materials, batching |
 | `app/lib/room3d/navigation.ts` | Pure pathfinding and collision checks |
-| `public/room3d/ATTRIBUTION.md` | Character source, pinned mirror and license |
-| `tests/room3d.test.mjs` | Path, placement and bundled-animation contracts |
+| `scripts/room3d/vrm-shrink.mjs` | Texture resize and primitive merge for the avatars |
+| `scripts/room3d/ual-to-vrm.mjs` | Bakes the CC0 animation clips for the VRM humanoid |
+| `public/room3d/ATTRIBUTION.md` | Avatar/animation sources, pinned mirror and licenses |
+| `tests/room3d.test.mjs` | Path, placement, avatar and clip contracts |
+
+`/room-preview?avatar=male` and `?quality=lite` (or `high`) switch the avatar and the
+quality tier for local checks.
 
 Canvas `data-fps`, `data-draw-calls`, and `data-triangles` expose lightweight local
 diagnostics; these do not send telemetry. FPS must be measured on actual target
@@ -86,14 +103,14 @@ performance testing.
 
 ## Required before product integration
 
-1. Approve the visual direction, then create a consistent final humanoid rig,
-   skin/face/hair/clothing assets and authored turn/start/stop/sit/stand clips.
-   The legacy SVG customization options do not yet control this 3D character.
-2. Replace approximate AABB footprints and procedural seat transitions where
-   needed, add robust foot IK/contact alignment and authored furniture actions.
-   Bed sleep, simulation needs, autonomous behavior and multiplayer are absent.
-3. Profile real iOS/Android devices; batch static geometry, use LODs/compressed
-   assets and define a reduced-quality fallback. The native app is unchanged.
+1. Avatar customization: the legacy SVG options do not control the VRM avatars, and
+   only the two default avatars exist. Combining VRoid parts inside the app needs a
+   separate pixiv license; authored turn/start/stop clips are still missing.
+2. Replace approximate AABB footprints where needed and add foot IK/contact
+   alignment for uneven poses. Bed sleep, simulation needs, autonomous behavior and
+   multiplayer are absent.
+3. Profile real iOS/Android devices (the lite tier is chosen by pointer type, not by
+   measured performance); consider compressed textures/meshes. The native app is unchanged.
 4. The separate 3D layout schema and authenticated API integration are implemented
    above. Verify them against deployed infrastructure before release. A full 2D-to-3D
    furniture conversion is not implemented; conversion is an explicit new layout.
@@ -114,6 +131,8 @@ performance testing.
 
 ## References
 
-- Character: [Quaternius Ultimate Modular Women](https://quaternius.com/packs/ultimatemodularwomen.html), CC0.
+- Avatars: VRoid official samples Sendagaya Shino and Sakurada Fumiriya (pixiv), CC0.
+- Animations: [Quaternius Universal Animation Library 1 and 2](https://quaternius.com/packs/universalanimationlibrary.html), CC0.
+- [three-vrm](https://github.com/pixiv/three-vrm) and its Mixamo retargeting example (MIT).
 - [Three.js animation system](https://threejs.org/manual/en/animation-system.html).
 - [Three.js GLTFLoader](https://threejs.org/docs/pages/GLTFLoader.html).

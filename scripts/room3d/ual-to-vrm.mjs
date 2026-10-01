@@ -8,9 +8,9 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { Quaternion, Vector3 } from "three";
 
 const [out, ...inputs] = process.argv.slice(2);
+// Only clips the room plays: every one is downloaded with each avatar.
 const WANTED = {
   Idle_Loop: "idle",
-  Idle_Talking_Loop: "talk",
   Walk_Loop: "walk",
   Sitting_Enter: "sitDown",
   Sitting_Idle_Loop: "sit",
@@ -19,7 +19,6 @@ const WANTED = {
   PickUp_Table: "pickUp",
   Farm_Watering: "water",
   Yes: "nod",
-  Dance_Loop: "dance",
 };
 const BONES = {
   pelvis: "hips", spine_01: "spine", spine_02: "chest", spine_03: "upperChest", neck_01: "neck", Head: "head",

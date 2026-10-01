@@ -31,7 +31,7 @@ export function HomeDirectory({onVisit}:{onVisit:(id:string)=>void}) {
  */
 export function HomeDialog({ownerId,viewerGender,onClose,onChat}:{ownerId:string;viewerGender?:string;onClose:()=>void;onChat:(profile:ApiProfile)=>void}) {
   // The viewer walks around as their own character: the male avatar for men, the female one otherwise.
-  const avatar=viewerGender==='man'?'/room3d/avatars/male.vrm':'/room3d/avatars/female.vrm';
+  const avatar=viewerGender==='man'?'male':'female';
   const home=useHome(ownerId,api),data=home.data;
   const [tab,setTab]=useState<'board'|'photos'|'gifts'|'settings'|null>(null);
   const [localBusy,setLocalBusy]=useState(false),[localError,setLocalError]=useState('');

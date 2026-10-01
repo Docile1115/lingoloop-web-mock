@@ -72,6 +72,9 @@ function Preview() {
         setPanel(null);
         setEditing(false);
         setNotes({});
+        // Local checks: ?avatar=male, ?quality=lite (otherwise the touch-device default applies).
+        const query = new URLSearchParams(window.location.search);
+        const quality = query.get("quality");
         try {
           scene.current = new RoomScene3D(host.current, {
             ready: () => setReady(true),
@@ -84,6 +87,9 @@ function Preview() {
             },
             status: setStatus,
             layout: setLayout,
+          }, {
+            avatar: query.get("avatar") === "male" ? "male" : "female",
+            quality: quality === "lite" || quality === "high" ? quality : undefined,
           });
         } catch {
           setError(true);
