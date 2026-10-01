@@ -10,7 +10,7 @@ import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from "react-n
 import { Ionicons } from "@expo/vector-icons";
 import { toFeedPost, toPartner, type ApiPost, type ApiProfile } from "@shared/live-data";
 import type { FeedPost, Partner } from "@shared/demo-data";
-import { post as apiPost } from "../lib/api";
+import { ApiError, post as apiPost } from "../lib/api";
 import { t, tx } from "../lib/i18n";
 import { useApi } from "../lib/useApi";
 import { useTheme } from "../lib/useTheme";
@@ -56,8 +56,10 @@ export function PartnerProfileScreen({
 }) {
   const c = useTheme();
   const [tab, setTab] = useState<"profile" | "posts">("profile");
-  const [following, setFollowing] = useState(false);
+  // 직접 바꾼 값. 없으면 서버의 팔로우 목록을 따릅니다.
+  const [followOverride, setFollowOverride] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   const directory = useApi<Partner[]>("/api/partners", [], (raw: ApiProfile[]) =>
     raw.map((row) => toPartner(row)),
@@ -68,6 +70,8 @@ export function PartnerProfileScreen({
     null,
     (raw: { following: number; followers: number; posts: number }) => raw,
   );
+  const follows = useApi<string[]>("/api/follows", [], (raw: string[]) => raw ?? []);
+  const following = followOverride ?? follows.data.includes(partnerId);
 
   const partner = directory.data.find((row) => row.id === partnerId);
   const theirPosts = useMemo(
@@ -83,15 +87,19 @@ export function PartnerProfileScreen({
     if (!partner || busy) return;
     const next = !following;
     setBusy(true);
-    setFollowing(next);
+    setError("");
+    setFollowOverride(next);
     try {
-      await apiPost(`/api/partners/${partner.id}/follow`, { following: next });
-    } catch {
-      setFollowing(!next); // 서버가 거절하면 되돌립니다.
+      const result = await apiPost<{ following: boolean }>(`/api/partners/${partner.id}/follow`, { following: next });
+      setFollowOverride(result.following);
+      counts.reload();
+    } catch (caught) {
+      setFollowOverride(!next); // 서버가 거절하면 되돌립니다.
+      setError(caught instanceof ApiError ? caught.message : t("요청을 처리하지 못했어요."));
     } finally {
       setBusy(false);
     }
-  }, [partner, following, busy]);
+  }, [partner, following, busy, counts.reload]);
 
   if (directory.loading) return <Loading />;
   if (!partner) {
@@ -154,7 +162,7 @@ export function PartnerProfileScreen({
           <PrimaryButton
             label={following ? t("팔로잉") : t("팔로우")}
             onPress={() => void toggleFollow()}
-            busy={busy}
+            busy={busy || follows.loading}
           />
         </View>
         <Pressable
@@ -166,6 +174,7 @@ export function PartnerProfileScreen({
           <Text style={{ color: c.ink, fontSize: 15, fontWeight: "600" }}>{t("메시지")}</Text>
         </Pressable>
       </View>
+      {error ? <Text style={[styles.error, { color: c.danger }]}>{error}</Text> : null}
 
       <SegmentedTabs
         value={tab}
@@ -290,4 +299,5 @@ const styles = StyleSheet.create({
   post: { padding: space.md, gap: space.xs, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md },
   postText: { fontSize: 15, lineHeight: 21 },
   none: { fontSize: 13, paddingVertical: space.lg, textAlign: "center" },
+  error: { fontSize: 13 },
 });

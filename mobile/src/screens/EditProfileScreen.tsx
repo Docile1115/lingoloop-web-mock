@@ -35,7 +35,7 @@ export function EditProfileScreen({
   onDone: () => void;
   onEditAvatar: () => void;
 }) {
-  const { me, refresh } = useSession();
+  const { me, applyMe } = useSession();
   const c = useTheme();
   const [name, setName] = useState(me?.name ?? "");
   const [bio, setBio] = useState(me?.bio ?? "");
@@ -46,28 +46,41 @@ export function EditProfileScreen({
 
   const save = useCallback(async () => {
     if (busy || !me) return;
+    // 서버 규칙(이름 2자 이상, 목표는 비우거나 2자 이상)을 먼저 확인합니다.
+    if (name.trim().length < 2) {
+      setError(t("이름은 2자 이상 적어 주세요."));
+      return;
+    }
+    if (goal.trim().length === 1) {
+      setError(t("학습 목표는 2자 이상 적어 주세요."));
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       const learning = me.learningLanguages?.[0];
-      await api("/api/profile", {
+      const saved = await api<Me>("/api/profile", {
         method: "PATCH",
         body: JSON.stringify({
           name: name.trim(),
           bio: bio.trim(),
+          // 서버는 배열 전체를 바꿉니다. 첫 언어만 고치고 나머지는 그대로 보냅니다.
           learningLanguages: learning
-            ? [{ code: learning.code, level, goal: goal.trim() }]
+            ? [
+                { code: learning.code, level, goal: goal.trim() },
+                ...(me.learningLanguages ?? []).slice(1),
+              ]
             : undefined,
         }),
       });
-      await refresh();
+      applyMe(saved);
       onDone();
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : t("요청을 처리하지 못했어요."));
     } finally {
       setBusy(false);
     }
-  }, [busy, me, name, bio, goal, level, refresh, onDone]);
+  }, [busy, me, name, bio, goal, level, applyMe, onDone]);
 
   if (!me) return <Loading />;
 

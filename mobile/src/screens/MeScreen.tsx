@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { toFeedPost, type ApiPost } from "@shared/live-data";
 import type { FeedPost } from "@shared/demo-data";
 import { t } from "../lib/i18n";
-import { useApi } from "../lib/useApi";
+import { useApi, useReloadOnFocus } from "../lib/useApi";
 import { useSession } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, tapSize } from "../lib/theme";
@@ -29,6 +29,8 @@ export function MeScreen({
   const posts = useApi<FeedPost[]>("/api/posts", [], (raw: ApiPost[]) =>
     raw.map(toFeedPost),
   );
+  /* 글쓰기에서 돌아오면 방금 쓴 글이 바로 보이게 다시 받습니다. */
+  useReloadOnFocus(posts.reload);
   useEffect(() => {
     if (!me) return;
     posts.set((rows) => rows.map((row) => row.authorId === me.id ? {
@@ -62,7 +64,7 @@ export function MeScreen({
       }
       ListHeaderComponent={
         <View style={{ gap: space.md }}>
-          <RoomCard name={me.name} value={me.roomConfig} avatar={me.avatarConfig} onEdit={()=>onHomes(me.id)} onVisit={()=>onHomes(me.id)} />
+          <RoomCard name={me.name} value={me.roomConfig} avatar={me.avatarConfig} own onVisit={()=>onHomes(me.id)} />
           <Pressable onPress={()=>onHomes()} accessibilityRole="button" style={{minHeight:48,padding:12}}><Text style={{color:c.primaryStrong}}>{t("친구 집 둘러보기")}</Text></Pressable>
           <View style={styles.head}>
             <Pressable
@@ -115,7 +117,9 @@ export function MeScreen({
         </View>
       }
       ListEmptyComponent={
-        posts.loading ? null : (
+        posts.loading ? null : posts.error ? (
+          <EmptyState title={posts.error} onRetry={posts.refresh} />
+        ) : (
           <EmptyState
             title={t("아직 쓴 글이 없어요")}
             body={t("첫 글을 올려보세요. 원어민이 고쳐줄 수 있어요.")}

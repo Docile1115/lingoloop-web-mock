@@ -5,8 +5,10 @@
  * 특히 "못 받아왔을 때 무엇을 보여줄지" 가 어긋나기 쉬워서 한곳에 둡니다 —
  * 실패했을 때 빈 목록만 보여주면 데이터가 없는 건지 못 받은 건지 알 수 없습니다.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import { ApiError, get } from "./api";
+import { t } from "./i18n";
 
 export type Loadable<T> = {
   data: T;
@@ -15,6 +17,8 @@ export type Loadable<T> = {
   /** 사람이 읽을 수 있는 실패 이유. 빈 문자열이면 실패하지 않은 것입니다. */
   error: string;
   refresh: () => void;
+  /** 당겨서 새로고침 표시 없이 다시 받아옵니다. 화면에 돌아왔을 때 씁니다. */
+  reload: () => void;
   /** 목록을 화면에서 직접 고칠 때(좋아요 등). 서버 재요청 없이 즉시 반영합니다. */
   set: React.Dispatch<React.SetStateAction<T>>;
 };
@@ -34,7 +38,7 @@ export function useApi<T>(path: string | null, initial: T, pick: (raw: never) =>
       .then((raw) => { if (alive) setData(pick(raw as never)); })
       .catch((caught) => {
         if (!alive) return;
-        setError(caught instanceof ApiError ? caught.message : "불러오지 못했어요.");
+        setError(caught instanceof ApiError ? caught.message : t("불러오지 못했어요."));
       })
       .finally(() => {
         if (!alive) return;
@@ -52,5 +56,23 @@ export function useApi<T>(path: string | null, initial: T, pick: (raw: never) =>
     setTick((n) => n + 1);
   }, []);
 
-  return { data, loading, refreshing, error, refresh, set: setData };
+  const reload = useCallback(() => setTick((n) => n + 1), []);
+
+  return { data, loading, refreshing, error, refresh, reload, set: setData };
+}
+
+/**
+ * 탭 화면은 마운트된 채 남아서 다른 화면에서 돌아와도 다시 받지 않습니다.
+ * 다시 보일 때마다 새로 받습니다. 첫 포커스는 첫 요청과 겹치므로 건너뜁니다.
+ */
+export function useReloadOnFocus(reload: () => void) {
+  const latest = useRef(reload);
+  latest.current = reload;
+  const seen = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!seen.current) { seen.current = true; return; }
+      latest.current();
+    }, []),
+  );
 }

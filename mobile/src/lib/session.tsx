@@ -38,6 +38,8 @@ type SessionValue = {
   signOut: () => Promise<void>;
   /** 프로필을 고친 뒤 서버 값을 다시 읽어옵니다. */
   refresh: () => Promise<void>;
+  /** PATCH /api/profile* 가 돌려준 최신 프로필을 그대로 반영합니다. 다시 요청하지 않습니다. */
+  applyMe: (next: Me) => void;
 };
 
 const SessionContext = createContext<SessionValue>({
@@ -46,6 +48,7 @@ const SessionContext = createContext<SessionValue>({
   signIn: async () => {},
   signOut: async () => {},
   refresh: async () => {},
+  applyMe: () => {},
 });
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
@@ -93,9 +96,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setMe(data.user);
   }, []);
 
+  const applyMe = useCallback((next: Me) => setMe(next), []);
+
   const value = useMemo(
-    () => ({ me, checking, signIn, signOut, refresh }),
-    [me, checking, signIn, signOut, refresh],
+    () => ({ me, checking, signIn, signOut, refresh, applyMe }),
+    [me, checking, signIn, signOut, refresh, applyMe],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

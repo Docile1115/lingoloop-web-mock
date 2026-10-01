@@ -15,7 +15,7 @@ import type { Partner } from '@shared/demo-data';
 import { api } from '../lib/api';
 import { t } from '../lib/i18n';
 import { useTheme } from '../lib/useTheme';
-import { useSession } from '../lib/session';
+import { useSession, type Me } from '../lib/session';
 
 function Button({children,onPress,disabled=false,selected=false}:{children:ReactNode;onPress:()=>void;disabled?:boolean;selected?:boolean}) {
   const c=useTheme();
@@ -58,14 +58,14 @@ export function HomesScreen({onVisit}:{onVisit:(id:string)=>void}) {
 
 type HomeActions={act:(suffix:string,method:string,body?:unknown)=>Promise<boolean>;busy:boolean};
 export function HomeScreen({ownerId,onStartChat}:{ownerId:string;onStartChat:(partner:Partner)=>void}) {
-  const c=useTheme(),{refresh,me}=useSession(),home=useHome(ownerId,api),data=home.data;
+  const c=useTheme(),{applyMe,me}=useSession(),home=useHome(ownerId,api),data=home.data;
   const [tab,setTab]=useState<'board'|'photos'|'gifts'|'settings'|null>(null),[error,setError]=useState(''),[localBusy,setLocalBusy]=useState(false);
   const [report,setReport]=useState<{kind:string;id:string}|null>(null),[reason,setReason]=useState(''),[notice,setNotice]=useState('');
   const lock=useRef(false),scroll=useRef<ScrollView>(null);const busy=home.busy||localBusy;
   const run=async(task:()=>Promise<unknown>)=>{if(lock.current||home.busy)return;lock.current=true;setLocalBusy(true);setError('');try{await task();await home.reload();}catch(e){setError(errorText(e));}finally{lock.current=false;setLocalBusy(false);}};
-  const install=async(id:RoomItemId)=>{if(!data)return;await run(async()=>{const initial=normalizeRoom(data.roomConfig),config=addRoomItem(initial,id);if(config===initial&&!initial.items.some(item=>item.id===id))throw new Error(t("가구를 하나 치운 뒤 설치해 주세요."));await api('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});await refresh();});};
+  const install=async(id:RoomItemId)=>{if(!data)return;await run(async()=>{const initial=normalizeRoom(data.roomConfig),config=addRoomItem(initial,id);if(config===initial&&!initial.items.some(item=>item.id===id))throw new Error(t("가구를 하나 치운 뒤 설치해 주세요."));applyMe(await api<Me>('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})}));});};
   const [frameId,setFrameId]=useState<HomePhoto['id']>('frame');
-  const saveRoom=async(config:RoomConfig)=>{if(lock.current||home.busy)return false;lock.current=true;setLocalBusy(true);try{await api('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})});await refresh();await home.reload();return true;}catch(e){setError(errorText(e));return false;}finally{lock.current=false;setLocalBusy(false);}};
+  const saveRoom=async(config:RoomConfig)=>{if(lock.current||home.busy)return false;lock.current=true;setLocalBusy(true);try{applyMe(await api<Me>('/api/profile/room',{method:'PATCH',body:JSON.stringify({config})}));await home.reload();return true;}catch(e){setError(errorText(e));return false;}finally{lock.current=false;setLocalBusy(false);}};
   const [dragging,setDragging]=useState(false),[roomDirty,setRoomDirty]=useState(false),[leaveApproved,setLeaveApproved]=useState(false);
   const navigation=useNavigation(),pendingLeave=useRef<(()=>void)|null>(null);
   useEffect(()=>{if(leaveApproved){const leave=pendingLeave.current;pendingLeave.current=null;leave?.();}},[leaveApproved]);

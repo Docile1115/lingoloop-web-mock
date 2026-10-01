@@ -31,7 +31,7 @@ import type { RootParams } from "../Navigation";
 import { ApiError, api } from "../lib/api";
 import { t } from "../lib/i18n";
 import { AVATAR_CATEGORY_LABELS as CATEGORY_LABELS, AVATAR_GROUP_LABELS, AVATAR_OPTION_LABELS } from "@shared/avatar-labels";
-import { useSession } from "../lib/session";
+import { useSession, type Me } from "../lib/session";
 import { radius, space, tapSize, type } from "../lib/theme";
 import { useTheme } from "../lib/useTheme";
 import { Avatar, Loading } from "../ui";
@@ -45,7 +45,7 @@ export function AvatarEditorScreen({ onDone }: { onDone: () => void }) {
   const { height } = useWindowDimensions();
   const previewHeight = Math.min(240, Math.max(100, height * .25));
   const navigation = useNavigation<NavigationProp<RootParams>>();
-  const { me, refresh } = useSession();
+  const { me, applyMe } = useSession();
   const initial = useRef<AvatarConfig>(copyConfig(me?.avatarConfig));
   const [draft, setDraft] = useState<AvatarConfig>(() => copyConfig(me?.avatarConfig));
   const [category, setCategory] = useState<AvatarCategory>("skinTone");
@@ -96,11 +96,11 @@ export function AvatarEditorScreen({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError("");
     try {
-      await api("/api/profile/avatar", {
+      const saved = await api<Me>("/api/profile/avatar", {
         method: "PATCH",
         body: JSON.stringify({ mode, config: draft }),
       });
-      await refresh();
+      applyMe(saved);
       pendingLeave.current = onDone;
       setLeaveApproved(true);
     } catch (caught) {
@@ -108,7 +108,7 @@ export function AvatarEditorScreen({ onDone }: { onDone: () => void }) {
     } finally {
       setBusy(false);
     }
-  }, [busy, draft, me, onDone, refresh]);
+  }, [busy, draft, me, onDone, applyMe]);
 
   if (!me) return <Loading />;
 

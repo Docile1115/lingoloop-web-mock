@@ -3,7 +3,7 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "rea
 import { toConversation, type ApiConversation } from "@shared/live-data";
 import type { Conversation } from "@shared/demo-data";
 import { t, tx } from "../lib/i18n";
-import { useApi } from "../lib/useApi";
+import { useApi, useReloadOnFocus } from "../lib/useApi";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, type } from "../lib/theme";
 import { Avatar, Divider, EmptyState, Loading } from "../ui";
@@ -17,6 +17,8 @@ export function ChatsScreen({ onOpen }: { onOpen: (row: Conversation) => void })
     // 들어갑니다. 인자를 명시해서 막습니다.
     (raw: ApiConversation[]) => raw.map((row) => toConversation(row)),
   );
+  /* 대화방에서 돌아오면 미리보기·안읽음 수를 다시 받습니다. */
+  useReloadOnFocus(chats.reload);
 
   if (chats.loading) return <Loading />;
 

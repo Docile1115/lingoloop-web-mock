@@ -6,7 +6,7 @@
  * 말을 하게 됩니다.
  */
 import { useCallback, useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { matchReasonText, toPartner, type ApiProfile, type MatchReasonCode } from "@shared/live-data";
 import type { Partner } from "@shared/demo-data";
@@ -48,6 +48,11 @@ export function PartnersScreen({
           : (row.matchReasons ?? []).map((reason) => tx(reason)),
       })),
   );
+  // 이미 마음을 보낸 사람. 앱을 다시 열어도 "마음을 보냈어요" 가 남아야 합니다.
+  const sent = useApi<string[]>("/api/likes/sent", [], (raw: Array<{ partner?: { id?: string } }>) =>
+    (raw ?? []).map((row) => row.partner?.id ?? "").filter(Boolean),
+  );
+  const isLiked = (id: string) => liked[id] ?? sent.data.includes(id);
 
   /* 마음 보내기. 예전 웹에서는 화면 상태만 바꾸고 상대에게는 아무 일도
      일어나지 않았습니다 — 서버에 남겨야 상대가 받은 마음에서 볼 수 있습니다. */
@@ -57,14 +62,15 @@ export function PartnersScreen({
     setLiked((rows) => ({ ...rows, [partner.id]: true }));
     try {
       await apiPost(`/api/partners/${partner.id}/like`, { liked: true });
-    } catch {
+    } catch (error) {
       setLiked((rows) => ({ ...rows, [partner.id]: false }));
+      Alert.alert(t("요청을 처리하지 못했어요."), error instanceof Error ? error.message : undefined);
     } finally {
       setBusy("");
     }
   }, [busy]);
 
-  if (daily.loading) return <Loading />;
+  if (daily.loading || sent.loading) return <Loading />;
 
   return (
     <FlatList
@@ -74,7 +80,11 @@ export function PartnersScreen({
       contentContainerStyle={daily.data.length ? styles.list : { flexGrow: 1 }}
       ItemSeparatorComponent={Divider}
       refreshControl={
-        <RefreshControl refreshing={daily.refreshing} onRefresh={daily.refresh} tintColor={c.primary} />
+        <RefreshControl
+          refreshing={daily.refreshing}
+          onRefresh={() => { daily.refresh(); sent.reload(); }}
+          tintColor={c.primary}
+        />
       }
       ListEmptyComponent={
         daily.error ? (
@@ -142,9 +152,9 @@ export function PartnersScreen({
           <View style={styles.actions}>
             <View style={{ flex: 1 }}>
               <PrimaryButton
-                label={liked[item.partner.id] ? t("마음을 보냈어요") : t("마음 보내기")}
+                label={isLiked(item.partner.id) ? t("마음을 보냈어요") : t("마음 보내기")}
                 onPress={() => void sendLike(item.partner)}
-                disabled={liked[item.partner.id]}
+                disabled={isLiked(item.partner.id)}
                 busy={busy === item.partner.id}
               />
             </View>
