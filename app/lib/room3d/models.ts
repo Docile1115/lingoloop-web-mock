@@ -1,5 +1,6 @@
 import * as T from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { Obstacle } from "./navigation";
 
 import type { Kind, Furnishing } from "./config";
@@ -25,6 +26,16 @@ export const INITIAL_FURNITURE: Furnishing[] = [
   { id: "frame", kind: "frame", x: 3.05, z: 1, rotation: -0.2 },
   { id: "whiteboard", kind: "board", x: -3.2, z: 0.7, rotation: 0.25 },
 ];
+/** Cushion height of every seat: where the avatars' authored sit pose rests (feet on the floor). */
+const SEAT_TOP = 0.5;
+/**
+ * Seat geometry for the sit animation, along the seat's forward axis from its centre:
+ * the backrest face at buttock height, the front of the seat and the cushion height.
+ */
+export const SEATS: Partial<Record<Kind, { back: number; front: number; top: number }>> = {
+  sofa: { back: -0.035, front: 0.43, top: SEAT_TOP },
+  chair: { back: -0.11, front: 0.325, top: SEAT_TOP },
+};
 export function footprint(item: Furnishing): Obstacle {
   const d = CATALOG[item.kind],
     c = Math.abs(Math.cos(item.rotation)),
@@ -145,7 +156,8 @@ export function box(
     parent,
     new RoundedBoxGeometry(
       ...size,
-      3,
+      // Sub-2 cm bevels (planks, trims, books) read the same with one segment at room scale.
+      radius < 0.02 ? 1 : 3,
       Math.min(radius, ...size.map((v) => v / 3)),
     ),
     mat,
@@ -193,6 +205,41 @@ function legs(
   for (const x of [-w / 2, w / 2])
     for (const z of [-d / 2, d / 2])
       box(group, [0.065, height, 0.065], m.walnut, [x, height / 2, z], 0.01);
+}
+/**
+ * Bakes a finished model into one mesh per material and shadow setting: dozens of small parts
+ * would otherwise each cost a draw call, plus another in the shadow pass. Named meshes stay
+ * separate because the scene looks them up (the picture of frames and the whiteboard).
+ */
+function batched(group: T.Group) {
+  group.updateMatrixWorld(true);
+  const toGroup = group.matrixWorld.clone().invert();
+  const buckets = new Map<string, { material: T.Material; cast: boolean; receive: boolean; parts: T.BufferGeometry[] }>();
+  const parts: T.Mesh[] = [];
+  group.traverse((node) => {
+    if (!(node instanceof T.Mesh) || node.name || Array.isArray(node.material)) return;
+    const key = `${node.material.uuid}:${node.castShadow}:${node.receiveShadow}`;
+    let bucket = buckets.get(key);
+    if (!bucket) buckets.set(key, (bucket = { material: node.material, cast: node.castShadow, receive: node.receiveShadow, parts: [] }));
+    // Rounded boxes are non-indexed, so everything is merged as plain triangle lists.
+    const geometry: T.BufferGeometry = node.geometry.index ? node.geometry.toNonIndexed() : node.geometry.clone();
+    bucket.parts.push(geometry.applyMatrix4(toGroup.clone().multiply(node.matrixWorld)));
+    parts.push(node);
+  });
+  for (const node of parts) {
+    node.removeFromParent();
+    node.geometry.dispose();
+  }
+  for (const bucket of buckets.values()) {
+    const geometry = mergeGeometries(bucket.parts);
+    bucket.parts.forEach((part) => part.dispose());
+    if (!geometry) throw new Error("incompatible furniture geometry");
+    const mesh = new T.Mesh(geometry, bucket.material);
+    mesh.castShadow = bucket.cast;
+    mesh.receiveShadow = bucket.receive;
+    group.add(mesh);
+  }
+  return group;
 }
 export function pictureTexture(board = false, notes: string[] = []) {
   const canvas = document.createElement("canvas");
@@ -262,21 +309,22 @@ export function furniture(kind: Kind, m: Materials) {
   const g = new T.Group();
   switch (kind) {
     case "sofa": {
-      legs(g, m, 2.25, 0.65, 0.2);
-      box(g, [2.5, 0.32, 0.92], m.sofa, [0, 0.35, 0], 0.09);
-      box(g, [2.5, 0.64, 0.22], m.sofa, [0, 0.8, -0.38], 0.09);
+      // Seat cushions top out at SEAT_TOP; thick back cushions keep the seat about as deep as a thigh.
+      legs(g, m, 2.25, 0.65, 0.12);
+      box(g, [2.5, 0.24, 0.86], m.sofa, [0, 0.24, -0.03], 0.09);
+      box(g, [2.5, 0.64, 0.22], m.sofa, [0, 0.635, -0.38], 0.09);
       for (const x of [-1.19, 1.19])
-        box(g, [0.26, 0.62, 0.99], m.sofa, [x, 0.57, 0], 0.1);
+        box(g, [0.26, 0.55, 0.99], m.sofa, [x, 0.44, 0], 0.1);
       for (const x of [-0.7, 0, 0.7]) {
-        box(g, [0.68, 0.18, 0.7], m.sofa, [x, 0.575, 0.08], 0.06);
-        const back = box(g, [0.69, 0.42, 0.16], m.sofa, [x, 0.84, -0.25], 0.08);
+        box(g, [0.68, 0.16, 0.7], m.sofa, [x, SEAT_TOP - 0.08, 0.08], 0.06);
+        const back = box(g, [0.69, 0.44, 0.24], m.sofa, [x, 0.685, -0.17], 0.08);
         back.rotation.x = -0.1;
       }
       const pillow = box(
         g,
         [0.42, 0.42, 0.17],
         m.pillow,
-        [-0.83, 0.82, 0.01],
+        [-0.83, 0.655, 0.13],
         0.11,
       );
       pillow.rotation.set(-0.25, 0, 0.18);
@@ -284,7 +332,7 @@ export function furniture(kind: Kind, m: Materials) {
         g,
         [0.39, 0.4, 0.16],
         m.accent,
-        [0.83, 0.81, -0.01],
+        [0.83, 0.645, 0.11],
         0.1,
       );
       pillow2.rotation.set(-0.18, 0, -0.15);
@@ -346,9 +394,9 @@ export function furniture(kind: Kind, m: Materials) {
       break;
     }
     case "chair": {
-      legs(g, m, 0.46, 0.46, 0.45);
-      box(g, [0.65, 0.12, 0.65], m.pillow, [0, 0.48, 0], 0.08);
-      box(g, [0.63, 0.48, 0.14], m.pillow, [0, 0.79, -0.27], 0.08);
+      legs(g, m, 0.46, 0.46, 0.41);
+      box(g, [0.65, 0.12, 0.58], m.pillow, [0, SEAT_TOP - 0.06, 0.035], 0.08);
+      box(g, [0.63, 0.48, 0.14], m.pillow, [0, 0.75, -0.18], 0.08);
       break;
     }
     case "shelf": {
@@ -460,7 +508,7 @@ export function furniture(kind: Kind, m: Materials) {
       break;
     }
   }
-  return g;
+  return batched(g);
 }
 export function shell(m: Materials) {
   const g = new T.Group();
@@ -533,5 +581,5 @@ export function shell(m: Materials) {
   const glow = new T.PointLight("#ffdbab", 3, 3);
   glow.position.set(0.54, 1.42, -1.75);
   g.add(glow);
-  return g;
+  return batched(g);
 }
