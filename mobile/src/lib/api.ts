@@ -17,6 +17,7 @@
  *    쿠키 저장소가 매 요청에 붙이게 합니다. 인증이 만료되어 401이 오면 세션
  *    Provider가 즉시 로그인 화면으로 되돌립니다.
  */
+import { t } from "./i18n";
 
 /** 운영 웹 주소. 로컬 서버를 보려면 app.config 대신 여기를 바꿉니다. */
 export const API_BASE =
@@ -62,7 +63,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       },
     });
   } catch {
-    throw new ApiError(0, "NETWORK", "서버에 연결할 수 없어요. 연결을 확인해 주세요.");
+    throw new ApiError(0, "NETWORK", t("서버에 연결할 수 없어요. 연결을 확인해 주세요."));
   }
 
   const body = (await response.json().catch(() => null)) as Envelope<T> | null;
@@ -72,7 +73,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(
       response.status,
       body?.error?.code ?? "UNKNOWN",
-      body?.error?.message ?? "요청을 처리하지 못했어요.",
+      body?.error?.message ?? t("요청을 처리하지 못했어요."),
       body?.error?.field,
     );
   }

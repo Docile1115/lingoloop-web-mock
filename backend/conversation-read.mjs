@@ -32,6 +32,12 @@ export function buildConversationReadPatch(conversation = {}, messages = [], rea
   const unreadBefore = safeUnreadCount(currentUnread[readerId]);
   const unreadAfter = hasNewerMessage ? Math.max(0, unreadBefore - visibleIncoming) : 0;
 
+  /* 수락 전 메시지 요청을 받은 사람이 열어 본 것은 읽음으로 남기지 않습니다.
+     보낸 사람의 "읽음"이 readAt에서 나오므로, 받은 사람의 안읽음 수만 정리합니다. */
+  if (conversation.requestStatus === "pending" && conversation.requestRecipientId === readerId) {
+    return unreadAfter === unreadBefore ? null : { unread: { ...currentUnread, [readerId]: unreadAfter } };
+  }
+
   return {
     readAt: { ...currentReadAt, [readerId]: latestAt },
     unread: { ...currentUnread, [readerId]: unreadAfter },

@@ -34,7 +34,8 @@ export function SearchScreen({
   useEffect(() => {
     const text = query.trim();
     if (text.length < 2) {
-      setPeople([]); setPosts([]); setError("");
+      // 이전 요청은 취소됐으므로 "찾는 중" 도 여기서 끕니다.
+      setPeople([]); setPosts([]); setError(""); setSearching(false);
       return;
     }
     let alive = true;

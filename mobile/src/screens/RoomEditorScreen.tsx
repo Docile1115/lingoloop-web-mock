@@ -10,7 +10,7 @@ import {
 import { ROOM_LABELS, ROOM_PRESET_LABELS } from '@shared/room-labels';
 import { t } from '../lib/i18n';
 import { api } from '../lib/api';
-import { useSession } from '../lib/session';
+import { useSession, type Me } from '../lib/session';
 import { useTheme } from '../lib/useTheme';
 import { RoomScene } from '../ui/RoomCard';
 
@@ -18,7 +18,7 @@ export function RoomEditorScreen({ onDone }: { onDone: () => void }) {
   const c = useTheme();
   const navigation = useNavigation();
   const scroller = useRef<ScrollView>(null);
-  const { me, refresh } = useSession();
+  const { me, applyMe } = useSession();
   const [initial] = useState(() => normalizeRoom(me?.roomConfig));
   const [draft,setDraft] = useState(() => normalizeRoom(me?.roomConfig));
   const [selected,setSelected] = useState<RoomItemId | null>(null);
@@ -46,12 +46,12 @@ export function RoomEditorScreen({ onDone }: { onDone: () => void }) {
     if (lock.current || !me) return;
     lock.current = true; setBusy(true); setError('');
     try {
-      await api('/api/profile/room',{method:'PATCH',body:JSON.stringify({config:draft})});
-      await refresh();
+      const saved = await api<Me>('/api/profile/room',{method:'PATCH',body:JSON.stringify({config:draft})});
+      applyMe(saved);
       pendingLeave.current = onDone; setLeaveApproved(true);
     } catch { setError(t("방을 저장하지 못했어요. 다시 시도해 주세요.")); }
     finally { lock.current = false; setBusy(false); }
-  },[draft,me,refresh,onDone]);
+  },[draft,me,applyMe,onDone]);
   return <SafeAreaView style={{flex:1,backgroundColor:c.bg}}>
     <View style={[s.header,{borderBottomColor:c.line}]}>
       <Pressable onPress={onDone} disabled={busy} accessibilityRole="button" style={s.action}><Text style={{color:c.muted}}>{t("취소")}</Text></Pressable>

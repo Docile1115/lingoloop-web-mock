@@ -130,12 +130,18 @@ test("프로필, 글, 댓글, 대화, 검색과 알림 응답은 공통 avatar �
   assert.match(source, /async function conversationView\([\s\S]*profileForOthers\(partnerSnapshot\.data\(\)\)/);
   assert.match(source, /app\.get\("\/api\/notifications"[\s\S]*profileForOthers\(actors\.get/);
 
+  // 글 목록·상세·검색은 공통 작성자 카드(postAuthorView)로 avatar를 덮습니다.
+  const postAuthor = source.slice(source.indexOf("function postAuthorView"), source.indexOf('app.get("/api/posts"'));
+  assert.match(postAuthor, /\.\.\.avatarPresentation\(author\)/);
   const posts = source.slice(source.indexOf('app.get("/api/posts"'), source.indexOf('app.get("/api/corrections/received"'));
-  assert.ok((posts.match(/avatarPresentation\(/g) || []).length >= 5, "post list/detail/create and reply responses propagate avatars");
+  assert.ok(
+    (posts.match(/avatarPresentation\(|postAuthorView\(/g) || []).length >= 5,
+    "post list/detail/create and reply responses propagate avatars",
+  );
 
   const search = source.slice(source.indexOf('app.get("/api/search"'), source.indexOf('app.post("/api/translate"'));
   assert.match(search, /profilesByIds\(posts\.map/);
-  assert.match(search, /avatarPresentation\(postAuthors\.get\(post\.authorId\)\)/);
+  assert.match(search, /postAuthorView\(post, postAuthors\.get\(post\.authorId\)\)/);
 
   const corrections = source.slice(
     source.indexOf('app.get("/api/corrections/received"'),

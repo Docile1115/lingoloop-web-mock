@@ -85,8 +85,7 @@ import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, 
 import { SignIn } from "./SignIn";
 import { ProfileRoom } from "./ProfileRoom";
 import { HomeDialog, HomeDirectory } from "./SocialHome";
-import type { RoomConfig } from "../lib/room";
-import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, type ApiNotification, type ApiNotificationPage, matchReasonText, type MatchReasonCode } from "../lib/live-data";
+import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, type ApiNotification, type ApiNotificationPage, type ApiCreateMessageResult, matchReasonText, type MatchReasonCode } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import {
   AVATAR_CATEGORIES,
@@ -173,12 +172,18 @@ type ActiveDetailRoute = Exclude<DetailRoute, null>;
 type DetailHistorySnapshot = { section: Section; stack: ActiveDetailRoute[] };
 type ReloadedChats = { conversations: Conversation[]; requestIds: Set<string> };
 
-/** 프로필 편집에서 고칠 수 있는 값. mock 이라 이 브라우저에만 남습니다. */
+/**
+ * 프로필 편집에서 고칠 수 있는 값.
+ *
+ * 저장된 값은 따로 들고 있지 않고 언제나 서버 프로필(me)에서 만듭니다.
+ * 예전에는 처음 받은 me 를 복사해 두고 그것만 고쳐서, 저장한 뒤에도 사이드바·
+ * 프로필 머리줄·새 글의 언어가 옛 값으로 남았습니다.
+ * "프로필 공개 범위" 도 있었지만 서버에 보내지도 저장하지도 않아 뺐습니다.
+ */
 type ProfileDraft = {
   name: string;
   bio: string;
   goal: string;
-  visibility: "public" | "partners";
   /** 나이와 성별. 이것도 고칠 자리가 없어서 가입할 때 값이 그대로였습니다. */
   age: number;
   gender: string;
@@ -249,19 +254,24 @@ type VerificationStepInfo = {
   status: "not-started" | "pending" | "verified";
 };
 
+/* 서버(backend/server.mjs 의 DEFAULT_MATCHING_PREFERENCES)와 같은 기본값입니다.
+   예전에는 화면만 캐나다·미국, 20–35세, 인증 회원만으로 보여줘서, 실제 추천에 쓰이지
+   않는 조건이 걸려 있는 것처럼 보였습니다. */
 const defaultMatchPreferences: MatchPreferences = {
   targetLanguages: ["en"],
-  preferredCountries: ["CA", "US"],
-  interests: ["travel", "movies", "coffee"],
-  availability: ["weekday-evening", "weekend-morning"],
+  preferredCountries: [],
+  interests: [],
+  availability: ["weekday-evening"],
   levelMin: "beginner",
   levelMax: "advanced",
-  ageMin: 20,
-  ageMax: 35,
-  verifiedOnly: true,
+  ageMin: 18,
+  ageMax: 100,
+  verifiedOnly: false,
   intents: ["language-exchange", "friendship"],
   onlineOnly: false,
 };
+/** 서버가 받는 선호 지역 수(normalizePreferences 의 preferredCountries 한도). */
+const MAX_PREFERRED_COUNTRIES = 8;
 
 /* 라벨 표는 화면 밖에서 만들어지므로 문구를 msg() 로 표시해 두고, 읽는 쪽에서 t() 로 번역합니다. */
 const languageLabels: Record<string, MessageKey> = { en: msg("영어"), es: msg("스페인어"), ja: msg("일본어") };
@@ -559,6 +569,7 @@ function LingoLoopScreens({
   const [exchangeLength, setExchangeLength] = useState(15);
   const [settings, setSettings] = useState<AppSettings>({ hideLocation: me.hideLocation ?? true, dmScope: "matches" });
   const [matchPreferences, setMatchPreferences] = useState<MatchPreferences>(defaultMatchPreferences);
+  const [matchPreferencesReady, setMatchPreferencesReady] = useState(false);
   const [dailyRecommendations, setDailyRecommendations] = useState<DailyMatchRecommendation[]>([]);
   const [matchesFailed, setMatchesFailed] = useState(false);
   /**
@@ -684,19 +695,9 @@ function LingoLoopScreens({
   useEffect(() => { selectedChatIdRef.current = selectedChatId; }, [selectedChatId]);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [profile, setProfile] = useState<ProfileDraft>({
-    name: me.name,
-    bio: me.bio,
-    goal: me.learningLanguages?.[0]?.goal || t("부담 없는 일상 대화"),
-    visibility: "public",
-    age: me.age ?? 0,
-    gender: me.gender ?? "unspecified",
-    nativeCode: me.nativeLanguages?.[0] ?? "ko",
-    learningCode: me.learningLanguages?.[0]?.code ?? "en",
-    learningLevel: me.learningLanguages?.[0]?.level ?? "beginner",
-  });
   /* 캐릭터 편집 화면을 위에 열었다 돌아와도 저장 전 프로필 입력을 보존합니다. */
   const [profileEditDraft, setProfileEditDraft] = useState<ProfileDraft | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [avatarEditorDirty, setAvatarEditorDirty] = useState(false);
   const [avatarEditorSaving, setAvatarEditorSaving] = useState(false);
   const avatarNavigationGuard = useRef<{
@@ -753,31 +754,37 @@ function LingoLoopScreens({
    * 예전에는 화면 상태만 바꾸고 "저장했어요" 라고 알렸습니다. 새로고침하면
    * 예전 이름으로 돌아왔고, 다른 사람에게는 바뀐 적도 없었습니다.
    * 학습 목표는 서버에서 학습 언어에 딸린 값이라 그 자리에 넣어 보냅니다.
+   *
+   * 서버가 돌려준 프로필로 me 를 바꿔야 사이드바·머리줄·새 글 언어가 함께 바뀝니다.
+   * 성공 여부를 돌려주어, 실패하면 편집 화면과 입력을 그대로 둡니다.
    */
-  const saveProfile = async (next: ProfileDraft) => {
-    const previous = profile;
-    setProfile(next);
+  const saveProfile = async (next: ProfileDraft): Promise<boolean> => {
     try {
-      const rest = (me.learningLanguages || []).slice(1);
-      await api("/api/profile", {
+      /* 두 번째 이후 학습 언어는 이 화면에서 고치지 않으므로 그대로 보냅니다.
+         다만 방금 고른 모국어·첫 학습 언어와 겹치는 것은 빼야 같은 말이 두 번 남지 않습니다. */
+      const chosen = new Set([next.nativeCode, next.learningCode]);
+      const rest = (me.learningLanguages || []).slice(1).filter((item) => !chosen.has(item.code));
+      const updated = await api<ApiProfile>("/api/profile", {
         method: "PATCH",
         body: JSON.stringify({
-          name: next.name,
-          bio: next.bio,
+          name: next.name.trim(),
+          bio: next.bio.trim(),
           age: next.age,
           gender: next.gender,
           nativeLanguages: [next.nativeCode],
           learningLanguages: [
-            { code: next.learningCode, level: next.learningLevel, goal: next.goal || t("부담 없는 일상 대화") },
+            { code: next.learningCode, level: next.learningLevel, goal: next.goal.trim() || t("부담 없는 일상 대화") },
             ...rest,
           ],
         }),
       });
+      onProfileUpdated({ ...me, ...updated });
       showToast(t("프로필을 저장했어요"));
       void reload();
+      return true;
     } catch (caught) {
-      setProfile(previous);
       showToast(caught instanceof Error ? caught.message : t("프로필을 저장하지 못했어요."));
+      return false;
     }
   };
 
@@ -803,7 +810,12 @@ function LingoLoopScreens({
     const rooms = [...(conversationList || []), ...(requestList || [])];
     const nextConversations = rooms.map((room) => toConversation(room));
     const nextRequestIds = new Set((requestList || []).map((room) => room.id));
-    setConversations(nextConversations);
+    /* 목록에는 말풍선이 실려 오지 않습니다. 이미 읽어 둔 말풍선은 남겨야, 목록을 다시
+       받을 때마다(저장 뒤 reload, 주기적 갱신) 열어 둔 대화가 텅 비지 않습니다. */
+    setConversations((current) => nextConversations.map((room) => {
+      const previous = current.find((item) => item.id === room.id);
+      return previous?.messages.length ? { ...room, messages: previous.messages } : room;
+    }));
     setMutedChatIds(new Set(rooms.filter((room) => room.muted).map((room) => room.id)));
     setRequestConversationIds(nextRequestIds);
     /* 처음 들어왔을 때 첫 대화를 자동으로 열지 않습니다.
@@ -902,6 +914,49 @@ function LingoLoopScreens({
       .catch(() => { /* 대화를 못 읽어도 목록은 그대로 둡니다. */ });
     return () => { cancelled = true; };
   }, [selectedChatId, me.id]);
+
+  /**
+   * 대화 화면을 보는 동안 새 메시지를 주기적으로 받아옵니다.
+   *
+   * 예전에는 대화방을 다시 고를 때만 읽어서, 상대가 답해도 화면에 나타나지 않았고
+   * 목록·안 읽음 배지도 그대로였습니다. 실시간 연결(WebSocket)이 생기기 전까지의 방법입니다.
+   */
+  const [chatRefreshTick, setChatRefreshTick] = useState(0);
+  useEffect(() => {
+    if (section !== "chats") return;
+    const tick = () => { if (document.visibilityState === "visible") setChatRefreshTick((value) => value + 1); };
+    const interval = window.setInterval(tick, 15_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [section]);
+  useEffect(() => {
+    if (!chatRefreshTick) return;
+    let cancelled = false;
+    const openId = selectedChatIdRef.current;
+    void (async () => {
+      // 열린 대화를 먼저 읽어야(서버가 읽음 처리) 뒤이어 받는 목록의 안 읽음 수가 맞습니다.
+      if (openId) {
+        try {
+          const rows = await api<ApiMessage[]>(`/api/conversations/${encodeURIComponent(openId)}/messages`);
+          if (cancelled) return;
+          const messages = (rows || []).map((row) => toChatMessage(row, me.id));
+          setConversations((current) => current.map((room) => {
+            if (room.id !== openId) return room;
+            // 보내는 중인 말풍선(local-)은 서버 목록에 아직 없을 수 있어 남깁니다.
+            const sending = room.messages.filter((message) => message.id.startsWith("local-"));
+            return { ...room, messages: [...messages, ...sending] };
+          }));
+        } catch {
+          /* 이번에 못 받으면 다음 차례에 다시 받습니다. */
+        }
+      }
+      if (!cancelled) await loadChats().catch(() => null);
+    })();
+    return () => { cancelled = true; };
+  }, [chatRefreshTick, loadChats, me.id]);
 
   const selectedConversation = conversations.find((item) => item.id === selectedChatId);
   /* 내비게이션 배지는 실제 안 읽은 수의 합입니다. 대화를 열면 그 방의 안 읽음이 0이 되어 함께 줄어듭니다. */
@@ -1139,6 +1194,8 @@ function LingoLoopScreens({
   }, []);
 
   useEffect(() => {
+    // 서버에 저장된 조건을 받기 전에는 부르지 않습니다 — 기본값으로 한 번, 받은 값으로 또 한 번 부르게 됩니다.
+    if (!matchPreferencesReady) return;
     let cancelled = false;
     const query = new URLSearchParams({
       targetLanguages: matchPreferences.targetLanguages.join(","),
@@ -1179,7 +1236,7 @@ function LingoLoopScreens({
     return () => {
       cancelled = true;
     };
-  }, [matchPreferences]);
+  }, [matchPreferences, matchPreferencesReady]);
 
   // 매칭 조건이 바뀌면 큐를 처음부터 다시 봅니다.
   useEffect(() => {
@@ -1187,22 +1244,27 @@ function LingoLoopScreens({
     return () => window.cancelAnimationFrame(frame);
   }, [matchPreferences]);
 
+  /**
+   * 매칭 조건 복원 — 서버에서 가져옵니다.
+   *
+   * 예전에는 이 브라우저의 localStorage 에서만 읽었습니다. 추천은 서버에 저장된 조건으로
+   * 만들어지는데, 화면은 기기에 남은 값(또는 서버와 다른 기본값)을 보여줬고, 앱에서 바꾼
+   * 조건도 보이지 않았습니다. 저장소 키가 계정별이 아니라 다른 계정의 조건이 보이기도 했습니다.
+   */
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      try {
-        // 사용자가 직접 고칠 수 있는 값이라 모양을 확인하고 씁니다.
-        const parsed = readStoredJson<Partial<MatchPreferences>>(
-          "lingoloop-match-preferences",
-          (value): value is Partial<MatchPreferences> =>
-            typeof value === "object" && value !== null && !Array.isArray(value),
-        );
-        if (!parsed) return;
-        setMatchPreferences(normalizeMatchPreferences({ ...defaultMatchPreferences, ...parsed }));
-      } catch {
-        // Device-local preferences are optional in this mock.
-      }
-    });
-    return () => window.cancelAnimationFrame(frame);
+    let cancelled = false;
+    api<{ preferences?: Partial<MatchPreferences> }>("/api/matching/preferences")
+      .then((body) => {
+        if (cancelled || !body.preferences) return;
+        setMatchPreferences(normalizeMatchPreferences({ ...defaultMatchPreferences, ...body.preferences }));
+      })
+      .catch(() => {
+        // 못 받아오면 서버 기본값과 같은 화면 기본값으로 둡니다. 추천은 어차피 서버 값으로 만듭니다.
+      })
+      .finally(() => {
+        if (!cancelled) setMatchPreferencesReady(true);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   // 새로고침·브라우저 Back/Forward에서 현재 탭과 겹쳐 연 상세 화면을 함께 복원합니다.
@@ -1395,11 +1457,6 @@ function LingoLoopScreens({
     }
 
     setMatchPreferences(normalized);
-    try {
-      window.localStorage.setItem("lingoloop-match-preferences", JSON.stringify(normalized));
-    } catch {
-      // Continue with in-memory state if browser storage is unavailable.
-    }
     showToast(t("매칭 설정을 저장했어요 · 오늘의 파트너에 바로 반영돼요"));
     return true;
   };
@@ -1569,8 +1626,26 @@ function LingoLoopScreens({
   };
 
   const openProfileEditor = () => {
-    setProfileEditDraft(profile);
+    setProfileEditDraft(profileDraftFrom(me));
     pushDetailRoute({ kind: "profile-edit" }, "learn", "#learn/profile-edit");
+  };
+
+  /* 저장을 기다리는 사이 사용자가 다른 화면으로 갔다면 그 화면을 닫지 않습니다.
+     저장이 끝난 시점의 화면을 보려고 매 렌더의 closeDetail 을 담아 둡니다. */
+  const finishProfileEdit = useRef<() => void>(() => {});
+  useEffect(() => {
+    finishProfileEdit.current = () => {
+      setProfileEditDraft(null);
+      if (detail?.kind === "profile-edit") closeDetail();
+    };
+  });
+
+  const submitProfile = async (next: ProfileDraft) => {
+    if (profileSaving) return;
+    setProfileSaving(true);
+    const saved = await saveProfile(next);
+    setProfileSaving(false);
+    if (saved) finishProfileEdit.current();
   };
 
   const closeAvatarEditor = () => {
@@ -1759,8 +1834,8 @@ function LingoLoopScreens({
 
     if (key === "saved") {
       // 글 저장은 복습함(저장한 표현)에 그대로 들어갑니다 — 저장 목록이 두 벌이면 어긋납니다.
+      // 책갈피 모양은 savedItems 에서 읽으므로 글 쪽 값은 따로 뒤집지 않습니다.
       void savePhrase({ id: post.id, phrase: post.text, meaning: "", source: post.author, due: "" });
-      updatePost(postId, (item) => ({ ...item, saved: !item.saved }));
       return;
     }
 
@@ -1913,6 +1988,24 @@ function LingoLoopScreens({
     showToast(t("{name}님과 대화를 열었어요", { name: partner.name }));
   };
 
+  /**
+   * 먼저 붙여 둔 말풍선(local-)을 서버가 저장한 메시지로 바꿉니다.
+   * 바꾸지 않으면 주기적 갱신이 받아온 같은 메시지와 함께 두 번 보입니다.
+   */
+  const settleLocalMessage = (conversationId: string, localId: string, saved: ApiMessage) => {
+    const message = toChatMessage(saved, me.id);
+    setConversations((items) => items.map((conversation) => {
+      if (conversation.id !== conversationId) return conversation;
+      const arrived = conversation.messages.some((item) => item.id === message.id);
+      return {
+        ...conversation,
+        messages: arrived
+          ? conversation.messages.filter((item) => item.id !== localId)
+          : conversation.messages.map((item) => (item.id === localId ? message : item)),
+      };
+    }));
+  };
+
   const sendMessage = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const checked = checkText(draft, "message");
@@ -1933,10 +2026,11 @@ function LingoLoopScreens({
     // 화면에는 먼저 붙이고 서버에 보냅니다. 실패하면 방금 붙인 것을 걷어내
     // "보낸 줄 알았는데 안 갔다" 를 만들지 않습니다.
     try {
-      await api("/api/conversations/" + encodeURIComponent(selectedConversation.id) + "/messages", {
+      const result = await api<ApiCreateMessageResult>("/api/conversations/" + encodeURIComponent(selectedConversation.id) + "/messages", {
         method: "POST",
         body: JSON.stringify({ text, type: "text" }),
       });
+      if (result?.message) settleLocalMessage(selectedConversation.id, newMessage.id, result.message);
     } catch (caught) {
       setConversations((items) =>
         items.map((conversation) =>
@@ -1969,10 +2063,11 @@ function LingoLoopScreens({
       ),
     );
     try {
-      await api("/api/conversations/" + encodeURIComponent(selectedConversation.id) + "/messages", {
+      const result = await api<ApiCreateMessageResult>("/api/conversations/" + encodeURIComponent(selectedConversation.id) + "/messages", {
         method: "POST",
         body: JSON.stringify({ type: kind, media, text: label }),
       });
+      if (result?.message) settleLocalMessage(selectedConversation.id, newMessage.id, result.message);
     } catch (caught) {
       setConversations((items) =>
         items.map((conversation) =>
@@ -2065,7 +2160,11 @@ function LingoLoopScreens({
     }
   };
 
+  /* 게시 버튼을 두 번 누르면 같은 글이 두 번 올라갔습니다. */
+  const publishingPost = useRef(false);
   const publishPost = async (text: string, options: PublishOptions) => {
+    if (publishingPost.current) return;
+    publishingPost.current = true;
     try {
       const saved = await api<ApiPost>("/api/posts", {
         method: "POST",
@@ -2084,10 +2183,13 @@ function LingoLoopScreens({
       setPosts((items) => [post, ...items]);
       setMyPostList((items) => [post, ...items]);
       setModal(null);
-      setSection("community");
+      /* 상세 화면 위에서 글을 썼다면 그 화면도 닫아야 새 글이 보입니다. */
+      goToSection("community");
       showToast(options.requestCorrection ? t("커뮤니티에 게시했어요 · 원어민 교정을 요청했어요") : t("커뮤니티에 게시했어요"));
     } catch (caught) {
       showToast(caught instanceof Error ? caught.message : t("글을 올리지 못했어요."));
+    } finally {
+      publishingPost.current = false;
     }
   };
 
@@ -2270,8 +2372,8 @@ function LingoLoopScreens({
         <div className="sidebar-spacer" />
         <div className="sidebar-profile-row">
           <button className="sidebar-profile" type="button" aria-label={t("내 프로필")} onClick={() => goToSection("learn")}>
-            <Avatar name={profile.name} flag={me.country?.flag ?? "🌐"} accent="violet" size="sm" online photo={me.avatarUrl} avatarMode={me.avatarMode} avatarConfig={me.avatarConfig} countryCode={me.country?.code} />
-            <span><strong>{profile.name}</strong><small>{tx(languageName(me.nativeLanguages?.[0] ?? "ko"))} → {tx(languageName(me.learningLanguages?.[0]?.code ?? "en"))}</small></span>
+            <Avatar name={me.name} flag={me.country?.flag ?? "🌐"} accent="violet" size="sm" online photo={me.avatarUrl} avatarMode={me.avatarMode} avatarConfig={me.avatarConfig} countryCode={me.country?.code} />
+            <span><strong>{me.name}</strong><small>{tx(languageName(me.nativeLanguages?.[0] ?? "ko"))} → {tx(languageName(me.learningLanguages?.[0]?.code ?? "en"))}</small></span>
           </button>
           <MenuPopover
             label={t("내 메뉴")}
@@ -2326,7 +2428,7 @@ function LingoLoopScreens({
 
           {detail?.kind === "profile-edit" ? (
             <div className="topbar-feed">
-              <button type="button" className="topbar-back" onClick={closeDetail} aria-label={t("뒤로")}>
+              <button type="button" className="topbar-back" disabled={profileSaving} onClick={closeDetail} aria-label={t("뒤로")}>
                 <ArrowLeft size={20} />
               </button>
               <span className="topbar-title">{t("프로필 편집")}</span>
@@ -2436,6 +2538,9 @@ function LingoLoopScreens({
                 onCopyLink={copyLink}
                 onTagSelect={(tag) => { setActiveTag(tag); goToSection("community"); }}
                 onToggleLike={() => togglePost(detail.post.id, "liked")}
+                onReplied={(kind) => updatePost(detail.post.id, (item) => (
+                  kind === "correction" ? { ...item, corrections: item.corrections + 1 } : { ...item, comments: item.comments + 1 }
+                ))}
                 onDeletePost={() => deletePost(detail.post)}
                 sort={replySort}
                 onSortChange={setReplySort}
@@ -2444,18 +2549,19 @@ function LingoLoopScreens({
 
             {detail?.kind === "profile-edit" ? (
               <ProfileEditView
-                value={profileEditDraft ?? profile}
-                savedValue={profile}
+                value={profileEditDraft ?? profileDraftFrom(me)}
+                savedValue={profileDraftFrom(me)}
                 me={me}
+                saving={profileSaving}
                 onEditAvatar={openAvatarEditor}
                 onChange={setProfileEditDraft}
-                onSave={(next) => { setProfileEditDraft(null); closeDetail(); void saveProfile(next); }}
+                onSave={(next) => void submitProfile(next)}
               />
             ) : null}
 
             {detail?.kind === "avatar-edit" ? (
               <AvatarEditorView
-                name={profile.name}
+                name={me.name}
                 mode={me.avatarMode}
                 value={me.avatarConfig}
                 photo={me.avatarUrl}
@@ -2617,11 +2723,6 @@ function LingoLoopScreens({
             {!detail && section === "learn" ? (
               <LearnView
                 onVisitHome={setVisitingHome}
-                onSaveRoom={async (config) => {
-                  const updated = await api<ApiProfile>("/api/profile/room", { method: "PATCH", body: JSON.stringify({ config }) });
-                  onProfileUpdated(updated);
-                  showToast(t("방을 저장했어요"));
-                }}
                 counts={followCounts[me.id]}
                 onOpenSettings={() => setSettingsOpen(true)}
                 onStartReview={() => setModal({ type: "review", items: savedItems })}
@@ -2632,8 +2733,6 @@ function LingoLoopScreens({
                 savedItems={savedItems}
                 onSavePhrase={savePhrase}
                 savedCount={savedItems.length}
-                profileName={profile.name}
-                profileBio={profile.bio}
                 me={me}
                 corrections={corrections}
                 onOpenTag={(tag) => { setActiveTag(tag); goToSection("community"); }}
@@ -2735,7 +2834,7 @@ function LingoLoopScreens({
           onJumpPartner={(position) => { setPartnerIndex(position); setModal(null); }}
           onOpenPartnerProfile={(partner) => { setModal(null); openProfile(partner); }}
             onAcceptLike={(partner) => void startChat(partner)}
-          onUpdateGoal={(goal) => void saveProfile({ ...profile, goal })}
+          onUpdateGoal={(goal) => void saveProfile({ ...profileDraftFrom(me), goal })}
         />
       ) : null}
 
@@ -3105,9 +3204,12 @@ function PostDetailView({
   onSortChange,
   onDeletePost,
   onToggleLike,
+  onReplied,
 }: {
   post: FeedPost;
   me: ApiProfile;
+  /** 답글·교정을 남긴 뒤 피드와 상세의 개수를 맞춥니다. */
+  onReplied: (kind: "reply" | "correction") => void;
   onProfile: (authorId: string) => void;
   onReport: () => void;
   onToast: (message: string) => void;
@@ -3138,6 +3240,9 @@ function PostDetailView({
   const [replyKind, setReplyKind] = useState<"reply" | "correction">("reply");
   const [correctionSource, setCorrectionSource] = useState<string | null>(null);
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
+  /* 보내는 중에 Enter·버튼을 또 누르면 같은 답글이 두 번 달렸습니다. */
+  const sendingReply = useRef(false);
+  const [sending, setSending] = useState(false);
   /* 인기순은 좋아요 많은 순, 최신순은 나중에 달린 순(배열 뒤쪽)입니다. */
   const sortedReplies = sort === "popular"
     ? [...replies].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))
@@ -3185,6 +3290,7 @@ function PostDetailView({
   };
 
   const submitReply = () => {
+    if (sendingReply.current) return;
     const checked = checkText(draft, "reply");
     if (!checked.ok) { if (checked.error) onToast(checked.error); return; }
     const text = checked.value;
@@ -3192,6 +3298,8 @@ function PostDetailView({
       onToast(t("원문에서 고친 부분이 없어요"));
       return;
     }
+    sendingReply.current = true;
+    setSending(true);
     void (async () => {
       try {
         const saved = await api<ApiReply>(`/api/posts/${encodeURIComponent(post.id)}/replies`, {
@@ -3213,11 +3321,15 @@ function PostDetailView({
         });
         setDraft("");
         setReplyTo(null);
+        onReplied(replyKind);
         onToast(replyKind === "correction" ? t("교정을 남겼어요") : t("답글을 남겼어요"));
         setReplyKind("reply");
         setCorrectionSource(null);
       } catch (caught) {
         onToast(caught instanceof Error ? caught.message : t("남기지 못했어요."));
+      } finally {
+        sendingReply.current = false;
+        setSending(false);
       }
     })();
   };
@@ -3339,6 +3451,8 @@ function PostDetailView({
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
+            // 한글·일본어 입력 중의 Enter 는 글자를 확정하는 키입니다. 대화 입력창과 같은 규칙입니다.
+            if (event.nativeEvent.isComposing) return;
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               submitReply();
@@ -3370,7 +3484,7 @@ function PostDetailView({
         <button
           type="button"
           className="reply-send"
-          disabled={!draft.trim()}
+          disabled={!draft.trim() || sending}
           onClick={submitReply}
           aria-label={replyKind === "correction" ? t("교정 남기기") : t("답글 남기기")}
           title={replyKind === "correction" ? t("교정 남기기") : t("답글 남기기")}
@@ -3480,7 +3594,7 @@ function ProfileDetailView({
 
       <p className="profile-head-bio">{partner.bio}</p>
 
-      <ProfileRoom name={partner.name} value={partner.roomConfig} avatar={partner.avatarConfig} onVisit={()=>onVisitHome(partner.id)} />
+      <ProfileRoom name={partner.name} onVisit={()=>onVisitHome(partner.id)} />
 
       <div className="profile-head-stats">
         <span><strong>{counts ? counts.posts : posts.length}</strong> {t("게시물")}</span>
@@ -3628,14 +3742,44 @@ function similarPartners(partner: Partner, directory: Partner[], limit = 6): Par
     .map((entry) => entry.person);
 }
 
+/** 서버 프로필에서 편집용 값을 만듭니다. 저장된 값과 비교할 때도 같은 함수를 씁니다. */
+function profileDraftFrom(me: ApiProfile): ProfileDraft {
+  return {
+    name: me.name,
+    bio: me.bio,
+    goal: me.learningLanguages?.[0]?.goal || t("부담 없는 일상 대화"),
+    age: me.age ?? 0,
+    gender: me.gender ?? "unspecified",
+    nativeCode: me.nativeLanguages?.[0] ?? "ko",
+    learningCode: me.learningLanguages?.[0]?.code ?? "en",
+    learningLevel: me.learningLanguages?.[0]?.level ?? "beginner",
+  };
+}
+
+/**
+ * 서버가 거절할 값을 저장 전에 알려줍니다(backend PATCH /api/profile 과 같은 규칙).
+ * 예전에는 그대로 보냈다가 서버의 한국어 오류 문장이 토스트로만 잠깐 떴습니다.
+ */
+function profileDraftErrors(draft: ProfileDraft): Partial<Record<"name" | "age" | "goal" | "learning", string>> {
+  const errors: Partial<Record<"name" | "age" | "goal" | "learning", string>> = {};
+  if (draft.name.trim().length < 2) errors.name = t("이름은 2자 이상 적어 주세요.");
+  if (!Number.isInteger(draft.age) || draft.age < 18 || draft.age > 100) errors.age = t("나이는 18세에서 100세 사이로 적어 주세요.");
+  // 비워두면 기본 목표로 저장합니다. 한 글자만 적으면 서버가 거절합니다.
+  if (draft.goal.trim().length === 1) errors.goal = t("학습 목표는 2자 이상 적어 주세요.");
+  if (!draft.learningCode || draft.learningCode === draft.nativeCode) errors.learning = t("배우는 말을 골라 주세요.");
+  return errors;
+}
+
 /**
  * 프로필 편집 — 지금까지 "프로필을 수정합니다" 토스트만 뜨던 자리입니다.
  * 저장하면 사이드바·프로필 화면에 바로 반영됩니다.
+ * 저장이 끝날 때까지 이 화면에 머물러, 실패해도 적은 내용이 남습니다.
  */
 function ProfileEditView({
   value,
   savedValue,
   me,
+  saving,
   onEditAvatar,
   onChange,
   onSave,
@@ -3643,15 +3787,19 @@ function ProfileEditView({
   value: ProfileDraft;
   savedValue: ProfileDraft;
   me: ApiProfile;
+  saving: boolean;
   onEditAvatar: () => void;
   onChange: (next: ProfileDraft) => void;
   onSave: (next: ProfileDraft) => void;
 }) {
   const draft = value;
   const changed = JSON.stringify(draft) !== JSON.stringify(savedValue);
+  const errors = profileDraftErrors(draft);
+  const valid = Object.keys(errors).length === 0;
 
   return (
     <div className="view detail-view">
+      <fieldset className="profile-edit-fields" disabled={saving}>
       <button className="profile-avatar-edit-row" type="button" onClick={onEditAvatar}>
         <Avatar
           name={draft.name}
@@ -3671,8 +3819,11 @@ function ProfileEditView({
           className="text-input"
           value={draft.name}
           maxLength={LIMITS.profileName}
+          aria-invalid={Boolean(errors.name)}
+          aria-describedby={errors.name ? "profile-name-error" : undefined}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
         />
+        {errors.name ? <small className="field-error" id="profile-name-error">{errors.name}</small> : null}
       </div>
       <div className="form-section">
         <label className="field-label" htmlFor="profile-bio">{t("자기소개")}</label>
@@ -3696,9 +3847,13 @@ function ProfileEditView({
           max={100}
           value={draft.age || ""}
           placeholder={t("숫자만")}
+          aria-invalid={Boolean(errors.age)}
+          aria-describedby={errors.age ? "profile-age-error" : undefined}
           onChange={(event) => onChange({ ...draft, age: Number(event.target.value) || 0 })}
         />
-        <small className="field-hint">{t("만 18세부터 쓸 수 있어요.")}</small>
+        {errors.age
+          ? <small className="field-error" id="profile-age-error">{errors.age}</small>
+          : <small className="field-hint">{t("만 18세부터 쓸 수 있어요.")}</small>}
       </div>
 
       <div className="form-section">
@@ -3727,7 +3882,13 @@ function ProfileEditView({
               key={option.code}
               className={draft.nativeCode === option.code ? "chip active" : "chip"}
               aria-pressed={draft.nativeCode === option.code}
-              onClick={() => onChange({ ...draft, nativeCode: option.code })}
+              onClick={() => onChange({
+                ...draft,
+                nativeCode: option.code,
+                /* 배우는 말과 같은 말을 고르면 둘을 맞바꿉니다. 예전에는 배우는 말 목록에서
+                   그 말이 사라질 뿐 값은 남아, "영어를 가르치고 영어를 배우는" 프로필이 저장됐습니다. */
+                learningCode: draft.learningCode === option.code ? draft.nativeCode : draft.learningCode,
+              })}
             >
               {tx(option.label)}
             </button>
@@ -3750,6 +3911,7 @@ function ProfileEditView({
             </button>
           ))}
         </div>
+        {errors.learning ? <small className="field-error">{errors.learning}</small> : null}
       </div>
 
       <div className="form-section">
@@ -3779,31 +3941,16 @@ function ProfileEditView({
           className="text-input"
           value={draft.goal}
           maxLength={LIMITS.profileGoal}
+          aria-invalid={Boolean(errors.goal)}
+          aria-describedby={errors.goal ? "profile-goal-error" : undefined}
           onChange={(event) => onChange({ ...draft, goal: event.target.value })}
         />
+        {errors.goal ? <small className="field-error" id="profile-goal-error">{errors.goal}</small> : null}
       </div>
-      <div className="form-section">
-        <span className="field-label">{t("프로필 공개 범위")}</span>
-        <div className="choice-row">
-          <button
-            type="button"
-            className={draft.visibility === "public" ? "active" : ""}
-            onClick={() => onChange({ ...draft, visibility: "public" })}
-          >
-            {t("전체 공개")}
-          </button>
-          <button
-            type="button"
-            className={draft.visibility === "partners" ? "active" : ""}
-            onClick={() => onChange({ ...draft, visibility: "partners" })}
-          >
-            {t("매칭된 파트너만")}
-          </button>
-        </div>
-      </div>
+      </fieldset>
       <div className="modal-footer">
-        <button className="primary-button" type="button" disabled={!changed} onClick={() => onSave(draft)}>
-          {t("저장")}
+        <button className="primary-button" type="button" disabled={saving || !changed || !valid} onClick={() => onSave(draft)}>
+          {saving ? t("저장 중…") : t("저장")}
         </button>
       </div>
     </div>
@@ -4273,6 +4420,9 @@ function PostCard({
   /** 지금 고른 주제. 프로필처럼 주제 거르기가 없는 화면에서는 넘기지 않습니다. */
   activeTag?: string | null;
 }) {
+  /* 저장 여부는 복습함(savedItems) 하나만 봅니다. 예전에는 글의 saved 값을 따로 뒤집어서,
+     ··· 메뉴로 저장한 글의 책갈피가 비어 보이거나 반대로 칠해졌습니다. */
+  const saved = savedItems.some((item) => item.id === post.id);
   return (
         <article className="feed-post">
           <header className="post-header">
@@ -4343,7 +4493,7 @@ function PostCard({
             <button className={corrections.has(post.id) ? "active correct" : ""} type="button" aria-label={t("교정")} title={t("교정")} onClick={() => (post.correction ? onCorrection(post.id) : onOpen(post))}><PenLine size={18} /> {post.corrections}</button>
             <button className={translated.has(post.id) ? "active" : ""} type="button" aria-label={t("번역")} title={t("번역")} onClick={() => onTranslate(post)}><Languages size={18} /></button>
             <button type="button" aria-label={t("공유")} title={t("공유")} onClick={() => void onShare(post)}><Share2 size={18} /></button>
-            <button className={post.saved ? "active save" : "post-save"} type="button" aria-label={t("저장")} title={t("저장")} onClick={() => onToggle(post.id, "saved")}><Bookmark size={18} fill={post.saved ? "currentColor" : "none"} /></button>
+            <button className={saved ? "active save" : "post-save"} type="button" aria-label={t("저장")} aria-pressed={saved} title={t("저장")} onClick={() => onToggle(post.id, "saved")}><Bookmark size={18} fill={saved ? "currentColor" : "none"} /></button>
           </footer>
       </article>
   );
@@ -4418,7 +4568,8 @@ function CommunityView({
   const visiblePosts = posts.filter((post) => {
     // 숨기거나 차단한 사람의 글은 피드에서 빠집니다 — 그래야 눌린 게 보입니다.
     if (hiddenAuthorIds.has(post.authorId) || blockedAuthorIds.has(post.authorId)) return false;
-    if (activeTag) return post.tags.includes(activeTag);
+    // 주제는 다른 조건과 함께 겁니다. 예전에는 주제를 고르면 팔로잉 탭·언어 거르기가 무시됐습니다.
+    if (activeTag && !post.tags.includes(activeTag)) return false;
     if (filters.nativeCode && post.nativeCode !== filters.nativeCode) return false;
     if (filters.learningCode && post.learningCode !== filters.learningCode) return false;
     if (tab === "following") return followingIds.includes(post.authorId);
@@ -4596,6 +4747,17 @@ function ChatsView({
   const [recording, setRecording] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  /* 녹음 중에 다른 화면으로 가면 마이크를 끄고 녹음은 보내지 않습니다.
+     예전에는 화면을 떠나도 마이크가 계속 켜져 있었습니다. */
+  const discardRecording = useRef(false);
+  useEffect(() => {
+    discardRecording.current = false;
+    const recorders = recorderRef;
+    return () => {
+      discardRecording.current = true;
+      if (recorders.current?.state === "recording") recorders.current.stop();
+    };
+  }, []);
 
   /**
    * 사진 보내기.
@@ -4625,17 +4787,24 @@ function ChatsView({
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 권한을 묻는 사이 화면을 떠났다면 녹음을 시작하지 않습니다.
+      if (discardRecording.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       const recorder = new MediaRecorder(stream);
       const chunks: BlobPart[] = [];
       recorder.ondataavailable = (event) => chunks.push(event.data);
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
         recorderRef.current = null;
+        if (discardRecording.current) return;
         setRecording(false);
         const reader = new FileReader();
         reader.onload = () => {
           const media = String(reader.result || "");
-          if (media.length > 700000) return onToast(t("녹음이 너무 길어요. 30초 안쪽으로 다시 녹음해 주세요."));
+          // 서버가 받는 첨부 크기와 같은 한도입니다. 더 크면 보내 봐야 서버가 거절합니다.
+          if (media.length > MAX_ATTACHMENT) return onToast(t("녹음이 너무 길어요. 30초 안쪽으로 다시 녹음해 주세요."));
           void onSendAttachment("voice", media, t("음성 메시지"));
         };
         reader.readAsDataURL(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
@@ -5306,7 +5475,6 @@ function SettingsModal({
 
 function LearnView({
   onVisitHome,
-  onSaveRoom,
   counts,
   onToast,
   onEditProfile,
@@ -5317,8 +5485,6 @@ function LearnView({
   onOpenSettings,
   onStartReview,
   savedCount,
-  profileName,
-  profileBio,
   me,
   myPostList,
   card,
@@ -5328,7 +5494,6 @@ function LearnView({
   /** 팔로잉·팔로워 수. 못 받아왔으면 숫자를 감춥니다. */
   counts?: { following: number; followers: number; posts: number };
   onEditProfile: () => void;
-  onSaveRoom: (room: RoomConfig) => Promise<void>;
   onVisitHome:(id:string)=>void;
   onEditAvatar: () => void;
   savedItems: SavedPhrase[];
@@ -5337,8 +5502,6 @@ function LearnView({
   onOpenSettings: () => void;
   onStartReview: () => void;
   savedCount: number;
-  profileName: string;
-  profileBio: string;
   onToast: (message: string) => void;
   onOpenTag: (tag: string) => void;
   onToggleLike: (id: string) => void;
@@ -5355,13 +5518,15 @@ function LearnView({
   const [profileTab, setProfileTab] = useState("posts");
   const [showAllSaved, setShowAllSaved] = useState(false);
 
+  /* 상대 프로필(ProfileDetailView)과 같은 순서입니다 — 누구인지가 먼저, 집은 그다음.
+     예전에는 마이룸과 친구 집 목록이 맨 위에 있어 내 이름·편집 버튼이 한참 아래로 밀렸습니다.
+     친구 집 목록은 탭으로 옮겨, 열 때만 불러옵니다. */
   return (
     <div className="view learn-view compact-learn">
-      <ProfileRoom name={profileName} value={me.roomConfig} avatar={me.avatarConfig} onSave={onSaveRoom} onVisit={()=>onVisitHome(me.id)} />
-      <HomeDirectory onVisit={onVisitHome}/>
       <header className="profile-head">
         <div className="profile-head-id">
-          <span className="profile-head-name">{profileName}<AgeGender age={me.age} gender={me.gender} /><BadgeCheck size={18} className="verified" /></span>
+          {/* 인증 배지는 서버가 인증했다고 알려준 사람에게만 붙입니다. */}
+          <span className="profile-head-name">{me.name}<AgeGender age={me.age} gender={me.gender} />{me.verified ? <BadgeCheck size={18} className="verified" /> : null}</span>
           <p className="profile-head-handle">{me.handle}</p>
           <LanguageExchange
             native={me.nativeLanguages?.[0]}
@@ -5371,7 +5536,7 @@ function LearnView({
         </div>
         <button className="profile-avatar-button" type="button" onClick={onEditAvatar} aria-label={t("캐릭터 꾸미기")}>
           <Avatar
-            name={profileName}
+            name={me.name}
             flag={me.country?.flag ?? "🌐"}
             accent="violet"
             size="xl"
@@ -5385,7 +5550,9 @@ function LearnView({
         </button>
       </header>
 
-      <p className="profile-head-bio">{profileBio}</p>
+      <p className="profile-head-bio">{me.bio}</p>
+
+      <ProfileRoom name={me.name} own onVisit={() => onVisitHome(me.id)} />
 
       <div className="profile-head-stats">
         {/* 연속 일수 같은 것은 서버가 아직 세지 않습니다. 지어낸 숫자를 보여주면
@@ -5404,10 +5571,13 @@ function LearnView({
         tabs={[
           { id: "posts", label: t("내 글") },
           { id: "learning", label: t("학습") },
+          { id: "homes", label: t("친구 집") },
         ]}
         active={profileTab}
         onSelect={setProfileTab}
       />
+
+      {profileTab === "homes" ? <HomeDirectory onVisit={onVisitHome} /> : null}
 
       {profileTab === "posts" && myPostList.length === 0 ? (
         <div className="empty-state">
@@ -5618,7 +5788,7 @@ function ModalLayer({
   onClose: () => void;
   onStartChat: (partner: Partner) => void;
   onOpenProfile: (partner: Partner) => void;
-  onPublish: (text: string, options: PublishOptions) => void;
+  onPublish: (text: string, options: PublishOptions) => Promise<void>;
   onCreateRoom: (details: { title: string; topic: string; language: string; level: string }) => void;
   onReport: (target: string, options?: ReportOptions) => void;
   mutedRoomIds: Set<string>;
@@ -6260,9 +6430,13 @@ function MatchingPreferencesModal({
     ? t(LEVEL_LABELS[preferences.levelMin])
     : `${t(LEVEL_LABELS[preferences.levelMin])} – ${t(LEVEL_LABELS[preferences.levelMax])}`;
 
+  /* 서버는 선호 지역을 8곳까지 받습니다. 넘기면 저장이 422 로 거절됐습니다. */
+  const countriesFull = preferences.preferredCountries.length >= MAX_PREFERRED_COUNTRIES;
   const toggleCountry = (country: string) => setPreferences((current) => ({
     ...current,
-    preferredCountries: current.preferredCountries.includes(country) ? current.preferredCountries.filter((item) => item !== country) : [...current.preferredCountries, country],
+    preferredCountries: current.preferredCountries.includes(country)
+      ? current.preferredCountries.filter((item) => item !== country)
+      : current.preferredCountries.length >= MAX_PREFERRED_COUNTRIES ? current.preferredCountries : [...current.preferredCountries, country],
   }));
   const toggleInterest = (interest: string) => setPreferences((current) => ({
     ...current,
@@ -6358,7 +6532,7 @@ function MatchingPreferencesModal({
           </span>
           <RangeSlider
             min={18}
-            max={80}
+            max={100}
             low={preferences.ageMin}
             high={preferences.ageMax}
             lowLabel={tx(msg("파트너 최소 나이"))}
@@ -6385,7 +6559,7 @@ function MatchingPreferencesModal({
         </div>
 
         <div className="form-section">
-          <span className="field-label">{t("선호 지역")}</span>
+          <span className="field-label">{t("선호 지역")}{countriesFull ? <small>{t("최대")} {t("{n}개", { n: MAX_PREFERRED_COUNTRIES })}</small> : null}</span>
           <div className="chip-row" role="group" aria-label={t("선호 지역")}>
             {Object.entries(countryLabels).map(([country, label]) => (
               <button
@@ -6393,6 +6567,7 @@ function MatchingPreferencesModal({
                 key={country}
                 className={preferences.preferredCountries.includes(country) ? "chip active" : "chip"}
                 aria-pressed={preferences.preferredCountries.includes(country)}
+                disabled={countriesFull && !preferences.preferredCountries.includes(country)}
                 onClick={() => toggleCountry(country)}
               >
                 <CountryFlag code={country} size={16} />{t(label)}
@@ -6586,26 +6761,39 @@ async function shrinkImage(file: File): Promise<string> {
   return smallest;
 }
 
-/** 브라우저 녹음기. 멈추면 데이터 URI 를 돌려줍니다. */
+/**
+ * 브라우저 녹음기. 멈추면 데이터 URI 를 돌려줍니다.
+ * 돌려준 함수에 true 를 넘기면(창을 닫을 때) 마이크만 끄고 결과는 버립니다.
+ * 권한을 묻는 중에 멈춰도 마이크가 뒤늦게 켜진 채 남지 않습니다.
+ */
 function startRecorder(onDone: (media: string) => void, onFail: () => void) {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) { onFail(); return null; }
   let recorder: MediaRecorder | null = null;
+  let discarded = false;
   void navigator.mediaDevices
     .getUserMedia({ audio: true })
     .then((stream) => {
+      if (discarded) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       recorder = new MediaRecorder(stream);
       const chunks: BlobPart[] = [];
       recorder.ondataavailable = (event) => chunks.push(event.data);
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
+        if (discarded) return;
         const reader = new FileReader();
         reader.onload = () => onDone(String(reader.result || ""));
         reader.readAsDataURL(new Blob(chunks, { type: recorder?.mimeType || "audio/webm" }));
       };
       recorder.start();
     })
-    .catch(onFail);
-  return () => recorder?.stop();
+    .catch(() => { if (!discarded) onFail(); });
+  return (discard = false) => {
+    if (discard || !recorder) discarded = true;
+    if (recorder?.state === "recording") recorder.stop();
+  };
 }
 
 /** 글에 달 수 있는 주제. 서버의 tags 로 그대로 갑니다. */
@@ -6620,8 +6808,9 @@ const POST_TOPICS: MessageKey[] = [
   msg("음악"),
 ];
 
-function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, options: PublishOptions) => void; onToast: (message: string) => void }) {
+function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, options: PublishOptions) => Promise<void>; onToast: (message: string) => void }) {
   const [text, setText] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const [correction, setCorrection] = useState(true);
   const [visibility, setVisibility] = useState<PublishOptions["visibility"]>("public");
   const [topics, setTopics] = useState<string[]>([]);
@@ -6630,7 +6819,12 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
   const [audio, setAudio] = useState("");
   const [recording, setRecording] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
-  const stopRef = useRef<(() => void) | null>(null);
+  const stopRef = useRef<((discard?: boolean) => void) | null>(null);
+  // 녹음 중에 글쓰기 창을 닫으면 마이크를 끕니다.
+  useEffect(() => {
+    const recorder = stopRef;
+    return () => recorder.current?.(true);
+  }, []);
 
   const pickPhoto = async (file: File) => {
     try {
@@ -6738,7 +6932,7 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
 
       <div className="modal-footer">
         <span className="safety-note"><ShieldCheck size={14} /> {t("연락처와 정밀 위치는 공유하지 마세요.")}</span>
-        <button className="primary-button" type="button" disabled={!canSubmit(text, "post")} onClick={() => { const checked = checkText(text, "post"); if (!checked.ok) { if (checked.error) onToast(checked.error); return; } onPublish(checked.value, { requestCorrection: correction, visibility, tags: topics, image, audio }); }}>{t("게시하기")} <Send size={16} /></button>
+        <button className="primary-button" type="button" disabled={publishing || !canSubmit(text, "post")} onClick={() => { const checked = checkText(text, "post"); if (!checked.ok) { if (checked.error) onToast(checked.error); return; } setPublishing(true); void onPublish(checked.value, { requestCorrection: correction, visibility, tags: topics, image, audio }).finally(() => setPublishing(false)); }}>{t("게시하기")} <Send size={16} /></button>
       </div>
     </div>
   );

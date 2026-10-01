@@ -51,6 +51,30 @@ test("already advanced or empty snapshots do not rewrite conversation state", ()
   assert.equal(buildConversationReadPatch({ unread: { me: 2 } }, [], "me"), null);
 });
 
+test("pending request recipients clear unread without leaving a read receipt for the sender", () => {
+  const request = {
+    requestStatus: "pending",
+    requestSenderId: "partner",
+    requestRecipientId: "me",
+    lastMessageAt: messages[0].sentAt,
+    unread: { me: 1 },
+  };
+
+  // 받은 사람이 요청을 열어 봐도 readAt은 남지 않고 안읽음만 정리됩니다.
+  assert.deepEqual(buildConversationReadPatch(request, [messages[0]], "me"), { unread: { me: 0 } });
+  assert.equal(buildConversationReadPatch({ ...request, unread: { me: 0 } }, [messages[0]], "me"), null);
+
+  // 보낸 사람 자신과, 수락된 뒤의 받은 사람은 기존처럼 읽음 시각을 남깁니다.
+  assert.deepEqual(buildConversationReadPatch({ ...request, unread: {} }, [messages[0]], "partner"), {
+    readAt: { partner: messages[0].sentAt },
+    unread: { partner: 0 },
+  });
+  assert.deepEqual(
+    buildConversationReadPatch({ ...request, requestStatus: "accepted", requestRecipientId: null }, [messages[0]], "me"),
+    { readAt: { me: messages[0].sentAt }, unread: { me: 0 } },
+  );
+});
+
 test("conversation visibility is scoped to the current member and tolerates legacy documents", () => {
   assert.equal(isConversationHidden({ hiddenBy: ["me"] }, "me"), true);
   assert.equal(isConversationHidden({ hiddenBy: ["partner"] }, "me"), false);

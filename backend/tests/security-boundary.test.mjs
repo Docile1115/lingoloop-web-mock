@@ -166,3 +166,74 @@ test("blocking commits first and drains notifications in bounded pages", async (
   assert.match(blockRoute, /created = await db\.runTransaction[\s\S]*await cleanupBlockedPair/);
   assert.match(source, /BLOCK_CLEANUP_PENDING/);
 });
+
+test("conversation support checks partner status and blocks before spending AI quota", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const route = source.slice(source.indexOf('app.post("/api/conversation-support"'), source.indexOf("app.use((req, _res, next)"));
+
+  const activeCheck = route.search(/partnerSnapshot\.data\(\)\?\.accountStatus !== "active"/);
+  const blockCheck = route.search(/isBlockedBetween\(req\.auth\.uid, partnerId\)[\s\S]*?PARTNER_NOT_FOUND/);
+  const aiCall = route.indexOf("geminiResponse(");
+  assert.ok(activeCheck >= 0 && blockCheck >= 0 && aiCall >= 0);
+  assert.ok(activeCheck < aiCall && blockCheck < aiCall, "partner checks must run before the Gemini call and quota use");
+});
+
+test("profiles shown to others hide legacy cities and last activity", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const helper = source.slice(source.indexOf("function profileForOthers"), source.indexOf("function defaultProfile"));
+
+  assert.match(helper, /delete rest\.lastActiveAt/);
+  assert.match(helper, /hideLocation === false \? rest : \{ \.\.\.rest, city: "" \}/);
+});
+
+test("new profiles never derive their public name or handle from the email address", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const helper = source.slice(source.indexOf("function defaultProfile"), source.indexOf("async function ensureProfile"));
+
+  assert.doesNotMatch(helper, /email\.split|email\)?\s*\.\s*(slice|replace|split)/);
+  assert.match(helper, /providedName\.length >= 2/);
+  assert.match(helper, /hasName \? providedName : "TimoTalk 사용자"/);
+  assert.match(helper, /\(hasName \? providedName : ""\)[\s\S]*\|\| "learner"/);
+});
+
+test("profile PATCH writes only requested fields and validates languages and photos", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const route = source.slice(source.indexOf('app.patch("/api/profile",'), source.indexOf('app.get("/api/partners"'));
+  const avatarRule = source.slice(source.indexOf("const AVATAR_DATA_URL"), source.indexOf("function preferenceVersion"));
+
+  // 읽어 둔 스냅샷 값으로 빠진 필드를 채워 쓰지 않습니다.
+  assert.match(route, /const patch = \{\};/);
+  assert.doesNotMatch(route, /=== undefined \? current\./);
+  assert.match(route, /const merged = \{ \.\.\.current, \.\.\.patch \}/);
+  assert.match(route, /!merged\.nativeLanguages\?\.length \|\| !merged\.learningLanguages\?\.length/);
+  assert.match(route, /supportedLanguageCode\(code, "nativeLanguages"\)/);
+  assert.match(route, /"learningLanguages\.code",\s*\)/);
+  assert.match(route, /seen\.has\(item\.code\)/);
+  assert.match(route, /item\.goal\.trim\(\)[\s\S]*goal \|\| "일상 대화"/);
+  assert.match(route, /patch\.avatarUrl = avatarUrlFrom\(body\.avatarUrl\)/);
+  assert.ok(avatarRule.includes("^data:image\\/(?:jpeg|png|webp);base64,"), "only raster image data URIs are accepted");
+  assert.doesNotMatch(avatarRule, /https?|svg/);
+  assert.match(source, /const LANGUAGE_CODES = new Set\(LANGUAGES\.map/);
+});
+
+test("post author cards overlay the author's current identity everywhere posts are read", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const helper = source.slice(source.indexOf("function postAuthorView"), source.indexOf('app.get("/api/posts"'));
+  assert.match(helper, /name: author\.name, handle: author\.handle, flag: author\.country\?\.flag/);
+
+  const routes = [
+    source.slice(source.indexOf('app.get("/api/posts"'), source.indexOf('app.post("/api/posts"')),
+    source.slice(source.indexOf('app.get("/api/posts/:postId"'), source.indexOf('app.get("/api/posts/:postId/replies"')),
+    source.slice(source.indexOf('app.get("/api/search"'), source.indexOf('app.post("/api/translate"')),
+  ];
+  for (const route of routes) assert.match(route, /author: postAuthorView\(post, /);
+});
+
+test("pending message requests never expose the recipient's read receipt", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const route = source.slice(
+    source.indexOf('app.get("/api/conversations/:conversationId/messages"'),
+    source.indexOf("async function createMessage"),
+  );
+  assert.match(route, /partnerId && conversationStatus\(conversation\) === "accepted" \? conversation\.readAt\?\.\[partnerId\]/);
+});

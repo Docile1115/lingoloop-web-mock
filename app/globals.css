@@ -6542,6 +6542,9 @@ label > svg { flex: none; }
 }
 .text-input:focus-visible { border-color: var(--primary); }
 .field-hint { display: block; margin-top: var(--sp-1); color: var(--subtle); font-size: 12px; text-align: right; }
+.field-error { display: block; margin-top: var(--sp-1); color: var(--danger); font-size: 12px; }
+/* 저장하는 동안 입력을 잠그는 묶음. 겉모양은 바꾸지 않습니다. */
+.profile-edit-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
 
 /* 새 대화 — 아직 대화가 없는 파트너 고르기 */
 .new-chat-content { display: flex; max-height: min(560px, 78vh); flex-direction: column; }

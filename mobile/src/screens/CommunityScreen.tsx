@@ -12,7 +12,7 @@ import { toFeedPost, type ApiPost } from "@shared/live-data";
 import type { FeedPost } from "@shared/demo-data";
 import { post as apiPost } from "../lib/api";
 import { t, tx } from "../lib/i18n";
-import { useApi } from "../lib/useApi";
+import { useApi, useReloadOnFocus } from "../lib/useApi";
 import { useSession } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
 import { space, type } from "../lib/theme";
@@ -32,9 +32,11 @@ export function CommunityScreen({
   const [tab, setTab] = useState<FeedTab>("latest");
 
   const posts = useApi<FeedPost[]>("/api/posts", [], (raw: ApiPost[]) => raw.map(toFeedPost));
-  const follows = useApi<string[]>("/api/follows", [], (raw: { following?: Array<{ id: string }> }) =>
-    (raw.following ?? []).map((row) => row.id),
-  );
+  // 서버는 팔로우한 사람의 id 배열을 그대로 줍니다.
+  const follows = useApi<string[]>("/api/follows", [], (raw: string[]) => raw ?? []);
+
+  /* 글쓰기·프로필에서 돌아오면 새 글과 팔로우 변경을 바로 보여줍니다. */
+  useReloadOnFocus(() => { posts.reload(); follows.reload(); });
 
   /* 캐릭터 저장 뒤 탭이 그대로 마운트돼 있어도 내 기존 글의 아바타를 즉시 맞춥니다. */
   useEffect(() => {
