@@ -168,7 +168,7 @@ class ApiError extends Error {
 }
 
 /* .doc() 에 들어가는 경로 값·본문 값은 모두 docId 로 확인합니다(validate.mjs). */
-const { docId, optionalDocId, mediaDataUri } = createValidators(ApiError);
+const { docId, optionalDocId, mediaDataUri, isoTimestamp } = createValidators(ApiError);
 
 function nowIso() {
   return new Date().toISOString();
@@ -875,10 +875,15 @@ async function unreadNotificationCount(uid) {
   return snapshot.docs.filter((document) => !blocked.has(document.data().actorId)).length;
 }
 
-async function conversationView(conversation, uid, includeMessages = false) {
+async function conversationView(conversation, uid, includeMessages = false, prefetchedProfiles = null) {
   const partnerId = conversation.memberIds.find((id) => id !== uid);
-  const partnerSnapshot = partnerId ? await db.collection("profiles").doc(partnerId).get() : null;
-  const partner = partnerSnapshot?.exists ? profileForOthers(partnerSnapshot.data()) : null;
+  // 목록은 상대 프로필을 한 번에 읽어(profilesByIds) 넘깁니다. 대화 하나를 볼 때만 여기서 읽습니다.
+  const partnerProfile = prefetchedProfiles
+    ? prefetchedProfiles.get(partnerId)
+    : partnerId
+      ? (await db.collection("profiles").doc(partnerId).get()).data()
+      : undefined;
+  const partner = partnerProfile ? profileForOthers(partnerProfile) : null;
   let messages;
   if (includeMessages) {
     const snapshot = await db
@@ -2267,7 +2272,13 @@ app.get("/api/conversations", requireUser, async (req, res) => {
       return status === "accepted" || (status === "pending" && conversation.requestSenderId === req.auth.uid);
     })
     .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
-  const views = await Promise.all(conversations.map((conversation) => conversationView(conversation, req.auth.uid, false)));
+  // 상대 프로필은 대화마다 따로 읽지 않고 한 번에(db.getAll) 읽습니다.
+  const partnerProfiles = await profilesByIds(
+    conversations.map((conversation) => (conversation.memberIds || []).find((memberId) => memberId !== req.auth.uid)),
+  );
+  const views = await Promise.all(
+    conversations.map((conversation) => conversationView(conversation, req.auth.uid, false, partnerProfiles)),
+  );
   return success(res, req, views, 200, { pagination: { total: views.length, nextCursor: null } });
 });
 
@@ -2415,6 +2426,9 @@ app.patch("/api/conversations/:conversationId/mute", requireUser, async (req, re
 
 app.get("/api/conversations/:conversationId/messages", requireUser, async (req, res) => {
   const id = docId(req.params.conversationId, "conversationId");
+  /* 폴링은 ?after=<마지막으로 받은 sentAt> 을 붙여 그 뒤의 메시지만 받습니다(오래된 것부터 200개).
+     없으면 예전처럼 최근 200개입니다. 권한 확인과 읽음 처리, 응답 모양은 같습니다. */
+  const after = req.query.after === undefined ? null : isoTimestamp(req.query.after, "after");
   const conversationReference = db.collection("conversations").doc(id);
   /* 큰 media payload를 transaction에 넣지 않습니다. 먼저 권한을 빠르게 확인한 뒤
      메시지와 당시의 알림 event identity를 일반 조회로 고정합니다. */
@@ -2430,7 +2444,10 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
     throw new ApiError(403, "CONVERSATION_BLOCKED", "차단된 상대와는 대화할 수 없습니다.");
   }
 
-  const messagesQuery = conversationReference.collection("messages").orderBy("sentAt", "desc").limit(200);
+  const messagesCollection = conversationReference.collection("messages");
+  const messagesQuery = after
+    ? messagesCollection.where("sentAt", ">", after).orderBy("sentAt", "asc").limit(200)
+    : messagesCollection.orderBy("sentAt", "desc").limit(200);
   const notificationsQuery = notificationItems(req.auth.uid)
     .where("conversationId", "==", id)
     .where("readAt", "==", null)
@@ -2439,7 +2456,8 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
     messagesQuery.get(),
     notificationsQuery.get(),
   ]);
-  const messages = messageSnapshot.docs.map((document) => document.data()).reverse();
+  const rows = messageSnapshot.docs.map((document) => document.data());
+  const messages = after ? rows : rows.reverse();
   const latestMessageAt = messages.length ? String(messages[messages.length - 1].sentAt || "") : "";
   const visibleMessageIds = new Set(messages.map((message) => message.id).filter(Boolean));
   const notificationCandidates = notificationSnapshot.docs

@@ -317,6 +317,23 @@ test("post and message attachments accept only device-made data URIs", async () 
   assert.doesNotMatch(source, /optionalString\(req\.body\?\.(?:imageUrl|audioUrl|media)\b/);
 });
 
+test("message polling can ask only for newer messages and the conversation list batches profile reads", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const messagesRoute = source.slice(
+    source.indexOf('app.get("/api/conversations/:conversationId/messages"'),
+    source.indexOf("async function createMessage"),
+  );
+  const listRoute = source.slice(source.indexOf('app.get("/api/conversations"'), source.indexOf('app.post("/api/conversations/:conversationId/accept"'));
+  const view = source.slice(source.indexOf("async function conversationView"), source.indexOf("async function consumeDailyQuota"));
+
+  // 잘못된 커서는 읽기 전에 거절하고, 같은 권한 확인을 거칩니다.
+  assert.match(messagesRoute, /isoTimestamp\(req\.query\.after, "after"\)[\s\S]*conversationReference\.get\(\)[\s\S]*isBlockedBetween/);
+  assert.match(messagesRoute, /where\("sentAt", ">", after\)\.orderBy\("sentAt", "asc"\)\.limit\(200\)/);
+  assert.match(messagesRoute, /orderBy\("sentAt", "desc"\)\.limit\(200\)/);
+  assert.match(listRoute, /profilesByIds\([\s\S]*conversationView\(conversation, req\.auth\.uid, false, partnerProfiles\)/);
+  assert.match(view, /prefetchedProfiles\s*\?\s*prefetchedProfiles\.get\(partnerId\)/);
+});
+
 test("pending message requests never expose the recipient's read receipt", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const route = source.slice(

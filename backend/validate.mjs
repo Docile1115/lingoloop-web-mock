@@ -51,6 +51,23 @@ export function isMediaDataUri(value, kind) {
   return Boolean(pattern) && typeof value === "string" && value.length <= MEDIA_MAX_LENGTH && pattern.test(value);
 }
 
+/**
+ * 메시지 폴링의 ?after= 값. 서버가 저장하는 sentAt(toISOString) 과 같은 꼴만 받습니다.
+ * sentAt 은 문자열로 비교하므로 밀리초 자릿수가 다른 값("…:56Z")은 저장 형식("…:56.000Z")으로
+ * 맞춥니다 — 그대로 비교하면 같은 초의 메시지를 건너뜁니다. 쿼리 문자열의 "+" 는 공백으로
+ * 풀리므로 시간대 오프셋(+09:00)은 받지 않습니다.
+ */
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+
+export function normalizedIsoTimestamp(value) {
+  if (typeof value !== "string" || !ISO_TIMESTAMP.test(value)) return null;
+  const millis = Date.parse(value);
+  if (!Number.isFinite(millis)) return null;
+  const normalized = new Date(millis).toISOString();
+  // 2026-02-30 처럼 달력에 없는 날짜는 다른 날로 넘어가므로 받지 않습니다.
+  return normalized.slice(0, 19) === value.slice(0, 19) ? normalized : null;
+}
+
 /** server.mjs 의 ApiError 로 422 를 만드는 검증 함수들입니다. */
 export function createValidators(ApiError) {
   const invalid = (field, message) => new ApiError(422, "VALIDATION_ERROR", message || field + " 형식을 확인해 주세요.", { field });
@@ -85,6 +102,13 @@ export function createValidators(ApiError) {
         throw invalid(field, kind === "image" ? "사진 형식을 확인해 주세요." : "음성 형식을 확인해 주세요.");
       }
       return media;
+    },
+
+    /** ISO 시각(…Z). 저장 형식(toISOString)으로 맞춰 돌려줍니다. */
+    isoTimestamp(value, field) {
+      const normalized = normalizedIsoTimestamp(value);
+      if (!normalized) throw invalid(field, field + " 필드는 ISO 시각(예: 2026-01-31T09:00:00.000Z)이어야 합니다.");
+      return normalized;
     },
   };
 }

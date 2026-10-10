@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
-import { createValidators, isDocumentId, isMediaDataUri, MEDIA_MAX_LENGTH } from "../validate.mjs";
+import { createValidators, isDocumentId, isMediaDataUri, MEDIA_MAX_LENGTH, normalizedIsoTimestamp } from "../validate.mjs";
 
 class TestApiError extends Error {
   constructor(status, code, message, details) {
@@ -148,6 +148,35 @@ test("media rejects remote URLs, scriptable types and malformed payloads", () =>
   const prefix = "data:image/png;base64,";
   assert.equal(isMediaDataUri(prefix + "A".repeat(MEDIA_MAX_LENGTH - prefix.length), "image"), true);
   assert.equal(isMediaDataUri(prefix + "A".repeat(MEDIA_MAX_LENGTH - prefix.length + 1), "image"), false);
+});
+
+test("message polling cursors accept stored sentAt values and normalize precision", () => {
+  const stored = new Date(Date.UTC(2026, 9, 10, 12, 34, 56, 789)).toISOString();
+  assert.equal(normalizedIsoTimestamp(stored), stored);
+  // 그대로 문자열 비교하면 "…:56Z" > "…:56.789Z" 라서 같은 초의 메시지를 건너뜁니다.
+  assert.equal(normalizedIsoTimestamp("2026-10-10T12:34:56Z"), "2026-10-10T12:34:56.000Z");
+  assert.equal(normalizedIsoTimestamp("2026-10-10T12:34:56.7Z"), "2026-10-10T12:34:56.700Z");
+  for (const value of [
+    "2026-10-10T12:34:56+09:00",
+    "2026-10-10T12:34:56 09:00",
+    "2026-10-10 12:34:56Z",
+    "2026-10-10",
+    "2026-02-30T00:00:00Z",
+    "2026-10-10T24:00:00Z",
+    "2026-10-10T12:34:56.7890Z",
+    " 2026-10-10T12:34:56Z",
+    "1791635696789",
+    "",
+    undefined,
+    null,
+    1791635696789,
+    ["2026-10-10T12:34:56Z"],
+  ]) {
+    assert.equal(normalizedIsoTimestamp(value), null, JSON.stringify(value));
+  }
+  const { isoTimestamp } = createValidators(TestApiError);
+  assert.equal(isoTimestamp("2026-10-10T12:34:56Z", "after"), "2026-10-10T12:34:56.000Z");
+  assert.throws(() => isoTimestamp("yesterday", "after"), { status: 422, code: "VALIDATION_ERROR" });
 });
 
 test("mediaDataUri keeps empty attachments optional and reports the field on rejection", () => {
