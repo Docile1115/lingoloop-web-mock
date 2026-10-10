@@ -20,6 +20,7 @@
  * 401 만 "세션이 끝났다"는 뜻입니다. 연결 끊김·시간 초과·5xx·503(AUTH_UNAVAILABLE,
  * 인증 서버 일시 장애)은 잠깐의 문제라 로그인 상태를 지우지 않습니다.
  */
+import { apiErrorMessage } from "@shared/live-data";
 import { t } from "./i18n";
 
 /** 운영 웹 주소. 로컬 서버를 보려면 app.config 대신 여기를 바꿉니다. */
@@ -110,10 +111,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
     if (!response.ok) {
       if (response.status === 401) onUnauthorized?.();
+      const code = body?.error?.code ?? "UNKNOWN";
       throw new ApiError(
         response.status,
-        body?.error?.code ?? "UNKNOWN",
-        body?.error?.message ?? t("요청을 처리하지 못했어요."),
+        code,
+        // 서버 문장은 한국어입니다. 웹과 같이 화면 언어의 문장으로 바꾸고, 내부 사정(설정·키)은 보여주지 않습니다.
+        apiErrorMessage(response.status, code, body?.error?.message),
         body?.error?.details?.field,
       );
     }
