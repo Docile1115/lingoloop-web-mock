@@ -12,12 +12,27 @@ import {
   View,
 } from "react-native";
 import { ApiError, post as apiPost } from "../lib/api";
-import { t } from "../lib/i18n";
+import { msg, t, type MessageKey } from "../lib/i18n";
 import { useTheme } from "../lib/useTheme";
 import { radius, space } from "../lib/theme";
 import { Chip, PrimaryButton } from "../ui";
 
-const TAG_SUGGESTIONS = ["#오늘의연습", "#질문", "#교정부탁", "#일상"];
+/**
+ * 글에 달 수 있는 주제. 웹(POST_TOPICS)과 같은 목록이고 서버의 tags 로 그대로 갑니다.
+ * 값은 사전 키(한국어 원문)로 저장해 어느 언어로 쓴 글이든 같은 주제로 묶이고,
+ * 화면에는 지금 언어로 보여줍니다.
+ */
+const POST_TOPICS: MessageKey[] = [
+  msg("오늘의연습"),
+  msg("표현질문"),
+  msg("문법질문"),
+  msg("일상"),
+  msg("여행"),
+  msg("음식"),
+  msg("영화"),
+  msg("음악"),
+];
+const MAX_TOPICS = 3;
 
 export function ComposeScreen({ onDone }: { onDone: () => void }) {
   const c = useTheme();
@@ -69,19 +84,24 @@ export function ComposeScreen({ onDone }: { onDone: () => void }) {
 
         <Text style={[styles.label, { color: c.ink }]}>{t("주제")}</Text>
         <View style={styles.chips}>
-          {TAG_SUGGESTIONS.map((tag) => (
+          {POST_TOPICS.map((tag) => (
             <Chip
               key={tag}
-              label={tag}
+              label={`#${t(tag)}`}
               active={tags.includes(tag)}
               onPress={() =>
                 setTags((rows) =>
-                  rows.includes(tag) ? rows.filter((one) => one !== tag) : [...rows, tag],
+                  rows.includes(tag)
+                    ? rows.filter((one) => one !== tag)
+                    : rows.length >= MAX_TOPICS
+                      ? rows
+                      : [...rows, tag],
                 )
               }
             />
           ))}
         </View>
+        <Text style={[styles.count, { color: c.subtle, textAlign: "left" }]}>{t("최대 3개까지 고를 수 있어요")}</Text>
 
         <View style={[styles.row, { borderColor: c.line }]}>
           <View style={{ flex: 1 }}>

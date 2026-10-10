@@ -168,7 +168,7 @@ export function AvatarEditorScreen({ onDone }: { onDone: () => void }) {
           </View>
           <View style={{ gap: space.sm }}>
             {[false, true].map((zoom) => <Pressable key={String(zoom)} accessibilityRole="button" accessibilityState={{ selected: faceZoom === zoom }} onPress={() => setFaceZoom(zoom)} style={[styles.category, { backgroundColor: faceZoom === zoom ? c.ink : c.surfaceSoft }]}>
-              <Text style={{ color: faceZoom === zoom ? c.bg : c.ink }}>{t(zoom ? "얼굴 확대" : "전신")}</Text>
+              <Text style={{ color: faceZoom === zoom ? c.bg : c.ink }}>{zoom ? t("얼굴 확대") : t("전신")}</Text>
             </Pressable>)}
           </View>
         </View>

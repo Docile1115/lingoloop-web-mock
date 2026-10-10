@@ -210,8 +210,9 @@ export function PostCard({
 
         {post.tags.length ? (
           <View style={styles.tags}>
+            {/* 주제는 사전 키(한국어 원문)로 저장됩니다. 아는 주제는 지금 언어로, 직접 쓴 태그는 그대로 보여줍니다. */}
             {post.tags.map((tag) => (
-              <Text key={tag} style={[styles.tag, { color: c.secondaryInk }]}>{tag}</Text>
+              <Text key={tag} style={[styles.tag, { color: c.secondaryInk }]}>#{tx(tag.replace(/^#/, ""))}</Text>
             ))}
           </View>
         ) : null}

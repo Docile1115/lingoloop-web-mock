@@ -9,7 +9,7 @@
  * 시간대의 메시지를 한 덩어리로 보여주고, 30분이 지나거나 날짜가 바뀌면
  * 시각을 다시 적습니다.
  */
-import { localizeClock, t, tx } from "./i18n";
+import { localizeClock, msg, t, tx } from "./i18n";
 
 const HALF_HOUR = 30 * 60 * 1000;
 
@@ -29,7 +29,8 @@ export function clockOf(iso: string): string {
   if (Number.isNaN(date.getTime())) return "";
   const hours = date.getHours();
   const minutes = String(date.getMinutes()).padStart(2, "0");
-  const meridiem = hours < 12 ? "오전" : "오후";
+  // 사전 키 그대로 넘깁니다. localizeClock 이 이 낱말을 알아보고 지금 언어로 옮깁니다.
+  const meridiem = hours < 12 ? msg("오전") : msg("오후");
   const hour12 = hours % 12 === 0 ? 12 : hours % 12;
   return localizeClock(`${meridiem} ${hour12}:${minutes}`);
 }

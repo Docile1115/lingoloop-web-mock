@@ -35,18 +35,18 @@ export {
 } from "@shared/i18n/core";
 
 /**
- * 기기 설정 언어. 지원하지 않는 언어면 한국어로 둡니다.
+ * 기기 설정 언어. 지원하지 않는 언어면 영어로 둡니다.
  *
  * 기기에 여러 언어가 순서대로 설정돼 있을 수 있어서 우리가 아는 것이 나올 때까지
  * 훑습니다 — 1순위가 프랑스어이고 2순위가 영어인 사람에게 한국어를 보여줄 이유가
- * 없습니다.
+ * 없습니다. 아는 언어가 하나도 없으면 한국어보다 영어가 읽힐 가능성이 훨씬 큽니다.
  */
 function deviceLocale(): Locale {
   for (const entry of getLocales()) {
     const guess = entry.languageCode?.slice(0, 2);
     if (isLocale(guess)) return guess;
   }
-  return "ko";
+  return "en";
 }
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {

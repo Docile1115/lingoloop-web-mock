@@ -175,7 +175,9 @@ test("화면 코드에 한국어가 그대로 남아 있지 않다", async () =>
     // 코드·React Native 공유용 숫자/색 토큰. 한국어는 렌더 문구가 아닌 측정 근거 주석입니다.
     "app/lib/tokens.ts",
   ];
-  const files = (await walk(join(ROOT, "app")))
+  // 앱(mobile/src) 화면도 같은 사전을 씁니다. 웹만 보면 앱에 남은 한국어 문구를 못 잡습니다.
+  // (mobile/app.json 의 권한 안내 문구는 네이티브 설정이라 이 검사 밖입니다.)
+  const files = [...(await walk(join(ROOT, "app"))), ...(await walk(join(ROOT, "mobile/src")))]
     .filter((f) => !f.startsWith(I18N))
     .filter((f) => !EXCLUDED.includes(relativePath(f)));
   const offenders = [];
@@ -186,7 +188,8 @@ test("화면 코드에 한국어가 그대로 남아 있지 않다", async () =>
     const src = (await read(file)).replace(/\/\*[\s\S]*?\*\//g, (m) =>
       m.replace(/[^\n]/g, " "),
     );
-    src.split("\n").forEach((line, index) => {
+    // Windows 체크아웃(CRLF)에서도 줄 끝 주석을 지울 수 있게 \r 까지 끊습니다.
+    src.split(/\r?\n/).forEach((line, index) => {
       const trimmed = line.trim();
       if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) return;
       if (/^\{\s*\/\*.*\*\/\s*\}$/.test(trimmed)) return; // JSX 주석

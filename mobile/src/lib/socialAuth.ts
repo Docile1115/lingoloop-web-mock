@@ -10,6 +10,7 @@ import {
   updateProfile,
 } from "firebase/auth";
 import { get } from "./api";
+import { t } from "./i18n";
 
 export type SocialProvider = "google" | "apple";
 
@@ -49,7 +50,7 @@ export async function loadSocialAuthConfig() {
   ) {
     throw new MobileSocialAuthError(
       "AUTH_CONFIG_INVALID",
-      "로그인 설정을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
+      t("로그인 설정을 불러오지 못했어요. 잠시 후 다시 시도해 주세요."),
     );
   }
   return config;
@@ -87,13 +88,13 @@ export async function exchangeProviderCredential(
   if (!config.providers[credential.provider]) {
     throw new MobileSocialAuthError(
       "PROVIDER_DISABLED",
-      "현재 이 로그인 방법을 사용할 수 없어요.",
+      t("현재 이 로그인 방법을 사용할 수 없어요."),
     );
   }
   if (!credential.providerIdToken) {
     throw new MobileSocialAuthError(
       "MISSING_PROVIDER_TOKEN",
-      "로그인 확인 정보를 받지 못했어요. 다시 시도해 주세요.",
+      t("로그인 확인 정보를 받지 못했어요. 다시 시도해 주세요."),
     );
   }
 

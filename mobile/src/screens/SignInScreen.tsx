@@ -62,7 +62,7 @@ export function SignInScreen() {
 
   const completeSignIn = useCallback<CompleteSignIn>(
     async (input) => {
-      if (!config) throw new Error("로그인 설정이 아직 준비되지 않았어요.");
+      if (!config) throw new Error(t("로그인 설정이 아직 준비되지 않았어요."));
       const credential = await exchangeProviderCredential(config, input);
       await signIn(credential);
     },
@@ -108,7 +108,7 @@ export function SignInScreen() {
         </View>
 
         <Text style={[s.privacy, { color: c.subtle }]}>
-          로그인하면 서비스 이용약관과 개인정보처리방침에 동의하게 됩니다.
+          {t("로그인하면 서비스 이용약관과 개인정보처리방침에 동의하게 됩니다.")}
         </Text>
       </View>
     </SafeAreaView>
@@ -157,7 +157,7 @@ function AppleSignIn({
       if (!result.identityToken) {
         throw new MobileSocialAuthError(
           "MISSING_PROVIDER_TOKEN",
-          "Apple 로그인 확인 정보를 받지 못했어요. 다시 시도해 주세요.",
+          t("Apple 로그인 확인 정보를 받지 못했어요. 다시 시도해 주세요."),
         );
       }
       const displayName = result.fullName
@@ -178,10 +178,10 @@ function AppleSignIn({
 
   if (checking) return <ActivityIndicator color={c.primary} size="small" />;
   if (!config.providers.apple) {
-    return <Text style={[s.error, { color: c.muted }]}>Apple 로그인이 아직 활성화되지 않았어요.</Text>;
+    return <Text style={[s.error, { color: c.muted }]}>{t("Apple 로그인이 아직 활성화되지 않았어요.")}</Text>;
   }
   if (!available) {
-    return <Text style={[s.error, { color: c.muted }]}>이 기기에서는 Apple 로그인을 사용할 수 없어요.</Text>;
+    return <Text style={[s.error, { color: c.muted }]}>{t("이 기기에서는 Apple 로그인을 사용할 수 없어요.")}</Text>;
   }
 
   return (
@@ -223,11 +223,11 @@ function GoogleSignIn({
     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
 
   if (!config.providers.google) {
-    return <Text style={[s.error, { color: c.muted }]}>Google 로그인이 아직 활성화되지 않았어요.</Text>;
+    return <Text style={[s.error, { color: c.muted }]}>{t("Google 로그인이 아직 활성화되지 않았어요.")}</Text>;
   }
   if (!clientId) {
     return (
-      <Text style={[s.error, { color: c.muted }]}>Google 로그인 설정이 필요해요. 앱 관리자에게 알려 주세요.</Text>
+      <Text style={[s.error, { color: c.muted }]}>{t("Google 로그인 설정이 필요해요. 앱 관리자에게 알려 주세요.")}</Text>
     );
   }
   return <ConfiguredGoogleSignIn clientId={clientId} completeSignIn={completeSignIn} />;
@@ -265,7 +265,7 @@ function ConfiguredGoogleSignIn({
       if (!result.data.idToken) {
         throw new MobileSocialAuthError(
           "MISSING_PROVIDER_TOKEN",
-          "Google 로그인 확인 정보를 받지 못했어요. 다시 시도해 주세요.",
+          t("Google 로그인 확인 정보를 받지 못했어요. 다시 시도해 주세요."),
         );
       }
       await completeSignIn({ provider: "google", providerIdToken: result.data.idToken });
@@ -309,20 +309,20 @@ function authErrorMessage(caught: unknown) {
   const code =
     typeof caught === "object" && caught && "code" in caught ? String(caught.code) : "";
   if (code === "auth/account-exists-with-different-credential") {
-    return "같은 이메일이 다른 로그인 방법에 연결되어 있어요.";
+    return t("같은 이메일이 다른 로그인 방법에 연결되어 있어요.");
   }
-  if (code === "auth/operation-not-allowed") return "현재 이 로그인 방법을 사용할 수 없어요.";
-  if (code === "auth/network-request-failed") return "네트워크 연결을 확인하고 다시 시도해 주세요.";
-  if (code === "auth/invalid-credential") return "로그인 확인 정보가 만료됐어요. 다시 시도해 주세요.";
+  if (code === "auth/operation-not-allowed") return t("현재 이 로그인 방법을 사용할 수 없어요.");
+  if (code === "auth/network-request-failed") return t("네트워크 연결을 확인하고 다시 시도해 주세요.");
+  if (code === "auth/invalid-credential") return t("로그인 확인 정보가 만료됐어요. 다시 시도해 주세요.");
   if (caught instanceof Error && caught.message) return caught.message;
   return t("요청을 처리하지 못했어요.");
 }
 
 function googleErrorMessage(caught: unknown) {
   if (isErrorWithCode(caught)) {
-    if (caught.code === statusCodes.IN_PROGRESS) return "Google 로그인이 이미 진행 중이에요.";
+    if (caught.code === statusCodes.IN_PROGRESS) return t("Google 로그인이 이미 진행 중이에요.");
     if (caught.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-      return "Google Play 서비스를 사용할 수 없어요. 업데이트 후 다시 시도해 주세요.";
+      return t("Google Play 서비스를 사용할 수 없어요. 업데이트 후 다시 시도해 주세요.");
     }
   }
   return authErrorMessage(caught);
