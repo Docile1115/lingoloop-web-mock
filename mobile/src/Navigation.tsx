@@ -18,7 +18,6 @@ import { ChatsScreen } from "./screens/ChatsScreen";
 import { CommunityScreen } from "./screens/CommunityScreen";
 import { ComposeScreen } from "./screens/ComposeScreen";
 import { AvatarEditorScreen } from "./screens/AvatarEditorScreen";
-import { RoomEditorScreen } from "./screens/RoomEditorScreen";
 import { EditProfileScreen } from "./screens/EditProfileScreen";
 import { MeScreen } from "./screens/MeScreen";
 import { PartnerProfileScreen } from "./screens/PartnerProfileScreen";
@@ -38,7 +37,6 @@ export type RootParams = {
   Compose: undefined;
   EditProfile: undefined;
   AvatarEditor: undefined;
-  RoomEditor: undefined;
   Homes: undefined;
   Home: {ownerId:string};
   Filters: undefined;
@@ -308,10 +306,6 @@ export function Navigation() {
           options={{ headerShown: false, headerBackButtonMenuEnabled: false, presentation: "modal" }}
         >
           {({ navigation }) => <AvatarEditorScreen onDone={() => navigation.goBack()} />}
-        </Stack.Screen>
-
-        <Stack.Screen name="RoomEditor" options={{ headerShown: false, headerBackButtonMenuEnabled: false, presentation: "modal" }}>
-          {({ navigation }) => <RoomEditorScreen onDone={() => navigation.goBack()} />}
         </Stack.Screen>
 
         <Stack.Screen name="Filters" options={{ title: t("오늘의 파트너 조건"), presentation: "modal" }}>

@@ -10,14 +10,14 @@ export function RoomScene({ value, avatar }: { value?: RoomConfig | null; avatar
     <SvgXml xml={renderRoomSvg(value,avatar)} width="100%" height="100%" />
   </View>;
 }
-// own: 내 방. 방 그림과 "내 집 방문·방명록" 문구를 보여줍니다(onEdit 만 넘겨도 내 방으로 봅니다).
-export function RoomCard({ name, value, avatar, own, onEdit, onVisit }: { name:string; value?: RoomConfig | null; avatar?: AvatarConfig | null; own?: boolean; onEdit?: () => void; onVisit?:()=>void }) {
+// own: 내 방. 방 그림과 "내 집 방문·방명록" 문구를 보여줍니다.
+// 2D 방은 읽기 전용 그림입니다 — 가구 배치는 웹의 3D 방에서만 하므로 "방 꾸미기" 입구를 두지 않습니다.
+export function RoomCard({ name, value, avatar, own, onVisit }: { name:string; value?: RoomConfig | null; avatar?: AvatarConfig | null; own?: boolean; onVisit?:()=>void }) {
   const c = useTheme();
-  const mine = own ?? !!onEdit;
+  const mine = !!own;
   return <View style={{ borderColor:c.line, borderWidth:1, borderRadius:20, overflow:'hidden', marginBottom:12 }}>
     <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:8,padding:12}}>
       <Text style={{color:c.ink,fontWeight:'700',fontSize:14,flex:1}} numberOfLines={1}>{t("{name}님의 마이룸",{name})}</Text>
-      {onEdit ? <Pressable onPress={onEdit} accessibilityRole="button" style={{minHeight:44,paddingHorizontal:12,justifyContent:'center',borderRadius:12,backgroundColor:c.sunken}}><Text style={{color:c.ink,fontWeight:'600'}}>{t("방 꾸미기")}</Text></Pressable> : null}
     </View>
     {mine?<View accessibilityRole="image" accessibilityLabel={t("{name}님의 마이룸",{name})}><RoomScene value={value} avatar={avatar}/></View>:null}
     {onVisit?<Pressable onPress={onVisit} accessibilityRole="button" style={{minHeight:48,padding:14}}><Text style={{color:c.primaryStrong,fontWeight:'600'}}>{mine?t("내 집 방문·방명록"):t("집 놀러 가기")}</Text></Pressable>:null}
