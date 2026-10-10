@@ -347,6 +347,21 @@ test("a single partner profile is served through the public view and hides block
   assert.match(route, /success\(res, req, profileForOthers\(snapshot\.data\(\)\)\)/);
 });
 
+test("follow counts use count() aggregations and keep the block and visibility rules", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const route = source.slice(
+    source.indexOf('app.get("/api/partners/:partnerId/follow-counts"'),
+    source.indexOf('app.get("/api/partners/:partnerId", requireUser'),
+  );
+
+  assert.equal(route.match(/\.count\(\)\.get\(\)/g).length, 3);
+  assert.doesNotMatch(route, /\.limit\(500\)\.get\(\)/);
+  assert.match(route, /blockedBothWays\(req\.auth\.uid\)/);
+  assert.match(route, /acceptedPartnerIds\(req\.auth\.uid\)/);
+  assert.match(route, /follows\.doc\(partnerId \+ "_" \+ id\), follows\.doc\(id \+ "_" \+ partnerId\)/);
+  assert.match(route, /seesEveryPost \? partnerPosts : partnerPosts\.where\("visibility", "==", "public"\)/);
+});
+
 test("pending message requests never expose the recipient's read receipt", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const route = source.slice(

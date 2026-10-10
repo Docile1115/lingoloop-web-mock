@@ -1697,21 +1697,35 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
  */
 app.get("/api/partners/:partnerId/follow-counts", requireUser, async (req, res) => {
   const partnerId = docId(req.params.partnerId, "partnerId");
-  const [followingSnapshot, followerSnapshot, postSnapshot, blocked, partnerIds] = await Promise.all([
-    db.collection("follows").where("fromUserId", "==", partnerId).limit(500).get(),
-    db.collection("follows").where("toUserId", "==", partnerId).limit(500).get(),
-    db.collection("posts").where("authorId", "==", partnerId).limit(500).get(),
+  const follows = db.collection("follows");
+  const partnerPosts = db.collection("posts").where("authorId", "==", partnerId);
+  /* 문서를 최대 500개씩 읽어 세던 것을 count() 집계로 바꿨습니다. 색인 1,000건당 읽기 1회로
+     과금되고, 500에서 잘리지도 않습니다. */
+  const [followingCount, followerCount, blocked, partnerIds] = await Promise.all([
+    follows.where("fromUserId", "==", partnerId).count().get(),
+    follows.where("toUserId", "==", partnerId).count().get(),
     blockedBothWays(req.auth.uid),
     acceptedPartnerIds(req.auth.uid),
   ]);
-  const following = followingSnapshot.docs.map((d) => d.data().toUserId).filter((id) => !blocked.has(id));
-  const followers = followerSnapshot.docs.map((d) => d.data().fromUserId).filter((id) => !blocked.has(id));
+  // 나와 차단 관계인 사람과의 팔로우는 빼고 셉니다. 팔로우 문서 id 가 "보낸사람_받는사람" 이라
+  // 그 사람들 몫만 직접 읽어 빼면 됩니다(보통 0~몇 건).
+  const blockedIds = [...blocked].filter((id) => id !== partnerId && isDocumentId(id, { min: 1 }));
   // 글 수는 "내가 볼 수 있는 글"만 셉니다. 파트너 공개 글까지 세면 열 수 없는
   // 글이 숫자에만 남아 목록과 어긋납니다.
-  const posts = postSnapshot.docs
-    .map((document) => document.data())
-    .filter((post) => post.visibility === "public" || post.authorId === req.auth.uid || partnerIds.has(post.authorId));
-  return success(res, req, { following: following.length, followers: followers.length, posts: posts.length });
+  const seesEveryPost = partnerId === req.auth.uid || partnerIds.has(partnerId);
+  const [postCount, blockedEdges] = await Promise.all([
+    (seesEveryPost ? partnerPosts : partnerPosts.where("visibility", "==", "public")).count().get(),
+    blockedIds.length
+      ? db.getAll(...blockedIds.flatMap((id) => [follows.doc(partnerId + "_" + id), follows.doc(id + "_" + partnerId)]))
+      : Promise.resolve([]),
+  ]);
+  const hiddenFollowing = blockedEdges.filter((snapshot, index) => index % 2 === 0 && snapshot.exists).length;
+  const hiddenFollowers = blockedEdges.filter((snapshot, index) => index % 2 === 1 && snapshot.exists).length;
+  return success(res, req, {
+    following: Math.max(0, followingCount.data().count - hiddenFollowing),
+    followers: Math.max(0, followerCount.data().count - hiddenFollowers),
+    posts: postCount.data().count,
+  });
 });
 
 /**
