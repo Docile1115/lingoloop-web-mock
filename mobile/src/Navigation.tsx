@@ -9,16 +9,18 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from "@react-navigation/
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
-import { Alert, Pressable, View, useColorScheme } from "react-native";
+import { Alert, View, useColorScheme } from "react-native";
+import type { ApiConversation } from "@shared/live-data";
 import type { FeedPost, Conversation, Partner } from "@shared/demo-data";
 import { post as apiPost } from "./lib/api";
+import { ChatsProvider, useChats } from "./lib/chats";
 import { t } from "./lib/i18n";
 import { useTheme } from "./lib/useTheme";
+import { HeaderButton } from "./ui";
 import { ChatsScreen } from "./screens/ChatsScreen";
 import { CommunityScreen } from "./screens/CommunityScreen";
 import { ComposeScreen } from "./screens/ComposeScreen";
 import { AvatarEditorScreen } from "./screens/AvatarEditorScreen";
-import { RoomEditorScreen } from "./screens/RoomEditorScreen";
 import { EditProfileScreen } from "./screens/EditProfileScreen";
 import { MeScreen } from "./screens/MeScreen";
 import { PartnerProfileScreen } from "./screens/PartnerProfileScreen";
@@ -33,12 +35,13 @@ import { HomeScreen, HomesScreen } from "./screens/HomesScreen";
 export type RootParams = {
   Tabs: undefined;
   PartnerProfile: { partnerId: string };
-  PostDetail: { post: FeedPost };
-  Thread: { conversation: Conversation };
+  /** compose: 피드의 댓글·교정 단추로 열면 그 입력칸을 바로 엽니다. */
+  PostDetail: { post: FeedPost; compose?: "reply" | "correction" };
+  /** request: 내가 받은 메시지 요청. 수락하기 전에는 답장할 수 없습니다. */
+  Thread: { conversation: Conversation; request?: boolean };
   Compose: undefined;
   EditProfile: undefined;
   AvatarEditor: undefined;
-  RoomEditor: undefined;
   Homes: undefined;
   Home: {ownerId:string};
   Filters: undefined;
@@ -56,68 +59,43 @@ const Tab = createBottomTabNavigator();
  * 추천에 있어야 함)은 서버가 판단하므로, 막히면 서버가 준 이유가 그대로
  * 화면에 뜹니다 — 앱에서 같은 규칙을 다시 짜면 둘이 어긋납니다.
  */
-async function openConversation(partner: Partner): Promise<Conversation | null> {
+async function openConversation(partner: Partner): Promise<RootParams["Thread"] | null> {
   try {
-    const created = await apiPost<{ id: string }>("/api/conversations", {
+    const created = await apiPost<ApiConversation>("/api/conversations", {
       partnerId: partner.id,
     });
     return {
-      id: created.id,
-      partnerId: partner.id,
-      name: partner.name,
-      handle: partner.handle,
-      flag: partner.flag,
-      accent: partner.accent,
-      photo: partner.photo,
-      avatarMode: partner.avatarMode,
-      avatarConfig: partner.avatarConfig,
-      countryCode: partner.countryCode,
-      preview: "",
-      time: "",
-      unread: 0,
-      online: partner.online,
-      language: partner.learning,
-      messages: [],
-    } as Conversation;
+      conversation: {
+        id: created.id,
+        partnerId: partner.id,
+        name: partner.name,
+        handle: partner.handle,
+        flag: partner.flag,
+        accent: partner.accent,
+        photo: partner.photo,
+        avatarMode: partner.avatarMode,
+        avatarConfig: partner.avatarConfig,
+        countryCode: partner.countryCode,
+        preview: "",
+        time: "",
+        unread: 0,
+        online: partner.online,
+        muted: Boolean(created.muted),
+        language: partner.learning,
+        messages: [],
+      } as Conversation,
+      // 상대가 먼저 보낸 요청이 있으면 그 방이 열립니다 — 수락 안내를 보여줘야 합니다.
+      request: Boolean(created.isIncomingRequest),
+    };
   } catch (error) {
     Alert.alert(t("요청을 처리하지 못했어요."),error instanceof Error?error.message:undefined);
     return null;
   }
 }
 
-/** 헤더의 아이콘 단추. 손가락으로 누를 만한 크기를 지킵니다. */
-function HeaderButton({
-  icon,
-  label,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  label: string;
-  onPress: () => void;
-}) {
-  const c = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      hitSlop={8}
-      style={({ pressed }) => ({
-        width: 40,
-        height: 40,
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: 20,
-        opacity: pressed ? 0.6 : 1,
-      })}
-    >
-      <Ionicons name={icon} size={22} color={c.ink} />
-    </Pressable>
-  );
-}
-
 function Tabs() {
   const c = useTheme();
+  const { unread } = useChats();
   return (
     /* 탭마다 헤더를 답니다. 헤더가 없으면 내용이 상태바 밑으로 들어갑니다 —
        위쪽 안전 영역은 네비게이터가 헤더와 함께 계산해 줍니다. */
@@ -158,8 +136,8 @@ function Tabs() {
           <PartnersScreen
             onOpenProfile={(partnerId) => navigation.navigate("PartnerProfile", { partnerId })}
             onStartChat={async (partner) => {
-              const conversation = await openConversation(partner);
-              if (conversation) navigation.navigate("Thread", { conversation });
+              const thread = await openConversation(partner);
+              if (thread) navigation.navigate("Thread", thread);
             }}
           />
         )}
@@ -184,7 +162,7 @@ function Tabs() {
       >
         {({ navigation }) => (
           <CommunityScreen
-            onOpenPost={(post) => navigation.navigate("PostDetail", { post })}
+            onOpenPost={(post, compose) => navigation.navigate("PostDetail", { post, compose })}
             onOpenProfile={(partnerId) => navigation.navigate("PartnerProfile", { partnerId })}
           />
         )}
@@ -195,10 +173,13 @@ function Tabs() {
         options={{
           title: t("대화"),
           tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles-outline" size={size} color={color} />,
+          // 안 읽은 메시지 수. 목록의 안읽음 표시와 같은 노랑을 씁니다.
+          tabBarBadge: unread > 0 ? (unread > 99 ? "99+" : unread) : undefined,
+          tabBarBadgeStyle: { backgroundColor: c.secondary, color: c.onSecondary, fontWeight: "800" },
         }}
       >
         {({ navigation }) => (
-          <ChatsScreen onOpen={(conversation) => navigation.navigate("Thread", { conversation })} />
+          <ChatsScreen onOpen={(conversation, request) => navigation.navigate("Thread", { conversation, request })} />
         )}
       </Tab.Screen>
 
@@ -228,6 +209,8 @@ export function Navigation() {
   const base = scheme === "dark" ? DarkTheme : DefaultTheme;
 
   return (
+    // 대화 목록은 대화 탭·대화방·탭 배지가 함께 봅니다. 그래서 화면들 바깥에 둡니다.
+    <ChatsProvider>
     <NavigationContainer
       theme={{
         ...base,
@@ -255,7 +238,7 @@ export function Navigation() {
           {({navigation})=><HomesScreen onVisit={ownerId=>navigation.push('Home',{ownerId})}/>}
         </Stack.Screen>
         <Stack.Screen name="Home" options={{title:t("친구 집")}}>
-          {({route,navigation})=><HomeScreen key={route.params.ownerId} ownerId={route.params.ownerId} onStartChat={async partner=>{const conversation=await openConversation(partner);if(conversation)navigation.navigate('Thread',{conversation});}}/>}
+          {({route,navigation})=><HomeScreen key={route.params.ownerId} ownerId={route.params.ownerId} onStartChat={async partner=>{const thread=await openConversation(partner);if(thread)navigation.navigate('Thread',thread);}}/>}
         </Stack.Screen>
 
         <Stack.Screen name="PartnerProfile" options={{ title: t("프로필") }}>
@@ -266,8 +249,8 @@ export function Navigation() {
               onOpenProfile={(partnerId) => navigation.push("PartnerProfile", { partnerId })}
               onOpenPost={(post) => navigation.navigate("PostDetail", { post })}
               onStartChat={async (partner) => {
-                const conversation = await openConversation(partner);
-                if (conversation) navigation.navigate("Thread", { conversation });
+                const thread = await openConversation(partner);
+                if (thread) navigation.navigate("Thread", thread);
               }}
             />
           )}
@@ -277,6 +260,7 @@ export function Navigation() {
           {({ route, navigation }) => (
             <PostDetailScreen
               post={route.params.post}
+              compose={route.params.compose}
               onOpenProfile={(partnerId) => navigation.push("PartnerProfile", { partnerId })}
             />
           )}
@@ -287,7 +271,14 @@ export function Navigation() {
           name="Thread"
           options={({ route }) => ({ title: route.params.conversation.name })}
         >
-          {({ route }) => <ThreadScreen conversation={route.params.conversation} />}
+          {/* 나가기·차단 뒤에는 탭 화면으로 돌아갑니다 — 차단한 사람의 프로필 위로 돌아가지 않게 합니다. */}
+          {({ route, navigation }) => (
+            <ThreadScreen
+              conversation={route.params.conversation}
+              request={route.params.request}
+              onClose={() => navigation.popToTop()}
+            />
+          )}
         </Stack.Screen>
 
         <Stack.Screen name="Compose" options={{ title: t("글쓰기"), presentation: "modal" }}>
@@ -310,10 +301,6 @@ export function Navigation() {
           {({ navigation }) => <AvatarEditorScreen onDone={() => navigation.goBack()} />}
         </Stack.Screen>
 
-        <Stack.Screen name="RoomEditor" options={{ headerShown: false, headerBackButtonMenuEnabled: false, presentation: "modal" }}>
-          {({ navigation }) => <RoomEditorScreen onDone={() => navigation.goBack()} />}
-        </Stack.Screen>
-
         <Stack.Screen name="Filters" options={{ title: t("오늘의 파트너 조건"), presentation: "modal" }}>
           {({ navigation }) => <FiltersScreen onDone={() => navigation.goBack()} />}
         </Stack.Screen>
@@ -323,8 +310,8 @@ export function Navigation() {
             <LikesScreen
               onOpenProfile={(partnerId) => navigation.navigate("PartnerProfile", { partnerId })}
               onStartChat={async (partner) => {
-                const conversation = await openConversation(partner);
-                if (conversation) navigation.navigate("Thread", { conversation });
+                const thread = await openConversation(partner);
+                if (thread) navigation.navigate("Thread", thread);
               }}
             />
           )}
@@ -340,5 +327,6 @@ export function Navigation() {
         </Stack.Screen>
       </Stack.Navigator>
     </NavigationContainer>
+    </ChatsProvider>
   );
 }

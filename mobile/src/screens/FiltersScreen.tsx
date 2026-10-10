@@ -10,38 +10,19 @@ import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ApiError, get, post } from "../lib/api";
-import { t } from "../lib/i18n";
+import { msg, t, type MessageKey } from "../lib/i18n";
+import { AVAILABILITY, INTERESTS, LANGUAGE_CODES, LEVELS, LEVEL_LABELS, languageLabel } from "../lib/profile";
+import { emitSignal } from "../lib/signals";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, type } from "../lib/theme";
 import { Chip, Loading, PrimaryButton } from "../ui";
 
-const LEVELS = ["beginner", "elementary", "intermediate", "upper", "advanced"] as const;
-const LEVEL_LABELS: Record<string, string> = {
-  beginner: "이제 시작했어요",
-  elementary: "짧은 문장은 말해요",
-  intermediate: "일상 대화는 해요",
-  upper: "어려운 얘기도 해요",
-  advanced: "거의 불편함이 없어요",
-};
-const AVAILABILITY: Array<[string, string]> = [
-  ["weekday-morning", "평일 아침"],
-  ["weekday-evening", "평일 저녁"],
-  ["weekend-morning", "주말 오전"],
-  ["weekend-evening", "주말 저녁"],
-];
-const INTENTS: Array<[string, string]> = [
-  ["language-exchange", "언어 교환"],
-  ["friendship", "친구 만들기"],
-  ["voice-practice", "음성 연습"],
-  ["culture-exchange", "문화 교류"],
-];
-const INTERESTS: Array<[string, string]> = [
-  ["movies", "영화"], ["travel", "여행"], ["coffee", "카페"], ["music", "음악"],
-  ["technology", "기술"], ["cooking", "요리"], ["books", "독서"], ["running", "운동"],
-];
-const LANGUAGES: Array<[string, string]> = [
-  ["ko", "한국어"], ["en", "영어"], ["ja", "일본어"],
-  ["es", "스페인어"], ["fr", "프랑스어"], ["de", "독일어"],
+/* 단계·시간·관심사 표는 프로필과 같은 것을 씁니다(lib/profile). 문구는 사전 키(msg)라 화면 언어로 보입니다. */
+const INTENTS: Array<[string, MessageKey]> = [
+  ["language-exchange", msg("언어 교환")],
+  ["friendship", msg("친구 만들기")],
+  ["voice-practice", msg("음성 연습")],
+  ["culture-exchange", msg("문화 교류")],
 ];
 
 type Preferences = {
@@ -88,6 +69,8 @@ export function FiltersScreen({ onDone }: { onDone: () => void }) {
     setError("");
     try {
       await post("/api/matching/preferences", draft);
+      // 조건이 바뀌면 오늘의 파트너도 바뀝니다. 탭에 받아 둔 목록을 다시 받게 알립니다.
+      emitSignal("matching-preferences");
       onDone();
     } catch (caught) {
       // 서버가 거절하면 화면을 닫지 않습니다 — 저장된 척하면 조건이 조용히 되돌아갑니다.
@@ -106,17 +89,18 @@ export function FiltersScreen({ onDone }: { onDone: () => void }) {
     }));
 
   // 이미 할 줄 아는 말을 배울 상대로 고를 이유가 없습니다.
-  const targets = LANGUAGES.filter(([code]) => !myNative.includes(code));
+  // 서버가 받는 언어 전부(웹과 같음). 중국어가 빠져 있어, 처음 설정에서 중국어를 고른 사람은 여기서 고른 언어가 보이지 않았습니다.
+  const targets = LANGUAGE_CODES.filter((code) => !myNative.includes(code));
 
   return (
     <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={styles.page}>
       <Section label={t("꼭 맞아야 해요")}>
         <Field label={t("배우고 싶은 언어")}>
           <View style={styles.chips}>
-            {targets.map(([code, label]) => (
+            {targets.map((code) => (
               <Chip
                 key={code}
-                label={t(label as never)}
+                label={languageLabel(code)}
                 active={draft.targetLanguages.includes(code)}
                 onPress={() => setDraft({ ...draft, targetLanguages: [code] })}
               />
@@ -127,7 +111,7 @@ export function FiltersScreen({ onDone }: { onDone: () => void }) {
         <Field label={t("주로 대화 가능한 시간")}>
           <View style={styles.chips}>
             {AVAILABILITY.map(([code, label]) => (
-              <Chip key={code} label={t(label as never)}
+              <Chip key={code} label={t(label)}
                 active={draft.availability.includes(code)}
                 onPress={() => toggle("availability", code)} />
             ))}
@@ -137,7 +121,7 @@ export function FiltersScreen({ onDone }: { onDone: () => void }) {
         <Field label={t("만남 목적")}>
           <View style={styles.chips}>
             {INTENTS.map(([code, label]) => (
-              <Chip key={code} label={t(label as never)}
+              <Chip key={code} label={t(label)}
                 active={draft.intents.includes(code)}
                 onPress={() => toggle("intents", code)} />
             ))}
@@ -171,7 +155,7 @@ export function FiltersScreen({ onDone }: { onDone: () => void }) {
               return (
                 <Chip
                   key={level}
-                  label={t(LEVEL_LABELS[level] as never)}
+                  label={t(LEVEL_LABELS[level])}
                   active={inRange}
                   // 누른 단계를 범위의 한쪽 끝으로 만듭니다 — 가까운 끝을 옮깁니다.
                   onPress={() => {
@@ -191,7 +175,7 @@ export function FiltersScreen({ onDone }: { onDone: () => void }) {
         <Field label={t("공통 관심사")}>
           <View style={styles.chips}>
             {INTERESTS.map(([code, label]) => (
-              <Chip key={code} label={t(label as never)}
+              <Chip key={code} label={t(label)}
                 active={draft.interests.includes(code)}
                 onPress={() => toggle("interests", code)} />
             ))}

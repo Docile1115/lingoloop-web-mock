@@ -12,6 +12,7 @@ import { matchReasonText, toPartner, type ApiProfile, type MatchReasonCode } fro
 import type { Partner } from "@shared/demo-data";
 import { post as apiPost } from "../lib/api";
 import { t, tx } from "../lib/i18n";
+import { useSignal } from "../lib/signals";
 import { useApi } from "../lib/useApi";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, type } from "../lib/theme";
@@ -53,6 +54,10 @@ export function PartnersScreen({
     (raw ?? []).map((row) => row.partner?.id ?? "").filter(Boolean),
   );
   const isLiked = (id: string) => liked[id] ?? sent.data.includes(id);
+
+  /* 조건 화면에서 저장하면 추천이 달라집니다. 탭은 마운트된 채라 스스로 다시 받지 않으므로
+     신호를 받아 다시 받습니다. 당겨서 새로고침과 같은 표시를 띄워 바뀌는 중임을 알립니다. */
+  useSignal("matching-preferences", daily.refresh);
 
   /* 마음 보내기. 예전 웹에서는 화면 상태만 바꾸고 상대에게는 아무 일도
      일어나지 않았습니다 — 서버에 남겨야 상대가 받은 마음에서 볼 수 있습니다. */

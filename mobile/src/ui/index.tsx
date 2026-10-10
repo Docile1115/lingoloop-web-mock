@@ -8,7 +8,9 @@
  * 색은 항상 useTheme() 에서 받습니다 — 값을 박아두면 다크 모드에서 안 보이는
  * 글자가 생깁니다.
  */
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SvgXml } from "react-native-svg";
 import {
   renderAvatarSvg,
@@ -289,6 +291,118 @@ export function Divider() {
   return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: c.line }} />;
 }
 
+/** 헤더의 아이콘 단추. 손가락으로 누를 만한 크기를 지킵니다. */
+export function HeaderButton({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  label: string;
+  onPress: () => void;
+}) {
+  const c = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={8}
+      style={({ pressed }) => ({
+        width: 40,
+        height: 40,
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 20,
+        opacity: pressed ? 0.6 : 1,
+      })}
+    >
+      <Ionicons name={icon} size={22} color={c.ink} />
+    </Pressable>
+  );
+}
+
+/**
+ * 아래에서 올라오는 시트.
+ *
+ * 안드로이드의 Alert 는 단추를 셋까지만 달 수 있어서, 메뉴가 넷 이상이면 이것을 씁니다.
+ * 한 화면에서 내용만 바꿔 씁니다 — iOS 는 Modal 을 닫는 중에 다른 Modal 을 열면 안 뜹니다.
+ */
+export function Sheet({
+  visible,
+  onClose,
+  title,
+  children,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const c = useTheme();
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.sheetWrap}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel={t("닫기")}
+        />
+        <View
+          style={[
+            styles.sheet,
+            { backgroundColor: c.surface, paddingBottom: insets.bottom + space.md },
+          ]}
+        >
+          {title ? <Text style={[type.name, { color: c.ink, paddingHorizontal: space.sm }]}>{title}</Text> : null}
+          <ScrollView bounces={false} contentContainerStyle={{ gap: space.xs }}>
+            {children}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** 시트 안의 한 줄. 위험한 동작(차단·신고)은 빨간 글씨로 구분합니다. */
+export function SheetItem({
+  icon,
+  label,
+  onPress,
+  danger,
+  selected,
+  disabled,
+}: {
+  icon?: React.ComponentProps<typeof Ionicons>["name"];
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+  /** 고르는 목록(신고 사유 등)에서 지금 고른 것. */
+  selected?: boolean;
+  disabled?: boolean;
+}) {
+  const c = useTheme();
+  const ink = danger ? c.danger : c.ink;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole={selected === undefined ? "button" : "radio"}
+      accessibilityState={selected === undefined ? { disabled } : { selected, disabled }}
+      style={({ pressed }) => [
+        styles.sheetItem,
+        { backgroundColor: pressed || selected ? c.sunken : "transparent", opacity: disabled ? 0.45 : 1 },
+      ]}
+    >
+      {icon ? <Ionicons name={icon} size={20} color={ink} /> : null}
+      <Text style={[type.body, { color: ink, flex: 1 }]}>{label}</Text>
+      {selected ? <Ionicons name="checkmark" size={20} color={c.primaryStrong} /> : null}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
   onlineDot: { position: "absolute", right: -1, bottom: -1, borderWidth: 2.5 },
@@ -322,4 +436,21 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   badge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: radius.pill },
+  sheetWrap: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.4)" },
+  sheet: {
+    maxHeight: "80%",
+    gap: space.sm,
+    paddingTop: space.lg,
+    paddingHorizontal: space.md,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+  },
+  sheetItem: {
+    minHeight: tapSize + 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
+  },
 });

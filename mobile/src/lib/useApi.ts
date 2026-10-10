@@ -29,9 +29,15 @@ export function useApi<T>(path: string | null, initial: T, pick: (raw: never) =>
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
+  const lastPath = useRef(path);
 
   useEffect(() => {
     if (!path) { setLoading(false); return; }
+    // 나중에 켜지는 요청(path 가 null 이었다가 생김)도 받기 전까지는 "불러오는 중"입니다.
+    if (lastPath.current !== path) {
+      lastPath.current = path;
+      setLoading(true);
+    }
     let alive = true;
     setError("");
     get(path)

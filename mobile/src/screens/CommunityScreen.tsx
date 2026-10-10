@@ -24,7 +24,8 @@ export function CommunityScreen({
   onOpenPost,
   onOpenProfile,
 }: {
-  onOpenPost: (post: FeedPost) => void;
+  /** compose: 글을 열면서 댓글 칸이나 교정 모드로 바로 갑니다. */
+  onOpenPost: (post: FeedPost, compose?: "reply" | "correction") => void;
   onOpenProfile: (authorId: string) => void;
 }) {
   const c = useTheme();
@@ -142,6 +143,8 @@ export function CommunityScreen({
             onPress={() => onOpenPost(item)}
             onAuthor={() => onOpenProfile(item.authorId)}
             onLike={() => toggleLike(item)}
+            onComment={() => onOpenPost(item, "reply")}
+            onCorrect={() => onOpenPost(item, "correction")}
           />
         )}
       />
@@ -154,11 +157,17 @@ export function PostCard({
   onPress,
   onAuthor,
   onLike,
+  onComment,
+  onCorrect,
 }: {
   post: FeedPost;
   onPress?: () => void;
   onAuthor?: () => void;
   onLike?: () => void;
+  /** 댓글 칸으로. */
+  onComment?: () => void;
+  /** 원문을 고쳐 교정으로 남기기. */
+  onCorrect?: () => void;
 }) {
   const c = useTheme();
   return (
@@ -201,8 +210,9 @@ export function PostCard({
 
         {post.tags.length ? (
           <View style={styles.tags}>
+            {/* 주제는 사전 키(한국어 원문)로 저장됩니다. 아는 주제는 지금 언어로, 직접 쓴 태그는 그대로 보여줍니다. */}
             {post.tags.map((tag) => (
-              <Text key={tag} style={[styles.tag, { color: c.secondaryInk }]}>{tag}</Text>
+              <Text key={tag} style={[styles.tag, { color: c.secondaryInk }]}>#{tx(tag.replace(/^#/, ""))}</Text>
             ))}
           </View>
         ) : null}
@@ -223,12 +233,29 @@ export function PostCard({
               color={post.liked ? c.danger : c.muted}
             />
           </Pressable>
-          <View style={styles.action}>
-            <Ionicons name="chatbubble-outline" size={19} color={c.muted} />
-          </View>
-          <View style={styles.action}>
-            <Ionicons name="pencil-outline" size={19} color={c.muted} />
-          </View>
+          {/* 눌러도 아무 일이 없는 아이콘은 두지 않습니다. 할 일이 있을 때만 단추로 그립니다. */}
+          {onComment ? (
+            <Pressable
+              onPress={onComment}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel={t("댓글")}
+              style={styles.action}
+            >
+              <Ionicons name="chatbubble-outline" size={19} color={c.muted} />
+            </Pressable>
+          ) : null}
+          {onCorrect ? (
+            <Pressable
+              onPress={onCorrect}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel={t("교정 남기기")}
+              style={styles.action}
+            >
+              <Ionicons name="pencil-outline" size={19} color={c.muted} />
+            </Pressable>
+          ) : null}
         </View>
 
         {post.likes || post.comments || post.corrections ? (

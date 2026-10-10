@@ -4,13 +4,17 @@
  * 웹과 같이 프로필·글 두 탭으로 나누고, 프로필 탭 맨 아래에 비슷한 사람을 둡니다.
  * "비슷한" 판정은 언어가 겹치는지로 먼저 거릅니다 — 관심사만 보면 스페인어를
  * 가르치는 사람 밑에 베트남어를 가르치는 사람이 올라옵니다.
+ *
+ * 프로필은 GET /api/partners/:id 로 한 사람만 받습니다. 예전에는 사람 목록 전체를
+ * 받아 그 안에서 찾았습니다. 처음에 보내는 요청도 줄였습니다 — 비슷한 사람(전체 목록)은
+ * 프로필이 뜬 뒤에, 글 목록은 글 탭을 열 때 받습니다.
  */
-import { useCallback, useMemo, useState } from "react";
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { toFeedPost, toPartner, type ApiPost, type ApiProfile } from "@shared/live-data";
 import type { FeedPost, Partner } from "@shared/demo-data";
-import { ApiError, post as apiPost } from "../lib/api";
+import { ApiError, get, post as apiPost } from "../lib/api";
 import { t, tx } from "../lib/i18n";
 import { useApi } from "../lib/useApi";
 import { useTheme } from "../lib/useTheme";
@@ -61,26 +65,78 @@ export function PartnerProfileScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const directory = useApi<Partner[]>("/api/partners", [], (raw: ApiProfile[]) =>
-    raw.map((row) => toPartner(row)),
-  );
-  const posts = useApi<FeedPost[]>("/api/posts", [], (raw: ApiPost[]) => raw.map(toFeedPost));
+  const [partner, setPartner] = useState<Partner | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  /** 비슷한 사람을 고를 명부. 예전 서버로 찾느라 이미 받았으면 다시 받지 않습니다. */
+  const [directory, setDirectory] = useState<Partner[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoadError("");
+    const load = async () => {
+      try {
+        const profile = await get<ApiProfile>(`/api/partners/${encodeURIComponent(partnerId)}`);
+        if (alive) setPartner(toPartner(profile));
+      } catch (caught) {
+        // 새 경로가 없는 예전 서버는 "경로 없음"(404 NOT_FOUND)을 줍니다. 그때만 전체 목록에서 찾습니다.
+        // 없거나 차단된 사람은 404 PARTNER_NOT_FOUND 라 여기로 오지 않습니다.
+        if (caught instanceof ApiError && caught.status === 404 && caught.code === "NOT_FOUND") {
+          const rows = (await get<ApiProfile[]>("/api/partners")).map((row) => toPartner(row));
+          if (!alive) return;
+          setDirectory(rows);
+          const found = rows.find((row) => row.id === partnerId);
+          if (found) setPartner(found);
+          else setLoadError(t("프로필을 찾을 수 없어요"));
+          return;
+        }
+        throw caught;
+      }
+    };
+    load()
+      .catch((caught) => {
+        if (!alive) return;
+        setLoadError(
+          caught instanceof ApiError && caught.status === 404
+            ? t("프로필을 찾을 수 없어요")
+            : caught instanceof ApiError
+              ? caught.message
+              : t("불러오지 못했어요."),
+        );
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [partnerId, attempt]);
+
+  // 비슷한 사람은 프로필이 뜬 뒤에 받습니다. 못 받아도 그 칸만 비웁니다.
+  useEffect(() => {
+    if (!partner || directory) return;
+    let alive = true;
+    get<ApiProfile[]>("/api/partners")
+      .then((rows) => { if (alive) setDirectory(rows.map((row) => toPartner(row))); })
+      .catch(() => { /* 비슷한 사람은 덤입니다. 프로필은 그대로 보여줍니다. */ });
+    return () => { alive = false; };
+  }, [partner, directory]);
+
+  // 글 목록은 글 탭을 열 때 받습니다. 개수는 아래 follow-counts 가 알려줍니다.
+  const [postsWanted, setPostsWanted] = useState(false);
+  const posts = useApi<FeedPost[]>(postsWanted ? "/api/posts" : null, [], (raw: ApiPost[]) => raw.map(toFeedPost));
   const counts = useApi<{ following: number; followers: number; posts: number } | null>(
-    `/api/partners/${partnerId}/follow-counts`,
+    `/api/partners/${encodeURIComponent(partnerId)}/follow-counts`,
     null,
     (raw: { following: number; followers: number; posts: number }) => raw,
   );
   const follows = useApi<string[]>("/api/follows", [], (raw: string[]) => raw ?? []);
   const following = followOverride ?? follows.data.includes(partnerId);
 
-  const partner = directory.data.find((row) => row.id === partnerId);
   const theirPosts = useMemo(
     () => posts.data.filter((row) => row.authorId === partnerId),
     [posts.data, partnerId],
   );
   const similar = useMemo(
-    () => (partner ? similarPartners(partner, directory.data) : []),
-    [partner, directory.data],
+    () => (partner && directory ? similarPartners(partner, directory) : []),
+    [partner, directory],
   );
 
   const toggleFollow = useCallback(async () => {
@@ -101,12 +157,15 @@ export function PartnerProfileScreen({
     }
   }, [partner, following, busy, counts.reload]);
 
-  if (directory.loading) return <Loading />;
+  if (loading) return <Loading />;
   if (!partner) {
     return (
       <EmptyState
-        title={directory.error || t("프로필을 찾을 수 없어요")}
-        onRetry={directory.refresh}
+        title={loadError || t("프로필을 찾을 수 없어요")}
+        onRetry={() => {
+          setLoading(true);
+          setAttempt((n) => n + 1);
+        }}
       />
     );
   }
@@ -178,10 +237,16 @@ export function PartnerProfileScreen({
 
       <SegmentedTabs
         value={tab}
-        onChange={setTab}
+        onChange={(next) => {
+          if (next === "posts") setPostsWanted(true);
+          setTab(next);
+        }}
         options={[
           { id: "profile", label: t("프로필") },
-          { id: "posts", label: `${t("글")} ${theirPosts.length}` },
+          {
+            id: "posts",
+            label: counts.data ? `${t("글")} ${counts.data.posts}` : postsWanted && !posts.loading ? `${t("글")} ${theirPosts.length}` : t("글"),
+          },
         ]}
       />
 
@@ -247,6 +312,10 @@ export function PartnerProfileScreen({
             </View>
           ) : null}
         </View>
+      ) : posts.loading ? (
+        <ActivityIndicator color={c.primary} style={{ paddingVertical: space.lg }} />
+      ) : posts.error && !theirPosts.length ? (
+        <EmptyState title={posts.error} onRetry={posts.refresh} />
       ) : theirPosts.length ? (
         <View style={{ gap: space.sm }}>
           {theirPosts.map((row) => (
