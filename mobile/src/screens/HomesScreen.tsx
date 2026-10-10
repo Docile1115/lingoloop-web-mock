@@ -14,6 +14,7 @@ import { toPartner, type ApiNotification, type ApiProfile } from '@shared/live-d
 import type { Partner } from '@shared/demo-data';
 import { api } from '../lib/api';
 import { t } from '../lib/i18n';
+import { useKeyboardOffset } from '../lib/useKeyboardOffset';
 import { useTheme } from '../lib/useTheme';
 import { useSession } from '../lib/session';
 
@@ -58,7 +59,7 @@ export function HomesScreen({onVisit}:{onVisit:(id:string)=>void}) {
 
 type HomeActions={act:(suffix:string,method:string,body?:unknown)=>Promise<boolean>;busy:boolean};
 export function HomeScreen({ownerId,onStartChat}:{ownerId:string;onStartChat:(partner:Partner)=>void}) {
-  const c=useTheme(),{me}=useSession(),home=useHome(ownerId,api),data=home.data;
+  const c=useTheme(),keyboardOffset=useKeyboardOffset(),{me}=useSession(),home=useHome(ownerId,api),data=home.data;
   const [tab,setTab]=useState<'board'|'photos'|'gifts'|'settings'|null>(null),[error,setError]=useState(''),[localBusy,setLocalBusy]=useState(false);
   const [report,setReport]=useState<{kind:string;id:string}|null>(null),[reason,setReason]=useState(''),[notice,setNotice]=useState('');
   const lock=useRef(false),scroll=useRef<ScrollView>(null);const busy=home.busy||localBusy;
@@ -71,7 +72,7 @@ export function HomeScreen({ownerId,onStartChat}:{ownerId:string;onStartChat:(pa
   const openPhotos=(id?:string)=>{setFrameId(frames.find(frame=>frame===id)??frames[0]??'frame');setTab('photos');};
   const openObject=(id:RoomItemId)=>{if(id==='whiteboard')setTab('board');else if(HOME_FRAMES.includes(id as HomePhoto['id']))openPhotos(id);};
   const actions={busy,act:home.act};
-  return <KeyboardAvoidingView style={{flex:1,backgroundColor:c.bg}} behavior={Platform.OS==='ios'?'padding':undefined} keyboardVerticalOffset={100}><ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,gap:16,paddingBottom:48}} onContentSizeChange={()=>{if(report)scroll.current?.scrollToEnd({animated:true});}}>
+  return <KeyboardAvoidingView style={{flex:1,backgroundColor:c.bg}} behavior={Platform.OS==='ios'?'padding':undefined} keyboardVerticalOffset={keyboardOffset}><ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,gap:16,paddingBottom:48}} onContentSizeChange={()=>{if(report)scroll.current?.scrollToEnd({animated:true});}}>
     {home.error||error?<Copy>{home.error||error}</Copy>:null}{home.loading?<Copy>{t("불러오는 중…")}</Copy>:null}
     {!data&&!home.loading?<Button disabled={busy} onPress={()=>void home.reload()}>{t("다시 시도")}</Button>:null}
     {data?<>

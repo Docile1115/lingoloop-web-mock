@@ -26,6 +26,7 @@ import {
 } from "../lib/profile";
 import { useSession, type Me } from "../lib/session";
 import { space, tapSize } from "../lib/theme";
+import { useKeyboardOffset } from "../lib/useKeyboardOffset";
 import { useTheme } from "../lib/useTheme";
 import { Loading, PrimaryButton } from "../ui";
 import { ProfileFields } from "../ui/ProfileFields";
@@ -54,6 +55,8 @@ function firstDraft(me: Me): ProfileDraft {
 
 export function OnboardingScreen() {
   const c = useTheme();
+  // 헤더가 없고 위쪽 안전 영역부터 시작하는 화면입니다.
+  const keyboardOffset = useKeyboardOffset("none");
   const { me, applyMe, signOut } = useSession();
   const [draft, setDraft] = useState<ProfileDraft | null>(() => (me ? firstDraft(me) : null));
   const [submitted, setSubmitted] = useState(false);
@@ -107,7 +110,11 @@ export function OnboardingScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "bottom"]}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={keyboardOffset}
+      >
         <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
           <Text style={[styles.title, { color: c.ink }]}>{t("시작하기 전에 나를 알려 주세요")}</Text>
           <Text style={[styles.lede, { color: c.muted }]}>

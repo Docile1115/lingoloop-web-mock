@@ -24,6 +24,7 @@ import type { FeedPost, PostReply } from "@shared/demo-data";
 import { ApiError, post as apiPost } from "../lib/api";
 import { t, tx } from "../lib/i18n";
 import { useApi } from "../lib/useApi";
+import { useKeyboardOffset } from "../lib/useKeyboardOffset";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, tapSize } from "../lib/theme";
 import { Avatar, Badge, EmptyState, Loading, SegmentedTabs } from "../ui";
@@ -40,6 +41,7 @@ export function PostDetailScreen({
   onOpenProfile: (authorId: string) => void;
 }) {
   const c = useTheme();
+  const keyboardOffset = useKeyboardOffset();
   const [post, setPost] = useState(initialPost);
   const [draft, setDraft] = useState("");
   const [kind, setKind] = useState<"reply" | "correction">("reply");
@@ -134,7 +136,7 @@ export function PostDetailScreen({
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: c.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={90}
+      keyboardVerticalOffset={keyboardOffset}
     >
       <FlatList
         data={replies.data}

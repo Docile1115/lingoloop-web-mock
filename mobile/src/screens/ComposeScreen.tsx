@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { ApiError, post as apiPost } from "../lib/api";
 import { msg, t, type MessageKey } from "../lib/i18n";
+import { useKeyboardOffset } from "../lib/useKeyboardOffset";
 import { useTheme } from "../lib/useTheme";
 import { radius, space } from "../lib/theme";
 import { Chip, PrimaryButton } from "../ui";
@@ -36,6 +37,7 @@ const MAX_TOPICS = 3;
 
 export function ComposeScreen({ onDone }: { onDone: () => void }) {
   const c = useTheme();
+  const keyboardOffset = useKeyboardOffset("modal");
   const [text, setText] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [requestCorrection, setRequestCorrection] = useState(false);
@@ -67,7 +69,7 @@ export function ComposeScreen({ onDone }: { onDone: () => void }) {
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: c.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={90}
+      keyboardVerticalOffset={keyboardOffset}
     >
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <TextInput

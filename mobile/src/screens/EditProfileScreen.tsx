@@ -26,6 +26,7 @@ import {
   type ProfileField,
 } from "../lib/profile";
 import { useSession, type Me } from "../lib/session";
+import { useKeyboardOffset } from "../lib/useKeyboardOffset";
 import { useTheme } from "../lib/useTheme";
 import { radius, space } from "../lib/theme";
 import { Avatar, Loading, PrimaryButton } from "../ui";
@@ -44,6 +45,7 @@ export function EditProfileScreen({
 }) {
   const { me, applyMe } = useSession();
   const c = useTheme();
+  const keyboardOffset = useKeyboardOffset("modal");
   const [draft, setDraft] = useState<ProfileDraft | null>(() => (me ? draftFromMe(me) : null));
   const [serverErrors, setServerErrors] = useState<Partial<Record<ProfileField, string>>>({});
   const [busy, setBusy] = useState(false);
@@ -92,7 +94,7 @@ export function EditProfileScreen({
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: c.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={90}
+      keyboardVerticalOffset={keyboardOffset}
     >
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <Pressable

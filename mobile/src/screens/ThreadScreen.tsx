@@ -42,6 +42,7 @@ import { useChats } from "../lib/chats";
 import { clockOf, dayLabel, needsTimeMark } from "../lib/format";
 import { msg, t, type MessageKey } from "../lib/i18n";
 import { useSession } from "../lib/session";
+import { useKeyboardOffset } from "../lib/useKeyboardOffset";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, tapSize, type } from "../lib/theme";
 import { EmptyState, HeaderButton, Loading, Sheet, SheetItem } from "../ui";
@@ -285,6 +286,7 @@ export function ThreadScreen({
   onClose: () => void;
 }) {
   const c = useTheme();
+  const keyboardOffset = useKeyboardOffset();
   const { me } = useSession();
   const navigation = useNavigation();
   const chats = useChats();
@@ -742,7 +744,7 @@ export function ThreadScreen({
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: c.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={90}
+      keyboardVerticalOffset={keyboardOffset}
     >
       {/* 받은 메시지 요청. 수락하기 전에는 답장할 수 없고, 읽음·활동 상태도 상대에게 보이지 않습니다. */}
       {incoming ? (
