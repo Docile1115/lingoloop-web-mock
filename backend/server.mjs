@@ -4,7 +4,7 @@ import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { buildConversationReadPatch, isConversationHidden } from "./conversation-read.mjs";
-import { extractGeminiText, GeminiProviderError, generateGeminiContent } from "./gemini.mjs";
+import { extractGeminiText, GeminiProviderError, generateGeminiContent, MODEL_SUCCESSORS } from "./gemini.mjs";
 import {
   buildNotification,
   matchesNotificationEvent,
@@ -39,7 +39,7 @@ const GOOGLE_WEB_CLIENT_ID = process.env.GOOGLE_WEB_CLIENT_ID || "";
 const AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST || "";
 const PROXY_SHARED_SECRET = process.env.PROXY_SHARED_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
 const GEMINI_LOCATION = process.env.GEMINI_LOCATION || "global";
 const GEMINI_API_BASE_URL =
   process.env.GEMINI_API_BASE_URL ||
@@ -884,21 +884,50 @@ async function consumeDailyQuota(uid, feature, limit) {
   });
 }
 
+/** 사용량을 되돌립니다. 공급자 쪽 실패(장애·한도·모델 종료)로 답을 못 준 요청은 세지 않습니다. */
+async function refundDailyQuota(uid, feature) {
+  const reference = db.collection("aiUsage").doc(uid).collection("days").doc(todayInSeoul());
+  await db
+    .runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(reference);
+      const used = Number(snapshot.data()?.counts?.[feature] || 0);
+      if (!snapshot.exists || !Number.isSafeInteger(used) || used < 1) return;
+      transaction.set(reference, { counts: { [feature]: used - 1 }, updatedAt: nowIso() }, { merge: true });
+    })
+    .catch((error) => console.warn("AI quota refund failed", feature, error?.message));
+}
+
+/**
+ * 지금 쓰는 모델. 설정한 모델이 종료되면(404) 후속 모델로 한 번 바꿔 다시 묻고, 이후 요청도
+ * 그 모델을 씁니다 — 배포 설정을 바꾸기 전까지 모든 AI 요청이 실패하는 일을 막습니다.
+ */
+let activeGeminiModel = GEMINI_MODEL;
+
 async function geminiResponse(payload, uid, { feature, dailyLimit }) {
   if (!GEMINI_API_KEY) {
     throw new ApiError(503, "AI_NOT_CONFIGURED", "AI 기능에 필요한 Gemini API 키가 아직 연결되지 않았습니다.");
   }
   const quota = await consumeDailyQuota(uid, feature, dailyLimit);
-  try {
-    const body = await generateGeminiContent({
+  const ask = (model) =>
+    generateGeminiContent({
       apiKey: GEMINI_API_KEY,
-      model: GEMINI_MODEL,
+      model,
       baseUrl: GEMINI_API_BASE_URL,
       ...payload,
     });
-    return { body, quota };
+  try {
+    try {
+      return { body: await ask(activeGeminiModel), quota };
+    } catch (error) {
+      const successor = MODEL_SUCCESSORS[activeGeminiModel];
+      if (!(error instanceof GeminiProviderError) || !error.modelUnavailable || !successor) throw error;
+      console.warn(`Gemini model ${activeGeminiModel} is unavailable; switching to ${successor}. Update GEMINI_MODEL.`);
+      activeGeminiModel = successor;
+      return { body: await ask(activeGeminiModel), quota };
+    }
   } catch (error) {
     if (error instanceof GeminiProviderError) {
+      if (error.status === 429 || error.status >= 500) await refundDailyQuota(uid, feature);
       throw new ApiError(error.status, error.code, error.message);
     }
     throw error;
@@ -1051,7 +1080,7 @@ app.get("/api/health", async (req, res) => {
     ai: {
       configured: Boolean(GEMINI_API_KEY),
       provider: GEMINI_PROVIDER,
-      model: GEMINI_MODEL,
+      model: activeGeminiModel,
     },
   });
 });
@@ -2702,7 +2731,7 @@ app.post("/api/translate", requireUser, async (req, res) => {
     alternatives: [],
     confidence: null,
     provider: GEMINI_PROVIDER,
-    model: GEMINI_MODEL,
+    model: activeGeminiModel,
     entitlement: { tier: "free-beta", charged: false, metered: true, paywall: false, usage: quota },
   });
 });
@@ -2776,7 +2805,7 @@ app.post("/api/conversation-support", requireUser, async (req, res) => {
     stage,
     ...support,
     provider: GEMINI_PROVIDER,
-    model: GEMINI_MODEL,
+    model: activeGeminiModel,
     entitlement: { tier: "free-beta", charged: false, metered: true, paywall: false, usage: quota },
   });
 });

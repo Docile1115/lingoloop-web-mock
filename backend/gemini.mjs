@@ -1,11 +1,31 @@
 const DEFAULT_GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
+/**
+ * Successors for models that Vertex AI retires. A retired model answers 404, so the server
+ * switches to the successor instead of failing every AI request until someone redeploys.
+ * gemini-2.5-flash-lite retires on 2026-10-20; gemini-3.1-flash-lite is GA on `global`.
+ */
+export const MODEL_SUCCESSORS = Object.freeze({
+  "gemini-2.5-flash-lite": "gemini-3.1-flash-lite",
+});
+
+/**
+ * Gemini 2.5 turns thinking off with thinkingBudget 0. Gemini 3 and later deprecate
+ * thinkingBudget (it can cause intermittent 400 INVALID_ARGUMENT) and Flash-Lite 3.x already
+ * defaults to the lowest thinking level, so nothing is sent for them.
+ */
+export function thinkingConfigFor(model) {
+  return /^gemini-2\./.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {};
+}
+
 export class GeminiProviderError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, { modelUnavailable = false } = {}) {
     super(message);
     this.name = "GeminiProviderError";
     this.status = status;
     this.code = code;
+    /** The model itself is gone (404), as opposed to a failed request. */
+    this.modelUnavailable = modelUnavailable;
   }
 }
 
@@ -65,7 +85,7 @@ export async function generateGeminiContent({
           generationConfig: {
             maxOutputTokens: 800,
             temperature: 0.2,
-            thinkingConfig: { thinkingBudget: 0 },
+            ...thinkingConfigFor(model),
             ...generationConfig,
           },
         }),
@@ -79,6 +99,9 @@ export async function generateGeminiContent({
   const body = await response.json().catch(() => ({}));
   if (response.status === 429) {
     throw new GeminiProviderError(429, "AI_PROVIDER_RATE_LIMITED", "AI 요청이 많습니다. 잠시 후 다시 시도해 주세요.");
+  }
+  if (response.status === 404) {
+    throw new GeminiProviderError(502, "AI_MODEL_UNAVAILABLE", "AI 요청을 처리하지 못했습니다.", { modelUnavailable: true });
   }
   if (!response.ok) {
     throw new GeminiProviderError(502, "AI_PROVIDER_ERROR", "AI 요청을 처리하지 못했습니다.");

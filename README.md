@@ -158,7 +158,7 @@ homeQuotas/{uid}
 - 룸 문서는 음성 연결 자체가 아니라 목록과 참가 상태를 위한 메타데이터입니다.
 - 무료 베타 AI 사용량은 사용자·서울 날짜별로 저장하며 기본 한도는 번역 100회, 대화 지원 30회입니다.
 
-운영 모델은 Google이 안정 버전 중 가장 비용 효율적인 모델로 안내하는 `gemini-2.5-flash-lite`입니다. 표준 유료 요금은 2026-08 기준 텍스트 입력 100만 토큰당 USD 0.10, 출력 100만 토큰당 USD 0.40이며, 경량 번역·추천에는 사고 토큰이 발생하지 않도록 `thinkingBudget: 0`을 사용합니다. Vertex AI는 이 모델의 종료일을 **2026-10-20**으로 안내하므로 그 전에 다음 Flash-Lite 안정 모델로 전환해야 합니다. 배포 전 [공식 가격표](https://cloud.google.com/vertex-ai/generative-ai/pricing)와 [모델 수명 주기](https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash-lite)를 다시 확인합니다.
+운영 기본 모델은 `gemini-3.1-flash-lite`입니다(Vertex AI GA, 2026-05-07 출시, `global` 위치 지원). 이전 기본값 `gemini-2.5-flash-lite`는 Vertex AI에서 **2026-10-20**에 종료되므로, 운영 API 서비스에 `GEMINI_MODEL=gemini-2.5-flash-lite`가 남아 있다면 바꿔야 합니다. 바꾸지 못한 채 종료일이 지나도 서버는 모델 404 응답을 받으면 `gemini-3.1-flash-lite`로 자동 전환하고 경고 로그를 남깁니다. Gemini 3 계열에는 `thinkingBudget`을 보내지 않습니다(간헐적 400 오류의 원인이며, 3.1 Flash-Lite의 기본 사고 수준은 가장 낮은 `MINIMAL`). 2.5 모델에는 계속 `thinkingBudget: 0`을 보냅니다. 공급자 장애·요청 한도·모델 종료로 답하지 못한 요청은 일일 무료 사용량에서 빼지 않습니다. 3.1 Flash-Lite는 2.5보다 비싸므로(2.5는 2026-08 기준 입력·출력 100만 토큰당 USD 0.10·0.40) 배포 전 [공식 가격표](https://cloud.google.com/vertex-ai/generative-ai/pricing)와 [모델 수명 주기](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-1-flash-lite)를 다시 확인합니다.
 
 ## 인증과 보안 경계
 
@@ -251,7 +251,7 @@ $env:GOOGLE_AUTH_ENABLED = "true"
 $env:APPLE_AUTH_ENABLED = "false"
 $env:PROXY_SHARED_SECRET = "a-long-random-secret"
 $env:COOKIE_SECURE = "false"
-$env:GEMINI_MODEL = "gemini-2.5-flash-lite"
+$env:GEMINI_MODEL = "gemini-3.1-flash-lite"
 # 선택: $env:GEMINI_API_KEY = "..."
 
 npm --prefix backend start
@@ -286,7 +286,7 @@ npm run dev
 | `PROXY_SHARED_SECRET` | 예 | 웹 프록시와 API 사이 공유 비밀 |
 | `COOKIE_SECURE` | 운영 예 | 운영은 기본값 `true`, 로컬 HTTP만 `false` |
 | `GEMINI_API_KEY` | 아니요 | 서비스 계정 결속 Gemini 인증 키. Secret Manager로 API 서비스에만 주입 |
-| `GEMINI_MODEL` | 아니요 | 기본값 `gemini-2.5-flash-lite` |
+| `GEMINI_MODEL` | 아니요 | 기본값 `gemini-3.1-flash-lite` |
 | `GEMINI_LOCATION` | 아니요 | Vertex AI 위치. 기본값 `global` |
 | `AI_TRANSLATION_DAILY_LIMIT` | 아니요 | 사용자당 번역 일일 한도. 기본값 `100` |
 | `AI_SUPPORT_DAILY_LIMIT` | 아니요 | 사용자당 대화 지원 일일 한도. 기본값 `30` |
@@ -333,7 +333,7 @@ gcloud run deploy lingoloop-api `
   --region asia-northeast1 `
   --source backend `
   --service-account lingoloop-api-runtime@YOUR_PROJECT.iam.gserviceaccount.com `
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=YOUR_PROJECT,APP_ORIGIN=https://YOUR_WEB_URL,COOKIE_SECURE=true,GEMINI_MODEL=gemini-2.5-flash-lite,GEMINI_LOCATION=global" `
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=YOUR_PROJECT,APP_ORIGIN=https://YOUR_WEB_URL,COOKIE_SECURE=true,GEMINI_MODEL=gemini-3.1-flash-lite,GEMINI_LOCATION=global" `
   --set-secrets "IDENTITY_API_KEY=lingoloop-identity-api-key:1,PROXY_SHARED_SECRET=lingoloop-proxy-shared-secret:1,GEMINI_API_KEY=lingoloop-gemini-api-key:1" `
   --allow-unauthenticated
 ```

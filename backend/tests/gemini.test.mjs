@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractGeminiText, GeminiProviderError, generateGeminiContent } from "../gemini.mjs";
+import { extractGeminiText, GeminiProviderError, generateGeminiContent, MODEL_SUCCESSORS, thinkingConfigFor } from "../gemini.mjs";
 
 test("Gemini 후보의 텍스트 파트를 결합한다", () => {
   assert.equal(
@@ -65,5 +65,43 @@ test("Gemini 429와 공급자 오류에 비밀 응답을 노출하지 않는다"
       fetchImpl: async () => new Response("not-json", { status: 500 }),
     }),
     (error) => error instanceof GeminiProviderError && error.status === 502 && error.code === "AI_PROVIDER_ERROR",
+  );
+});
+
+test("Gemini 3 계열에는 폐지된 thinkingBudget 을 보내지 않는다", async () => {
+  assert.deepEqual(thinkingConfigFor("gemini-2.5-flash-lite"), { thinkingConfig: { thinkingBudget: 0 } });
+  assert.deepEqual(thinkingConfigFor("gemini-3.1-flash-lite"), {});
+  let payload;
+  await generateGeminiContent({
+    apiKey: "test-secret",
+    model: "gemini-3.1-flash-lite",
+    instructions: "Translate faithfully.",
+    input: "안녕하세요",
+    generationConfig: { responseMimeType: "text/plain" },
+    fetchImpl: async (_url, init) => {
+      payload = JSON.parse(init.body);
+      return new Response(JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: "Hello" }] } }] }), { status: 200 });
+    },
+  });
+  assert.equal(payload.generationConfig.thinkingConfig, undefined);
+  assert.equal(payload.generationConfig.responseMimeType, "text/plain");
+});
+
+test("종료된 모델(404)은 후속 모델로 바꿀 수 있게 따로 알린다", async () => {
+  assert.equal(MODEL_SUCCESSORS["gemini-2.5-flash-lite"], "gemini-3.1-flash-lite");
+  await assert.rejects(
+    generateGeminiContent({
+      apiKey: "test-secret",
+      model: "gemini-2.5-flash-lite",
+      instructions: "test",
+      input: "test",
+      fetchImpl: async () => new Response(JSON.stringify({ error: { message: "Publisher Model not found" } }), { status: 404 }),
+    }),
+    (error) =>
+      error instanceof GeminiProviderError &&
+      error.modelUnavailable === true &&
+      error.status === 502 &&
+      error.code === "AI_MODEL_UNAVAILABLE" &&
+      !error.message.includes("Publisher"),
   );
 });
