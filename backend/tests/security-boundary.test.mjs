@@ -99,6 +99,29 @@ test("conversation creation decides DM policy and relationships in its create tr
   assert.doesNotMatch(route, /await directMessageDecisionInTransaction\((?!transaction)/);
 });
 
+test("matches-only DMs use evidence the sender cannot regenerate, and declined senders cool down", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const helper = source.slice(
+    source.indexOf("async function directMessageDecisionInTransaction"),
+    source.indexOf("async function profilesByIds"),
+  );
+  const createRoute = source.slice(source.indexOf('app.post("/api/conversations"'), source.indexOf('app.get("/api/conversations"'));
+  const declineRoute = source.slice(
+    source.indexOf('app.delete("/api/conversations/:conversationId/request"'),
+    source.indexOf('app.delete("/api/conversations/:conversationId",'),
+  );
+
+  assert.match(helper, /collection\("dailyMatches"\)\.doc\(recipientId\)/);
+  assert.doesNotMatch(helper, /collection\("dailyMatches"\)\.doc\(senderId\)/);
+  assert.match(helper, /dmRelationships\(\{/);
+  // 새 요청(pending)을 만들 때만 거절 기록과 하루 한도를 봅니다. 모두 같은 transaction 안입니다.
+  assert.match(
+    createRoute,
+    /if \(!snapshot\.exists && decision\.status === "pending"\) \{[\s\S]*transaction\.getAll\([\s\S]*dmRequestCooldowns[\s\S]*requestCooldownUntil[\s\S]*takeWriteQuota\(transaction, quotaSnapshot, "messageRequests"\)[\s\S]*transaction\.create\(reference/,
+  );
+  assert.match(declineRoute, /transaction\.set\(db\.collection\("dmRequestCooldowns"\)\.doc\(senderId \+ "_" \+ req\.auth\.uid\)/);
+});
+
 test("notification reads compare event identity and read-all uses transaction snapshots", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const routes = source.slice(

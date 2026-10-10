@@ -12,7 +12,14 @@ import {
   notificationEventIdentity,
   NOTIFICATION_TYPES,
 } from "./notifications.mjs";
-import { decideDmRoute, spamSignals } from "./policy.mjs";
+import {
+  decideDmRoute,
+  dmRelationships,
+  DM_REQUEST_COOLDOWN_MS,
+  requestCooldownUntil,
+  spamSignals,
+} from "./policy.mjs";
+import { nextWriteQuota, writeQuotaMessage } from "./write-quota.mjs";
 import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-limit.mjs";
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import { registerHomeRoutes } from "./homes.mjs";
@@ -775,19 +782,21 @@ async function directMessageDecisionInTransaction(transaction, senderId, recipie
     db.collection("likes").doc(recipientId + "_" + senderId),
     db.collection("follows").doc(senderId + "_" + recipientId),
     db.collection("follows").doc(recipientId + "_" + senderId),
-    db.collection("dailyMatches").doc(senderId).collection("days").doc(date),
+    // 받는 사람의 오늘의 추천입니다. 보내는 사람 자신의 추천은 조건을 바꿔 몇 번이고 다시
+    // 뽑을 수 있어 매칭의 근거가 되지 못합니다(policy.mjs dmRelationships).
+    db.collection("dailyMatches").doc(recipientId).collection("days").doc(date),
   ];
-  const [policySnapshot, senderLike, recipientLike, senderFollow, recipientFollow, dailyMatch] =
+  const [policySnapshot, senderLike, recipientLike, senderFollow, recipientFollow, recipientDailyMatch] =
     await transaction.getAll(...references);
   const policy = policySnapshot.exists ? { ...DEFAULT_DM_PRIVACY, ...policySnapshot.data() } : DEFAULT_DM_PRIVACY;
-  const systemMatched = Boolean(
-    dailyMatch.exists && dailyMatch.data()?.recommendations?.some((item) => item.partnerId === recipientId),
-  );
-  const relationships = {
-    matched: (senderLike.exists && recipientLike.exists) || systemMatched,
-    follower: senderFollow.exists,
-    mutualFollow: senderFollow.exists && recipientFollow.exists,
-  };
+  const relationships = dmRelationships({
+    senderId,
+    senderLiked: senderLike.exists,
+    recipientLiked: recipientLike.exists,
+    senderFollows: senderFollow.exists,
+    recipientFollows: recipientFollow.exists,
+    recipientRecommendations: recipientDailyMatch.exists ? recipientDailyMatch.data()?.recommendations : [],
+  });
   const route = decideDmRoute(policy, relationships);
   if (route.status !== "denied") {
     return { status: route.status, policy: route.scope, relationships };
@@ -800,6 +809,30 @@ async function profilesByIds(ids) {
   if (!unique.length) return new Map();
   const snapshots = await db.getAll(...unique.map((id) => db.collection("profiles").doc(id)));
   return new Map(snapshots.filter((snapshot) => snapshot.exists).map((snapshot) => [snapshot.id, snapshot.data()]));
+}
+
+/**
+ * 사용자별 하루 쓰기 한도(write-quota.mjs).
+ *
+ * 행동을 기록하는 transaction 안에서 같은 문서를 읽고 고칩니다 — 실제로 쓴 것만 세고,
+ * 동시에 보낸 요청도 한도를 넘지 못합니다. Firestore transaction 은 읽기를 쓰기보다 먼저
+ * 끝내야 하므로, 읽기 단계에서 writeQuotaReference 를 읽어 두고 쓰기 직전에 takeWriteQuota 를 부릅니다.
+ */
+function writeQuotaReference(uid) {
+  return db.collection("writeQuotas").doc(uid);
+}
+
+function takeWriteQuota(transaction, quotaSnapshot, action) {
+  const day = todayInSeoul();
+  const quota = nextWriteQuota(quotaSnapshot.exists ? quotaSnapshot.data() : null, action, day);
+  if (!quota.allowed) {
+    throw new ApiError(429, "RATE_LIMITED", writeQuotaMessage(action), {
+      action,
+      limit: quota.limit,
+      resetsAt: nextRefreshAt(day),
+    });
+  }
+  transaction.set(quotaSnapshot.ref, { ...quota.next, updatedAt: nowIso() });
 }
 
 function notificationItems(recipientId) {
@@ -2141,6 +2174,23 @@ app.post("/api/conversations", requireUser, async (req, res) => {
     // 정책·관계 판정도 이 transaction의 읽기 단계에 둡니다. 아래 create/update보다
     // 먼저 끝나므로 Firestore의 read-before-write 규칙도 지킵니다.
     const decision = await directMessageDecisionInTransaction(transaction, req.auth.uid, partnerId);
+    if (!snapshot.exists && decision.status === "pending") {
+      // 새 요청만 제한합니다: 거절당한 뒤 7일, 하루 20개. 바로 열리는 대화는 세지 않습니다.
+      const [cooldownSnapshot, quotaSnapshot] = await transaction.getAll(
+        db.collection("dmRequestCooldowns").doc(req.auth.uid + "_" + partnerId),
+        writeQuotaReference(req.auth.uid),
+      );
+      const cooldownUntil = requestCooldownUntil(cooldownSnapshot.exists ? cooldownSnapshot.data() : null);
+      if (cooldownUntil) {
+        throw new ApiError(
+          429,
+          "MESSAGE_REQUEST_COOLDOWN",
+          "상대방이 메시지 요청을 거절해 7일 동안 다시 요청할 수 없습니다.",
+          { retryAt: new Date(cooldownUntil).toISOString() },
+        );
+      }
+      takeWriteQuota(transaction, quotaSnapshot, "messageRequests");
+    }
     if (!snapshot.exists) {
       transaction.create(reference, {
         id,
@@ -2280,6 +2330,15 @@ app.delete("/api/conversations/:conversationId/request", requireUser, async (req
       sourceId: id,
     });
     transaction.delete(reference);
+    // 거절한 뒤 같은 사람이 곧바로 새 요청을 보내지 못하게 7일 동안 기억합니다(policy.mjs).
+    const declinedAt = nowIso();
+    transaction.set(db.collection("dmRequestCooldowns").doc(senderId + "_" + req.auth.uid), {
+      senderId,
+      recipientId: req.auth.uid,
+      declinedAt,
+      // Firestore TTL 정책이 지울 수 있는 Timestamp 입니다. 판정은 declinedAt 으로 합니다.
+      expireAt: new Date(Date.parse(declinedAt) + DM_REQUEST_COOLDOWN_MS),
+    });
   });
   return success(res, req, { id, dismissed: true });
 });
