@@ -937,4 +937,6 @@ export const en: Record<MessageKey, string> = {
   "PC 웹의 3D 방에 액자를 놓으면 사진을 걸 수 있어요.": "Place a frame in your 3D room on the desktop web to hang a photo.",
   "이 기기에서는 재생할 수 없는 음성이에요.": "This voice message can't be played on this device.",
   "마이크를 쓸 수 없어요. 설정에서 마이크 권한을 허용해 주세요.": "Can't use the microphone. Allow microphone access in Settings.",
+  "응답이 늦어요. 연결을 확인하고 다시 시도해 주세요.": "The server is taking too long. Check your connection and try again.",
+  "로그인 상태를 확인하지 못했어요. 연결되면 다시 시도해 주세요.": "We couldn't check your sign-in. Try again once you're connected.",
 };
