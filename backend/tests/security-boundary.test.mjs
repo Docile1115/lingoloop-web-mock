@@ -122,6 +122,29 @@ test("matches-only DMs use evidence the sender cannot regenerate, and declined s
   assert.match(declineRoute, /transaction\.set\(db\.collection\("dmRequestCooldowns"\)\.doc\(senderId \+ "_" \+ req\.auth\.uid\)/);
 });
 
+test("per-user daily write limits are taken inside each write transaction and never on reads", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end));
+  const routes = [
+    ["posts", section('app.post("/api/posts"', 'app.delete("/api/posts/:postId"')],
+    ["replies", section('app.post("/api/posts/:postId/replies"', 'app.get("/api/corrections/received"')],
+    ["reactions", section('app.post("/api/posts/:postId/like"', 'app.post("/api/conversations"')],
+    ["reactions", section('app.post("/api/partners/:partnerId/like"', 'app.post("/api/partners/:partnerId/follow"')],
+    ["follows", section('app.post("/api/partners/:partnerId/follow"', 'app.get("/api/partners/:partnerId/follow-counts"')],
+    ["reports", section('app.post("/api/reports"', 'app.get("/api/account/verification"')],
+    ["messageRequests", section('app.post("/api/conversations"', 'app.get("/api/conversations"')],
+  ];
+  for (const [action, route] of routes) {
+    assert.match(
+      route,
+      new RegExp('db\\.runTransaction[\\s\\S]*writeQuotaReference\\(req\\.auth\\.uid\\)[\\s\\S]*takeWriteQuota\\(transaction, quotaSnapshot, "' + action + '"\\)'),
+      action,
+    );
+  }
+  // 위 경로 말고는 쓰지 않습니다(읽기에는 한도를 걸지 않습니다).
+  assert.equal(source.match(/takeWriteQuota\(transaction, quotaSnapshot, "/g).length, routes.length);
+});
+
 test("notification reads compare event identity and read-all uses transaction snapshots", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const routes = source.slice(

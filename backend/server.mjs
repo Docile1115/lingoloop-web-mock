@@ -1590,14 +1590,16 @@ app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
   const reference = db.collection("likes").doc(req.auth.uid + "_" + partnerId);
   const reverseReference = db.collection("likes").doc(partnerId + "_" + req.auth.uid);
   const result = await db.runTransaction(async (transaction) => {
-    const [existing, reverse] = await Promise.all([
+    const [existing, reverse, quotaSnapshot] = await Promise.all([
       transaction.get(reference),
       transaction.get(reverseReference),
+      transaction.get(writeQuotaReference(req.auth.uid)),
     ]);
     await assertNotBlockedInTransaction(transaction, req.auth.uid, [partnerId], {
       message: "차단된 상대에게는 마음을 보낼 수 없습니다.",
     });
     if (!existing.exists) {
+      takeWriteQuota(transaction, quotaSnapshot, "reactions");
       transaction.create(reference, {
         fromUserId: req.auth.uid,
         toUserId: partnerId,
@@ -1639,12 +1641,16 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
     ? null
     : optionalBoolean(req.body.following, "following", false);
   const following = await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(reference);
+    const [snapshot, quotaSnapshot] = await Promise.all([
+      transaction.get(reference),
+      transaction.get(writeQuotaReference(req.auth.uid)),
+    ]);
     await assertNotBlockedInTransaction(transaction, req.auth.uid, [partnerId], {
       message: "차단된 상대를 팔로우할 수 없습니다.",
     });
     const next = requestedFollowing ?? !snapshot.exists;
     if (next === snapshot.exists) return next;
+    takeWriteQuota(transaction, quotaSnapshot, "follows");
     if (next) {
       transaction.create(reference, { fromUserId: req.auth.uid, toUserId: partnerId, createdAt: timestamp });
       putNotification(transaction, {
@@ -1782,7 +1788,11 @@ app.post("/api/posts", requireUser, async (req, res) => {
     createdAt: timestamp,
     updatedAt: timestamp,
   };
-  await db.collection("posts").doc(post.id).create(post);
+  await db.runTransaction(async (transaction) => {
+    const quotaSnapshot = await transaction.get(writeQuotaReference(req.auth.uid));
+    takeWriteQuota(transaction, quotaSnapshot, "posts");
+    transaction.create(db.collection("posts").doc(post.id), post);
+  });
   return success(res, req, post, 201);
 });
 
@@ -1897,9 +1907,10 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
   const postReference = db.collection("posts").doc(postId);
   const parentReference = parentId ? postReference.collection("replies").doc(parentId) : null;
   await db.runTransaction(async (transaction) => {
-    const [snapshot, parentSnapshot] = await Promise.all([
+    const [snapshot, parentSnapshot, quotaSnapshot] = await Promise.all([
       transaction.get(postReference),
       parentReference ? transaction.get(parentReference) : Promise.resolve(null),
+      transaction.get(writeQuotaReference(req.auth.uid)),
     ]);
     if (!snapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
     if (parentReference && !parentSnapshot?.exists) {
@@ -1912,6 +1923,7 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
       code: "POST_NOT_FOUND",
       message: "게시물을 찾을 수 없습니다.",
     });
+    takeWriteQuota(transaction, quotaSnapshot, "replies");
     transaction.create(postReference.collection("replies").doc(reply.id), reply);
     transaction.update(postReference, {
       comments: kind === "reply" ? (current.comments || 0) + 1 : current.comments || 0,
@@ -2094,9 +2106,10 @@ app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
   const requestedLiked = req.body?.liked === undefined ? null : optionalBoolean(req.body.liked, "liked", false);
   const notificationEventId = crypto.randomUUID();
   const result = await db.runTransaction(async (transaction) => {
-    const [postSnapshot, reactionSnapshot] = await Promise.all([
+    const [postSnapshot, reactionSnapshot, quotaSnapshot] = await Promise.all([
       transaction.get(postReference),
       transaction.get(reactionReference),
+      transaction.get(writeQuotaReference(req.auth.uid)),
     ]);
     if (!postSnapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
     const post = postSnapshot.data();
@@ -2109,6 +2122,7 @@ app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
     if (liked === reactionSnapshot.exists) {
       return { liked, likes: Math.max(0, Number(post.likes || 0)) };
     }
+    takeWriteQuota(transaction, quotaSnapshot, "reactions");
     const timestamp = nowIso();
     if (liked) {
       transaction.create(reactionReference, { userId: req.auth.uid, createdAt: timestamp });
@@ -2739,7 +2753,11 @@ app.post("/api/reports", requireUser, async (req, res) => {
     nextUpdateBy: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     reporterAccountStatus: "active",
   };
-  await db.collection("reports").doc(report.id).create(report);
+  await db.runTransaction(async (transaction) => {
+    const quotaSnapshot = await transaction.get(writeQuotaReference(req.auth.uid));
+    takeWriteQuota(transaction, quotaSnapshot, "reports");
+    transaction.create(db.collection("reports").doc(report.id), report);
+  });
   return success(res, req, {
     ...report,
     safetyMessage: "신고가 접수되었습니다. 신고자 계정은 신고만으로 제한되지 않습니다.",

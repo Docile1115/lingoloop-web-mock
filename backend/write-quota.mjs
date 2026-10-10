@@ -10,6 +10,14 @@
  * 저장은 호출하는 쪽이 행동을 기록하는 transaction 안에서 합니다.
  */
 export const WRITE_LIMITS = Object.freeze({
+  posts: Object.freeze({ limit: 30, label: "게시물 작성" }),
+  // 댓글과 교정을 함께 셉니다.
+  replies: Object.freeze({ limit: 200, label: "댓글·교정 작성" }),
+  // 글 좋아요와 파트너에게 보내는 마음을 함께 셉니다. 누르고 취소하는 것도 한 번씩입니다.
+  reactions: Object.freeze({ limit: 500, label: "좋아요·마음 보내기" }),
+  // 팔로우와 언팔로우를 함께 셉니다 — 반복하면 상대 알림함에 알림이 계속 생깁니다.
+  follows: Object.freeze({ limit: 200, label: "팔로우 변경" }),
+  reports: Object.freeze({ limit: 30, label: "신고 접수" }),
   messageRequests: Object.freeze({ limit: 20, label: "새 메시지 요청" }),
 });
 

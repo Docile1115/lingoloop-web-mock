@@ -31,4 +31,23 @@ test("quota messages name the action and the limit in Korean", () => {
     writeQuotaMessage("messageRequests"),
     "오늘 새 메시지 요청 한도(20회)를 모두 사용했습니다. 내일 다시 시도해 주세요.",
   );
+  assert.equal(writeQuotaMessage("posts"), "오늘 게시물 작성 한도(30회)를 모두 사용했습니다. 내일 다시 시도해 주세요.");
+});
+
+test("write actions have generous daily caps that stop scripted floods", () => {
+  const limits = Object.fromEntries(Object.entries(WRITE_LIMITS).map(([action, rule]) => [action, rule.limit]));
+  assert.deepEqual(limits, { posts: 30, replies: 200, reactions: 500, follows: 200, reports: 30, messageRequests: 20 });
+  for (const [action, { limit }] of Object.entries(WRITE_LIMITS)) {
+    let current = null;
+    for (let count = 1; count <= limit; count += 1) {
+      const result = nextWriteQuota(current, action, day);
+      assert.equal(result.allowed, true);
+      assert.equal(result.used, count);
+      current = result.next;
+    }
+    assert.equal(nextWriteQuota(current, action, day).allowed, false, action);
+    // 한 행동이 한도에 닿아도 다른 행동은 그대로입니다.
+    const otherAction = action === "posts" ? "reports" : "posts";
+    assert.equal(nextWriteQuota(current, otherAction, day).allowed, true);
+  }
 });
