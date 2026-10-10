@@ -213,7 +213,7 @@ test("Gemini AI는 운영 API와 실제 대화 UI에 연결된다", async () => 
     readFile(new URL("../backend/Dockerfile", import.meta.url), "utf8"),
   ]);
 
-  assert.match(backend, /GEMINI_MODEL = process\.env\.GEMINI_MODEL \|\| "gemini-2\.5-flash-lite"/);
+  assert.match(backend, /GEMINI_MODEL = process\.env\.GEMINI_MODEL \|\| "gemini-3\.1-flash-lite"/);
   assert.match(backend, /AI_NOT_CONFIGURED/);
   assert.match(backend, /generateGeminiContent/);
   assert.match(backend, /aiplatform\.googleapis\.com/);

@@ -4254,9 +4254,9 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   .single-match-card > footer { margin-top: var(--sp-2); }
   .single-match-card > footer button { min-height: 34px; font-size: 13px; }
   .next-match-note { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-2); }
-  .beta-access-note,
-  .beta-access-note strong,
-  .beta-access-note small,
+  .beta-access-note { margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
+  .beta-access-note strong { font-size: 13px; }
+  .beta-access-note small { font-size: 12px; }
   .next-match-note > svg { width: 14px; }
   .next-match-note small { display: none; }
   .next-match-note button { padding-right: 0; }
