@@ -6,6 +6,7 @@
  */
 import { StyleSheet, Text, TextInput, View } from "react-native";
 import { interestName } from "@shared/live-data";
+import { GOAL_PRESETS } from "@shared/profile-options";
 import { t } from "../lib/i18n";
 import {
   AVAILABILITY,
@@ -34,7 +35,7 @@ export function ProfileFields({
   onChange: (next: ProfileDraft) => void;
   errors: Partial<Record<ProfileField, string>>;
   disabled?: boolean;
-  /** 보여줄 칸. 처음 설정은 자기소개를 빼고 관심사·시간을 더합니다. */
+  /** 보여줄 칸. 처음 설정은 자기소개를 뺍니다. */
   fields: readonly ProfileField[];
 }) {
   const c = useTheme();
@@ -180,6 +181,15 @@ export function ProfileFields({
       {show("goal") ? (
         <>
           <Text style={[styles.label, { color: c.ink }]}>{t("학습 목표")}</Text>
+          {/* 웹의 처음 설정과 같은 예시. 누르면 그 문구가 목표가 되고, 아래 칸에서 직접 고쳐 써도 됩니다. */}
+          <View style={styles.chips}>
+            {GOAL_PRESETS.map((preset) => {
+              const title = t(preset.title);
+              return (
+                <Chip key={preset.id} label={title} active={draft.goal.trim() === title} onPress={() => !disabled && set({ goal: title })} />
+              );
+            })}
+          </View>
           <TextInput
             style={input}
             value={draft.goal}

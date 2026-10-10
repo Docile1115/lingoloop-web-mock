@@ -2,7 +2,7 @@
  * 프로필 편집. 저장하면 서버에 남고 웹에서도 바로 보입니다.
  *
  * 웹의 프로필 편집과 같은 칸(이름·자기소개·나이·성별·사는 곳·가르칠 수 있는 말·
- * 배우는 말·단계·목표)을 고칠 수 있습니다. 칸 모양과 검사는 처음 설정과 같이 씁니다.
+ * 배우는 말·단계·목표·관심사·대화 가능한 시간)을 고칠 수 있습니다. 칸 모양과 검사는 처음 설정과 같이 씁니다.
  */
 import { useCallback, useState } from "react";
 import {
@@ -33,7 +33,7 @@ import { Avatar, Loading, PrimaryButton } from "../ui";
 import { ProfileFields } from "../ui/ProfileFields";
 
 const FIELDS: readonly ProfileField[] = [
-  "name", "bio", "age", "gender", "country", "native", "learning", "level", "goal",
+  "name", "bio", "age", "gender", "country", "native", "learning", "level", "goal", "interests", "availability",
 ];
 
 export function EditProfileScreen({
@@ -71,7 +71,12 @@ export function EditProfileScreen({
     try {
       const saved = await api<Me>("/api/profile", {
         method: "PATCH",
-        body: JSON.stringify({ ...profilePatch(draft, me), bio: draft.bio.trim() }),
+        body: JSON.stringify({
+          ...profilePatch(draft, me),
+          bio: draft.bio.trim(),
+          interests: draft.interests,
+          availability: draft.availability,
+        }),
       });
       applyMe(saved);
       onDone();

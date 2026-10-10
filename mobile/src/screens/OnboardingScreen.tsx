@@ -93,6 +93,16 @@ export function OnboardingScreen() {
           completeOnboarding: true,
         }),
       });
+      // 오늘의 파트너는 배울 언어의 원어민을 찾습니다. 서버 기본값(영어)에 두면 일본어를 배우는
+      // 사람에게도 영어 원어민만 추천됩니다(웹의 처음 설정과 같음). 탭이 열리기 전에 저장하고,
+      // 실패해도 설정은 끝난 것으로 둡니다 — 매칭 조건 화면에서 다시 고를 수 있습니다.
+      await api("/api/matching/preferences", {
+        method: "POST",
+        body: JSON.stringify({
+          targetLanguages: [draft.learning],
+          ...(draft.availability.length ? { availability: draft.availability } : {}),
+        }),
+      }).catch(() => undefined);
       // 저장은 됐는데 응답에 완료 시각이 빠졌더라도 이번 실행에서는 다시 묻지 않습니다.
       // 서버 값이 기준이라 다음 실행 때 /api/auth/me 가 다시 판단합니다.
       applyMe(saved.onboardedAt === null ? { ...saved, onboardedAt: undefined } : saved);

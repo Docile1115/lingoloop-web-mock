@@ -11,7 +11,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-nat
 import { Ionicons } from "@expo/vector-icons";
 import { ApiError, get, post } from "../lib/api";
 import { msg, t, type MessageKey } from "../lib/i18n";
-import { AVAILABILITY, INTERESTS, LEVELS, LEVEL_LABELS, languageLabel } from "../lib/profile";
+import { AVAILABILITY, INTERESTS, LANGUAGE_CODES, LEVELS, LEVEL_LABELS, languageLabel } from "../lib/profile";
 import { emitSignal } from "../lib/signals";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, type } from "../lib/theme";
@@ -24,7 +24,6 @@ const INTENTS: Array<[string, MessageKey]> = [
   ["voice-practice", msg("음성 연습")],
   ["culture-exchange", msg("문화 교류")],
 ];
-const LANGUAGES = ["ko", "en", "ja", "es", "fr", "de"];
 
 type Preferences = {
   targetLanguages: string[];
@@ -90,7 +89,8 @@ export function FiltersScreen({ onDone }: { onDone: () => void }) {
     }));
 
   // 이미 할 줄 아는 말을 배울 상대로 고를 이유가 없습니다.
-  const targets = LANGUAGES.filter((code) => !myNative.includes(code));
+  // 서버가 받는 언어 전부(웹과 같음). 중국어가 빠져 있어, 처음 설정에서 중국어를 고른 사람은 여기서 고른 언어가 보이지 않았습니다.
+  const targets = LANGUAGE_CODES.filter((code) => !myNative.includes(code));
 
   return (
     <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={styles.page}>
