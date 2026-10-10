@@ -24,22 +24,16 @@ import {
   Eye,
   EyeOff,
   Flag,
-  Globe2,
-  Hand,
   Heart,
   Image as ImageIcon,
   Languages,
   Link as LinkIcon,
   LogOut,
   LockKeyhole,
-  Maximize2,
   MessageCircle,
   Mic,
-  MicOff,
-  Minimize2,
   PenLine,
   Phone,
-  Play,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -64,13 +58,11 @@ import {
   X,
   CalendarClock,
   MapPin,
+  Mail,
+  AlertCircle,
   type LucideIcon,
 } from "lucide-react";
 import {
-  currentUser,
-  initialRoomMessages,
-  languageOptions,
-  rooms,
   type SavedPhrase,
   type Accent,
   type ChatMessage,
@@ -78,14 +70,24 @@ import {
   type FeedPost,
   type Partner,
   type PostReply,
-  type PracticeRoom,
-  type RoomMessage,
 } from "@/app/lib/demo-data";
-import { I18nProvider, useLocaleRerender, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
+import { I18nProvider, useLocaleRerender, currentLocaleSnapshot, localizeClock, LOCALES, LOCALE_LABEL, msg, t, tx, useLocale, type MessageKey } from "@/app/lib/i18n";
 import { SignIn } from "./SignIn";
+import { FirstRunSetup } from "./FirstRunSetup";
+import { ExchangeSessionBar, type ExchangeSession } from "./ExchangeSessionBar";
+import {
+  LEARNING_LEVELS,
+  LEVEL_LABELS,
+  PROFILE_LANGUAGES,
+  availabilityLabels,
+  countryLabels,
+  interestLabels,
+  type LearningLevel,
+  type MatchAvailability,
+} from "@/app/lib/profile-options";
 import { ProfileRoom } from "./ProfileRoom";
 import { HomeDialog, HomeDirectory } from "./SocialHome";
-import { api, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, type ApiNotification, type ApiNotificationPage, type ApiCreateMessageResult, matchReasonText, type MatchReasonCode } from "../lib/live-data";
+import { api, ApiError, SESSION_EXPIRED_EVENT, knowsLocalTime, interestName, accentFor, relativeTime as liveRelativeTime, type ApiProfile, type ApiPost, type ApiConversation, type ApiMessage, toFeedPost, toConversation, toChatMessage, toSavedPhrase, toPostReply, toPartner, languageName, clockTime, type ApiSavedPhrase, type ApiCorrection, type ApiReceivedLike, type ApiReply, type ApiNotification, type ApiNotificationPage, type ApiCreateMessageResult, matchReasonText, type MatchReasonCode } from "../lib/live-data";
 import { canSubmit, checkText, LIMITS, readStoredJson } from "@/app/lib/validation";
 import {
   AVATAR_CATEGORIES,
@@ -104,9 +106,8 @@ import { AVATAR_CATEGORY_LABELS as avatarCategoryLabels, AVATAR_GROUP_LABELS, AV
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type Section = "discover" | "community" | "chats" | "practice" | "learn";
+type Section = "discover" | "community" | "chats" | "learn";
 
-type MatchAvailability = "weekday-morning" | "weekday-evening" | "weekend-morning" | "weekend-evening";
 type MatchIntent = "language-exchange" | "friendship" | "voice-practice" | "culture";
 type DmScope = "matches" | "mutuals" | "anyone";
 
@@ -180,6 +181,12 @@ type ReloadedChats = { conversations: Conversation[]; requestIds: Set<string> };
  * 프로필 머리줄·새 글의 언어가 옛 값으로 남았습니다.
  * "프로필 공개 범위" 도 있었지만 서버에 보내지도 저장하지도 않아 뺐습니다.
  */
+/** 실패 안내에 성공 표시(체크)를 붙이지 않도록 토스트의 성격을 함께 넘깁니다. */
+type ToastTone = "success" | "error";
+
+/** 처음 불러오는 중 / 받음 / 처음부터 받지 못함. */
+type LoadState = "loading" | "ready" | "error";
+
 type ProfileDraft = {
   name: string;
   bio: string;
@@ -191,6 +198,11 @@ type ProfileDraft = {
   nativeCode: string;
   learningCode: string;
   learningLevel: string;
+  /** 사는 나라. 예전에는 고칠 자리가 없어 새 계정은 모두 "대한민국"으로 남았습니다. */
+  countryCode: string;
+  /** 주로 활동하는 시간과 관심사. 추천 이유와 프로필에 쓰입니다. */
+  availability: string[];
+  interests: string[];
 };
 
 /** 커뮤니티 탭. 헬로톡과 같은 순서 — 최신이 기본입니다. */
@@ -207,18 +219,14 @@ const emptyFeedFilters: FeedFilters = { nativeCode: "", learningCode: "" };
 type ModalState =
   | { type: "new-chat" }
   | { type: "review"; items: SavedPhrase[] }
-  | { type: "profile"; partner: Partner }
   | { type: "filters" }
   | { type: "community-filters" }
   | { type: "compose" }
   | { type: "search" }
-  | { type: "room"; room: PracticeRoom }
-  | { type: "create-room" }
   | { type: "exchange" }
   | { type: "partner-list" }
   | { type: "likes" }
-  | { type: "report"; target: string; targetId?: string; targetType?: "user" | "post" | "room" }
-  | { type: "onboarding" }
+  | { type: "report"; target: string; targetId?: string; targetType?: "user" | "post" | "room"; blockId?: string }
   | { type: "confirm"; title: string; body: string; confirmLabel: string; onConfirm: () => void }
   | null;
 
@@ -231,6 +239,8 @@ type ReportOptions = {
   block?: boolean;
   targetId?: string;
   targetType?: "user" | "post" | "room";
+  /** "함께 차단"할 사람. 글을 신고하면 신고 대상은 글이고 차단 대상은 글쓴이입니다. */
+  blockId?: string;
 };
 
 /** mock API 가 돌려주는 신고 접수 상태 중 화면에서 쓰는 부분. */
@@ -274,25 +284,6 @@ const defaultMatchPreferences: MatchPreferences = {
 const MAX_PREFERRED_COUNTRIES = 8;
 
 /* 라벨 표는 화면 밖에서 만들어지므로 문구를 msg() 로 표시해 두고, 읽는 쪽에서 t() 로 번역합니다. */
-const languageLabels: Record<string, MessageKey> = { en: msg("영어"), es: msg("스페인어"), ja: msg("일본어") };
-/* 서버(backend/server.mjs 의 COUNTRIES)가 받는 나라 전부입니다. 예전에는 여섯 곳만
-   골를 수 있어서, 브라질·베트남 사람은 지역 조건에 아예 나오지 않았습니다. */
-const countryLabels: Record<string, MessageKey> = {
-  KR: msg("대한민국"),
-  US: msg("미국"),
-  JP: msg("일본"),
-  CN: msg("중국"),
-  GB: msg("영국"),
-  CA: msg("캐나다"),
-  AU: msg("호주"),
-  FR: msg("프랑스"),
-  DE: msg("독일"),
-  ES: msg("스페인"),
-  BR: msg("브라질"),
-  VN: msg("베트남"),
-};
-const interestLabels: Record<string, MessageKey> = { movies: msg("영화"), travel: msg("여행"), coffee: msg("카페"), music: msg("음악"), technology: msg("기술"), cooking: msg("요리"), books: msg("독서"), running: msg("운동") };
-
 /** 코드를 현재 언어의 라벨로. 모르는 코드는 원래 값을 그대로 보여줍니다. */
 const labelOf = (table: Record<string, MessageKey>, code: string): string =>
   table[code] ? t(table[code]) : code;
@@ -316,41 +307,11 @@ function normalizeMatchPreferences(preferences: MatchPreferences): MatchPreferen
   };
 }
 
-const availabilityLabels: Record<MatchAvailability, MessageKey> = {
-  "weekday-morning": msg("평일 아침"),
-  "weekday-evening": msg("평일 저녁"),
-  "weekend-morning": msg("주말 오전"),
-  "weekend-evening": msg("주말 저녁"),
-};
-
 const intentLabels: Record<MatchIntent, string> = {
   "language-exchange": msg("언어 교환"),
   friendship: msg("친구 만들기"),
   "voice-practice": msg("음성 연습"),
   culture: msg("문화 교류"),
-};
-
-const dailyMatchDetails: Record<string, { reasons: MessageKey[]; icebreaker: string }> = {
-  maya: {
-    reasons: [msg("영어 원어민"), msg("평일 저녁 활동"), msg("영화·카페 관심사")],
-    icebreaker: "Hi Maya! What is the best movie you watched at a café lately?",
-  },
-  omar: {
-    reasons: [msg("영어 원어민"), msg("짧은 음성 연습"), msg("기술 관심사")],
-    icebreaker: "Hi Omar! What kind of game are you working on these days?",
-  },
-  lucas: {
-    reasons: [msg("여행 목표 일치"), msg("한국어 B1"), msg("저녁 활동")],
-    icebreaker: "Hi Lucas! Which Korean city is at the top of your travel list?",
-  },
-  aiko: {
-    reasons: [msg("학습 리듬 일치"), msg("디자인 관심사"), msg("꼼꼼한 교정")],
-    icebreaker: "Hi Aiko! What design detail inspired you this week?",
-  },
-  clara: {
-    reasons: [msg("주말 활동"), msg("문장 교정 선호"), msg("문화 관심사")],
-    icebreaker: "Hi Clara! Which museum would you recommend to a first-time visitor?",
-  },
 };
 
 /** mock 백엔드(mock-api/data.ts)에서 conversationGuides 가 준비된 파트너 ID 목록. */
@@ -359,10 +320,22 @@ const dailyMatchDetails: Record<string, { reasons: MessageKey[]; icebreaker: str
 const shortReportId = (id: string): string => `LL-${id.replace(/^report-/, "").slice(0, 8).toUpperCase()}`;
 
 /** 보이스룸 실시간 자막 데모 문장. */
-const ROOM_CAPTION = "What is one small win you had today?";
 
 /** 한글 포함 여부(가-힣 유니코드 범위) — 번역 대상 언어와 음성 언어를 고를 때 씁니다. */
 const HANGUL_PATTERN = /[\uAC00-\uD7A3]/;
+const KANA_PATTERN = /[\u3040-\u30FF]/;
+
+/**
+ * 번역할 언어. 읽는 사람의 화면 언어로 옮기되, 글이 이미 그 언어로 보이면 그 사람이
+ * 배우는 말로 옮깁니다. 예전에는 화면 언어와 상관없이 "한글이면 영어, 아니면 한국어"였습니다.
+ */
+function translationTarget(text: string, learningCode?: string): string {
+  const locale = currentLocaleSnapshot();
+  const alreadyInLocale =
+    locale === "ko" ? HANGUL_PATTERN.test(text) : locale === "ja" ? KANA_PATTERN.test(text) : !HANGUL_PATTERN.test(text) && !KANA_PATTERN.test(text);
+  if (!alreadyInLocale) return locale;
+  return learningCode && learningCode !== locale ? learningCode : locale === "en" ? "ko" : "en";
+}
 
 /** 화면의 DM 수신 범위 ↔ mock API(/api/dm/privacy) 의 whoCanMessage 값 대응. */
 const dmScopeToApi: Record<DmScope, string> = { matches: "matches", mutuals: "mutual-follows", anyone: "everyone" };
@@ -417,15 +390,17 @@ const MAX_DAILY_PARTNERS = 12;
  * 현지 시각은 마운트 이후에만 계산합니다.
  * 서버와 클라이언트의 시각이 달라 하이드레이션이 깨지기 때문입니다.
  */
-function useLocalTime(offsetHours: number): string {
+/** 상대의 현지 시각. 나라의 시간대를 모르면(null) 빈 문자열이라 화면이 그 줄을 감춥니다. */
+function useLocalTime(offsetHours: number | null): string {
   const [time, setTime] = useState("");
   useEffect(() => {
+    if (offsetHours === null) return;
     const tick = () => setTime(localTimeOf(offsetHours));
     tick();
     const id = window.setInterval(tick, 60_000);
     return () => window.clearInterval(id);
   }, [offsetHours]);
-  return time;
+  return offsetHours === null ? "" : time;
 }
 
 /** 나(한국) 기준 시차를 적용한 상대 현지 시각. */
@@ -560,18 +535,20 @@ function LingoLoopScreens({
   const feedFilterCount = (feedFilters.nativeCode ? 1 : 0) + (feedFilters.learningCode ? 1 : 0);
   const [translatedPosts, setTranslatedPosts] = useState<Set<string>>(new Set());
   const [postTranslations, setPostTranslations] = useState<Record<string, string>>({});
-  const [openCorrections, setOpenCorrections] = useState<Set<string>>(new Set());
-  const [toast, setToast] = useState<string | null>(null);
-  const [roomHandRaised, setRoomHandRaised] = useState(false);
-  const [roomMicOn, setRoomMicOn] = useState(false);
-  const [minimizedRoom, setMinimizedRoom] = useState<PracticeRoom | null>(null);
-  const [roomMessages, setRoomMessages] = useState<RoomMessage[]>(initialRoomMessages);
+  const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null);
   const [exchangeLength, setExchangeLength] = useState(15);
+  /** 진행 중인 교환 세션(대화방 하나에 하나). 이 기기에서만 재는 턴 타이머입니다. */
+  const [exchangeSession, setExchangeSession] = useState<ExchangeSession | null>(null);
   const [settings, setSettings] = useState<AppSettings>({ hideLocation: me.hideLocation ?? true, dmScope: "matches" });
   const [matchPreferences, setMatchPreferences] = useState<MatchPreferences>(defaultMatchPreferences);
   const [matchPreferencesReady, setMatchPreferencesReady] = useState(false);
   const [dailyRecommendations, setDailyRecommendations] = useState<DailyMatchRecommendation[]>([]);
   const [matchesFailed, setMatchesFailed] = useState(false);
+  /** 오늘의 추천을 처음 받기 전. 이때 "조건에 맞는 사람이 없어요"를 띄우면 안 됩니다. */
+  const [matchesLoading, setMatchesLoading] = useState(true);
+  /** 피드·대화 목록을 처음 받기 전("loading")과 받지 못한 것("error")을 빈 목록과 구분합니다. */
+  const [feedState, setFeedState] = useState<LoadState>("loading");
+  const [chatState, setChatState] = useState<LoadState>("loading");
   /**
    * 사람 명부.
    *
@@ -639,8 +616,21 @@ function LingoLoopScreens({
    */
   const activeNav: Section | "notifications" = detail?.kind === "notifications" ? "notifications" : section;
   const [partnerIndex, setPartnerIndex] = useState(0);
+  /* 오늘 어디까지 봤는지. 추천은 하루 동안 같으므로 새로고침해도 이어서 봅니다 — 예전에는
+     처음으로 돌아가 이미 마음을 보낸 사람·넘긴 사람이 다시 나왔습니다. */
+  const partnerProgressKey = `timotalk.partner-progress.${me.id}`;
+  const partnerProgressDay = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+  /** 저장해 둔 진행을 읽기 전에는 쓰지 않습니다 — 처음 그린 0 이 저장된 값을 덮어씁니다. */
+  const partnerProgressRestored = useRef(false);
+  useEffect(() => {
+    if (!partnerProgressRestored.current) return;
+    try {
+      window.localStorage.setItem(partnerProgressKey, JSON.stringify({ day: partnerProgressDay, prefs: JSON.stringify(matchPreferences), index: partnerIndex }));
+    } catch {
+      /* 저장할 수 없으면 새로고침 때 처음부터 봅니다. */
+    }
+  }, [partnerProgressKey, partnerProgressDay, matchPreferences, partnerIndex]);
   const [signaledPartners, setSignaledPartners] = useState<string[]>([]);
-  const [practiceRooms, setPracticeRooms] = useState<PracticeRoom[]>(rooms);
   /* 아래 상태들은 "토스트만 뜨고 끝나던" 동작을 실제로 반영하기 위한 것입니다.
      mock 이지만 화면에는 진짜로 남아야 눌러본 사람이 결과를 확인할 수 있습니다. */
   /* 저장한 표현 — 데모 씨앗 3개로 시작하고, 사용자가 저장한 것이 앞에 쌓입니다.
@@ -686,13 +676,19 @@ function LingoLoopScreens({
   const [hiddenAuthorIds, setHiddenAuthorIds] = useState<Set<string>>(new Set());
   const [blockedAuthorIds, setBlockedAuthorIds] = useState<Set<string>>(new Set());
   const [mutedChatIds, setMutedChatIds] = useState<Set<string>>(new Set());
-  const [mutedRoomIds, setMutedRoomIds] = useState<Set<string>>(new Set());
   const startingChatPartnerIds = useRef<Set<string>>(new Set());
   const mutingConversationIds = useRef<Set<string>>(new Set());
   const dismissingRequestIds = useRef<Set<string>>(new Set());
   const leavingConversationIds = useRef<Set<string>>(new Set());
   const selectedChatIdRef = useRef(selectedChatId);
   useEffect(() => { selectedChatIdRef.current = selectedChatId; }, [selectedChatId]);
+  /* 폴링이 최신 목록·화면을 읽도록 담아 둡니다(효과를 매번 다시 걸지 않게). */
+  const conversationsRef = useRef(conversations);
+  const sectionRef = useRef(section);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+    sectionRef.current = section;
+  }, [conversations, section]);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /* 캐릭터 편집 화면을 위에 열었다 돌아와도 저장 전 프로필 입력을 보존합니다. */
@@ -776,6 +772,9 @@ function LingoLoopScreens({
             { code: next.learningCode, level: next.learningLevel, goal: next.goal.trim() || t("부담 없는 일상 대화") },
             ...rest,
           ],
+          ...(next.countryCode ? { countryCode: next.countryCode } : {}),
+          availability: next.availability,
+          interests: next.interests,
         }),
       });
       onProfileUpdated({ ...me, ...updated });
@@ -783,7 +782,7 @@ function LingoLoopScreens({
       void reload();
       return true;
     } catch (caught) {
-      showToast(caught instanceof Error ? caught.message : t("프로필을 저장하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("프로필을 저장하지 못했어요."), "error");
       return false;
     }
   };
@@ -814,7 +813,15 @@ function LingoLoopScreens({
        받을 때마다(저장 뒤 reload, 주기적 갱신) 열어 둔 대화가 텅 비지 않습니다. */
     setConversations((current) => nextConversations.map((room) => {
       const previous = current.find((item) => item.id === room.id);
-      return previous?.messages.length ? { ...room, messages: previous.messages } : room;
+      if (!previous?.messages.length) return room;
+      // 새 메시지만 받아 오므로 지난 말풍선의 "읽음"은 상대가 읽은 시각으로 다시 매깁니다.
+      const readAt = room.partnerReadAt ?? "";
+      return {
+        ...room,
+        messages: previous.messages.map((message) =>
+          message.mine && message.sentAt ? { ...message, readByPartner: Boolean(readAt) && readAt >= message.sentAt } : message,
+        ),
+      };
     }));
     setMutedChatIds(new Set(rooms.filter((room) => room.muted).map((room) => room.id)));
     setRequestConversationIds(nextRequestIds);
@@ -825,37 +832,54 @@ function LingoLoopScreens({
   }, []);
 
   const reload = useCallback(async (): Promise<ReloadedChats | null> => {
-    try {
-      const [postList, chatResult, phraseList, correctionList, likeList, followList, blockList, peopleList, sentLikeList] = await Promise.all([
-        api<ApiPost[]>("/api/posts"),
-        loadChats(),
-        api<ApiSavedPhrase[]>("/api/saved-phrases"),
-        api<ApiCorrection[]>("/api/corrections/received"),
-        api<ApiReceivedLike[]>("/api/likes/received"),
-        api<string[]>("/api/follows"),
-        api<Array<{ blockedId: string; partner: ApiProfile }>>("/api/blocks"),
-        api<ApiProfile[]>("/api/partners"),
-        api<ApiReceivedLike[]>("/api/likes/sent"),
-      ]);
-      setSentLikes(sentLikeList || []);
-      void loadFollowCounts(me.id);
-      setSignaledPartners((sentLikeList || []).map((item) => item.partner.id));
-      setDirectory((peopleList || []).map((person) => toPartner(person)));
-      setSavedItems((phraseList || []).map(toSavedPhrase));
-      setCorrections(correctionList || []);
-      setLikesReceived(likeList || []);
-      setFollowingIds(followList || []);
-      setBlockedAuthorIds(new Set((blockList || []).map((row) => row.blockedId)));
-      setBlockedPartners((blockList || []).filter((row) => row.partner).map((row) => toPartner(row.partner)));
-      const savedIds = new Set((phraseList || []).map((item) => item.id));
-      const feed = (postList || []).map((post) => ({ ...toFeedPost(post), saved: savedIds.has(post.id) }));
+    /* 하나가 실패해도 나머지는 그립니다. 예전에는 Promise.all 이라 요청 하나만 실패해도
+       전부 버려지고, 화면은 "아직 글이 없어요"·"아직 대화가 없어요" 같은 빈 안내를 띄웠습니다. */
+    const results = await Promise.allSettled([
+      api<ApiPost[]>("/api/posts"),
+      loadChats(),
+      api<ApiSavedPhrase[]>("/api/saved-phrases"),
+      api<ApiCorrection[]>("/api/corrections/received"),
+      api<ApiReceivedLike[]>("/api/likes/received"),
+      api<string[]>("/api/follows"),
+      api<Array<{ blockedId: string; partner: ApiProfile }>>("/api/blocks"),
+      api<ApiProfile[]>("/api/partners"),
+      api<ApiReceivedLike[]>("/api/likes/sent"),
+    ] as const);
+    const [postResult, chatResult, phraseResult, correctionResult, likeResult, followResult, blockResult, peopleResult, sentLikeResult] = results;
+    const ok = <T,>(result: PromiseSettledResult<T>): T | undefined => (result.status === "fulfilled" ? result.value : undefined);
+    const sentLikeList = ok(sentLikeResult);
+    if (sentLikeList) {
+      setSentLikes(sentLikeList);
+      setSignaledPartners(sentLikeList.map((item) => item.partner.id));
+    }
+    void loadFollowCounts(me.id);
+    const peopleList = ok(peopleResult);
+    if (peopleList) setDirectory(peopleList.map((person) => toPartner(person)));
+    const phraseList = ok(phraseResult);
+    if (phraseList) setSavedItems(phraseList.map(toSavedPhrase));
+    const correctionList = ok(correctionResult);
+    if (correctionList) setCorrections(correctionList);
+    const likeList = ok(likeResult);
+    if (likeList) setLikesReceived(likeList);
+    const followList = ok(followResult);
+    if (followList) setFollowingIds(followList);
+    const blockList = ok(blockResult);
+    if (blockList) {
+      setBlockedAuthorIds(new Set(blockList.map((row) => row.blockedId)));
+      setBlockedPartners(blockList.filter((row) => row.partner).map((row) => toPartner(row.partner)));
+    }
+    const postList = ok(postResult);
+    if (postList) {
+      const savedIds = new Set((phraseList ?? []).map((item) => item.id));
+      const feed = postList.map((post) => ({ ...toFeedPost(post), saved: savedIds.has(post.id) }));
       setPosts(feed);
       setMyPostList(feed.filter((post) => post.authorId === me.id));
-      return chatResult;
-    } catch {
-      /* 실패해도 빈 화면을 유지합니다. 오류는 아래 개별 동작에서 알립니다. */
-      return null;
     }
+    // 한 번 받은 목록은 남겨 둡니다. 처음부터 못 받았을 때만 "불러오지 못했어요"를 보여줍니다.
+    setFeedState((current) => (postList ? "ready" : current === "ready" ? "ready" : "error"));
+    const chats = ok(chatResult);
+    setChatState((current) => (chats ? "ready" : current === "ready" ? "ready" : "error"));
+    return chats ?? null;
   }, [me.id, loadChats, loadFollowCounts]);
 
   useEffect(() => {
@@ -865,7 +889,8 @@ function LingoLoopScreens({
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadNotifications(), 0);
-    const interval = window.setInterval(() => void loadNotifications(true), 45_000);
+    // 숨은 탭에서는 묻지 않습니다. 다시 보이면 visibilitychange 가 바로 받아 옵니다.
+    const interval = window.setInterval(() => { if (document.visibilityState === "visible") void loadNotifications(true); }, 45_000);
     const onVisibility = () => {
       if (document.visibilityState === "visible") void loadNotifications(true);
     };
@@ -922,10 +947,11 @@ function LingoLoopScreens({
    * 목록·안 읽음 배지도 그대로였습니다. 실시간 연결(WebSocket)이 생기기 전까지의 방법입니다.
    */
   const [chatRefreshTick, setChatRefreshTick] = useState(0);
+  /* 대화 탭 밖에서도 1분마다 목록을 받아 내비게이션의 안 읽음 배지를 맞춥니다.
+     예전에는 대화 탭에 있을 때만 갱신돼 다른 탭에서는 새 메시지가 와도 배지가 그대로였습니다. */
   useEffect(() => {
-    if (section !== "chats") return;
     const tick = () => { if (document.visibilityState === "visible") setChatRefreshTick((value) => value + 1); };
-    const interval = window.setInterval(tick, 15_000);
+    const interval = window.setInterval(tick, section === "chats" ? 15_000 : 60_000);
     document.addEventListener("visibilitychange", tick);
     return () => {
       window.clearInterval(interval);
@@ -938,16 +964,27 @@ function LingoLoopScreens({
     const openId = selectedChatIdRef.current;
     void (async () => {
       // 열린 대화를 먼저 읽어야(서버가 읽음 처리) 뒤이어 받는 목록의 안 읽음 수가 맞습니다.
-      if (openId) {
+      // 대화 탭을 보고 있을 때만 읽습니다 — 다른 탭에서 읽음 처리하면 안 됩니다.
+      if (openId && sectionRef.current === "chats") {
         try {
-          const rows = await api<ApiMessage[]>(`/api/conversations/${encodeURIComponent(openId)}/messages`);
+          /* 마지막으로 받은 메시지 뒤의 것만 받습니다. 예전에는 15초마다 최근 200개를
+             사진·음성까지 통째로 다시 받았습니다. after 를 모르는 서버는 그대로 200개를
+             주므로 id 로 합쳐 둡니다. */
+          const known = conversationsRef.current.find((room) => room.id === openId)?.messages ?? [];
+          const lastSentAt = known.filter((message) => !message.id.startsWith("local-") && message.sentAt).at(-1)?.sentAt;
+          const rows = await api<ApiMessage[]>(
+            `/api/conversations/${encodeURIComponent(openId)}/messages${lastSentAt ? `?after=${encodeURIComponent(lastSentAt)}` : ""}`,
+          );
           if (cancelled) return;
-          const messages = (rows || []).map((row) => toChatMessage(row, me.id));
+          const incoming = (rows || []).map((row) => toChatMessage(row, me.id));
           setConversations((current) => current.map((room) => {
             if (room.id !== openId) return room;
+            const byId = new Map(room.messages.filter((message) => !message.id.startsWith("local-")).map((message) => [message.id, message]));
+            for (const message of incoming) byId.set(message.id, message);
+            const merged = [...byId.values()].sort((a, b) => String(a.sentAt ?? "").localeCompare(String(b.sentAt ?? "")));
             // 보내는 중인 말풍선(local-)은 서버 목록에 아직 없을 수 있어 남깁니다.
             const sending = room.messages.filter((message) => message.id.startsWith("local-"));
-            return { ...room, messages: [...messages, ...sending] };
+            return { ...room, messages: [...merged, ...sending] };
           }));
         } catch {
           /* 이번에 못 받으면 다음 차례에 다시 받습니다. */
@@ -1033,7 +1070,7 @@ function LingoLoopScreens({
       }
     } catch (caught) {
       setSavedItems((current) => (exists ? [item, ...current] : current.filter((saved) => saved.id !== item.id)));
-      showToast(caught instanceof Error ? caught.message : t("저장하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("저장하지 못했어요."), "error");
     }
   };
   const isSaved = (id: string) => savedItems.some((item) => item.id === id);
@@ -1110,7 +1147,7 @@ function LingoLoopScreens({
         setSelectedChatId(id);
         setMobileThreadOpen(true);
       }
-      showToast(caught instanceof Error ? caught.message : t("대화방에서 나가지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("대화방에서 나가지 못했어요."), "error");
       return false;
     } finally {
       leavingConversationIds.current.delete(id);
@@ -1147,14 +1184,14 @@ function LingoLoopScreens({
     } catch (caught) {
       // 서버에 못 남기면 내 화면에서만 사라진 상태가 됩니다 — 되돌리고 알립니다.
       setBlockedAuthorIds((current) => { const next = new Set(current); next.delete(authorId); return next; });
-      showToast(caught instanceof Error ? caught.message : t("차단하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("차단하지 못했어요."), "error");
       return false;
     }
   };
 
   const blockChatPartner = async (conversationId: string, partnerId: string | undefined, name: string) => {
     if (!partnerId) {
-      showToast(t("차단하지 못했어요."));
+      showToast(t("차단하지 못했어요."), "error");
       return;
     }
     const blocked = await blockAuthor(partnerId, name);
@@ -1173,17 +1210,16 @@ function LingoLoopScreens({
       showToast(t("차단을 해제했어요"));
     } catch (caught) {
       setBlockedAuthorIds((current) => new Set(current).add(authorId));
-      showToast(caught instanceof Error ? caught.message : t("차단을 풀지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("차단을 풀지 못했어요."), "error");
     }
   };
 
   // 내가 접수한 신고 상태 — 프로필의 신고센터 카드가 실제 접수 내역을 보여줍니다.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/reports")
-      .then((response) => (response.ok ? (response.json() as Promise<{ data?: SafetyReportInfo[] }>) : Promise.reject(new Error(`Mock API returned ${response.status}`))))
-      .then((body) => {
-        if (!cancelled && body.data?.length) setSafetyReports(body.data);
+    api<SafetyReportInfo[]>("/api/reports")
+      .then((reports) => {
+        if (!cancelled && reports?.length) setSafetyReports(reports);
       })
       .catch(() => {
         // 오프라인이면 카드가 기본 안내 문구를 유지합니다.
@@ -1197,45 +1233,41 @@ function LingoLoopScreens({
     // 서버에 저장된 조건을 받기 전에는 부르지 않습니다 — 기본값으로 한 번, 받은 값으로 또 한 번 부르게 됩니다.
     if (!matchPreferencesReady) return;
     let cancelled = false;
-    const query = new URLSearchParams({
-      targetLanguages: matchPreferences.targetLanguages.join(","),
-      preferredCountries: matchPreferences.preferredCountries.join(","),
-      interests: matchPreferences.interests.join(","),
-      availability: matchPreferences.availability.join(","),
-      levelMin: matchPreferences.levelMin,
-      levelMax: matchPreferences.levelMax,
-      ageMin: String(matchPreferences.ageMin),
-      ageMax: String(matchPreferences.ageMax),
-      verifiedOnly: String(matchPreferences.verifiedOnly),
-      intents: matchPreferences.intents.join(","),
-      onlineOnly: String(matchPreferences.onlineOnly),
-    });
-
-    fetch(`/api/matching/daily?${query.toString()}`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-        return response.json() as Promise<{ data?: { recommendations?: Array<{ partner: ApiProfile; score: number; matchReasons: string[]; matchReasonCodes?: MatchReasonCode[]; icebreaker: string }> } }>;
-      })
+    /* 추천은 서버에 저장된 조건으로 만듭니다. 예전에는 조건을 쿼리로도 보냈지만
+       서버는 읽지 않았습니다. 조건이 바뀌면(저장되면) 이 효과가 다시 돌아 새로 받습니다. */
+    api<{ recommendations?: Array<{ partner: ApiProfile; score: number; matchReasons: string[]; matchReasonCodes?: MatchReasonCode[]; icebreaker: string }> }>("/api/matching/daily")
       .then((body) => {
         if (cancelled) return;
-        setDailyRecommendations((body.data?.recommendations || []).slice(0, MAX_DAILY_PARTNERS).map((item) => ({
+        const recommendations = (body.recommendations || []).slice(0, MAX_DAILY_PARTNERS);
+        setDailyRecommendations(recommendations.map((item) => ({
           partner: displayPartnerFromApi(item.partner, item.score),
           score: item.score,
           matchReasons: item.matchReasons,
           matchReasonCodes: item.matchReasonCodes,
           icebreaker: item.icebreaker,
         })));
+        // 같은 날, 같은 조건으로 받은 추천일 때만 이어 봅니다(조건을 바꾸면 처음부터).
+        const saved = readStoredJson<{ day: string; prefs: string; index: number }>(partnerProgressKey, (value): value is { day: string; prefs: string; index: number } =>
+          typeof value === "object" && value !== null && typeof (value as { day?: unknown }).day === "string" && Number.isInteger((value as { index?: unknown }).index));
+        if (saved?.day === partnerProgressDay && saved.prefs === JSON.stringify(matchPreferences) && saved.index > 0)
+          setPartnerIndex(Math.min(saved.index, recommendations.length));
+        partnerProgressRestored.current = true;
         setMatchesFailed(false);
       })
       .catch(() => {
         // 추천을 못 받아오면 빈 화면 + 안내입니다. 예전에는 가짜 사람 12명을
         // 대신 보여줬는데, 말을 걸 수 없는 사람들이라 더 나쁩니다.
         if (!cancelled) { setDailyRecommendations([]); setMatchesFailed(true); }
+      })
+      .finally(() => {
+        if (!cancelled) setMatchesLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
+    // partnerProgressKey·Day 는 계정·날짜가 같으면 그대로이므로 추천을 다시 부를 이유가 아닙니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchPreferences, matchPreferencesReady]);
 
   // 매칭 조건이 바뀌면 큐를 처음부터 다시 봅니다.
@@ -1364,15 +1396,16 @@ function LingoLoopScreens({
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setModal({ type: "search" });
+        // 다른 창(글쓰기 등)이 열려 있으면 바꾸지 않습니다 — 쓰던 내용이 사라졌습니다.
+        setModal((current) => current ?? { type: "search" });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const showToast = (message: string) => {
-    setToast(message);
+  const showToast = (message: string, tone: ToastTone = "success") => {
+    setToast({ message, tone });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2800);
   };
@@ -1390,7 +1423,7 @@ function LingoLoopScreens({
     setSettings(next);
     const failed = (caught: unknown) => {
       setSettings(previous);
-      showToast(caught instanceof Error ? caught.message : t("설정을 저장하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("설정을 저장하지 못했어요."), "error");
     };
 
     if (next.hideLocation !== previous.hideLocation) {
@@ -1441,18 +1474,9 @@ function LingoLoopScreens({
   const saveMatchPreferences = async (preferences: MatchPreferences): Promise<boolean> => {
     const normalized = normalizeMatchPreferences(preferences);
     try {
-      const response = await fetch("/api/matching/preferences", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(normalized),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
-        showToast(body?.error?.message || t("매칭 설정을 저장하지 못했어요."));
-        return false;
-      }
-    } catch {
-      showToast(t("매칭 설정을 저장하지 못했어요."));
+      await api("/api/matching/preferences", { method: "POST", body: JSON.stringify(normalized) });
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : t("매칭 설정을 저장하지 못했어요."), "error");
       return false;
     }
 
@@ -1484,7 +1508,7 @@ function LingoLoopScreens({
       )
       .catch((caught) => {
         setSignaledPartners((current) => current.filter((id) => id !== partner.id));
-        showToast(caught instanceof Error ? caught.message : t("마음을 보내지 못했어요."));
+        showToast(caught instanceof Error ? caught.message : t("마음을 보내지 못했어요."), "error");
       });
   };
 
@@ -1511,7 +1535,7 @@ function LingoLoopScreens({
       void loadFollowCounts(partner.id);
     } catch (caught) {
       setFollowingIds((current) => (wasFollowing ? [...current.filter((id) => id !== partner.id), partner.id] : current.filter((id) => id !== partner.id)));
-      showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."), "error");
     }
   };
 
@@ -1545,7 +1569,7 @@ function LingoLoopScreens({
       URL.revokeObjectURL(url);
       showToast(t("대화 기록을 내려받았어요"));
     } catch (caught) {
-      showToast(caught instanceof Error ? caught.message : t("대화 기록을 내려받지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("대화 기록을 내려받지 못했어요."), "error");
     }
   };
 
@@ -1671,7 +1695,7 @@ function LingoLoopScreens({
     } catch (caught) {
       avatarNavigationGuard.current.saving = false;
       setAvatarEditorSaving(false);
-      showToast(caught instanceof Error ? caught.message : t("캐릭터를 저장하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("캐릭터를 저장하지 못했어요."), "error");
       return false;
     }
   };
@@ -1698,7 +1722,7 @@ function LingoLoopScreens({
       if (result.stale) void loadNotifications(true);
     } catch (caught) {
       void loadNotifications();
-      showToast(caught instanceof Error ? caught.message : t("알림을 읽음 처리하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("알림을 읽음 처리하지 못했어요."), "error");
     }
   };
 
@@ -1716,7 +1740,7 @@ function LingoLoopScreens({
       if (result.hasMore) void loadNotifications(true);
     } catch (caught) {
       void loadNotifications();
-      showToast(caught instanceof Error ? caught.message : t("알림을 읽음 처리하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("알림을 읽음 처리하지 못했어요."), "error");
     }
   };
 
@@ -1791,18 +1815,21 @@ function LingoLoopScreens({
     if (postTranslations[post.id]) return;
     void (async () => {
       try {
-        const targetLanguage = HANGUL_PATTERN.test(post.text) ? "en" : "ko";
-        const response = await fetch("/api/translate", {
+        const targetLanguage = translationTarget(post.text, me.learningLanguages?.[0]?.code);
+        const { translatedText } = await api<{ translatedText?: string }>("/api/translate", {
           method: "POST",
-          headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: post.text, targetLanguage }),
         });
-        if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-        const body = await response.json() as { data?: { translatedText?: string } };
-        const translatedText = body.data?.translatedText;
-        if (translatedText) setPostTranslations((current) => ({ ...current, [post.id]: translatedText }));
-      } catch {
-        // 오프라인이면 fixture 번역(post.translation)이 그대로 표시됩니다.
+        if (!translatedText) throw new Error(t("번역을 불러오지 못했어요."));
+        setPostTranslations((current) => ({ ...current, [post.id]: translatedText }));
+      } catch (caught) {
+        // 빈 번역 칸을 남기지 않고 닫은 뒤 이유를 알립니다.
+        setTranslatedPosts((current) => {
+          const next = new Set(current);
+          next.delete(post.id);
+          return next;
+        });
+        showToast(caught instanceof Error ? caught.message : t("번역을 불러오지 못했어요."), "error");
       }
     })();
   };
@@ -1849,7 +1876,7 @@ function LingoLoopScreens({
       .then((result) => updatePost(postId, (item) => ({ ...item, liked: result.liked, likes: result.likes })))
       .catch((caught) => {
         updatePost(postId, (item) => ({ ...item, liked: !nextLiked, likes: item.likes + (nextLiked ? -1 : 1) }));
-        showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."));
+        showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."), "error");
       });
   };
 
@@ -1888,7 +1915,7 @@ function LingoLoopScreens({
             setPosts((current) => restore(current, postIndex));
             setMyPostList((current) => restore(current, myPostIndex));
             void reload();
-            showToast(caught instanceof Error ? caught.message : t("글을 삭제하지 못했어요."));
+            showToast(caught instanceof Error ? caught.message : t("글을 삭제하지 못했어요."), "error");
           });
       },
     });
@@ -1926,7 +1953,7 @@ function LingoLoopScreens({
       showToast(result.muted ? t("{name}님과의 알림을 껐어요", { name }) : t("{name}님과의 알림을 켰어요", { name }));
     } catch (caught) {
       applyMuted(wasMuted);
-      showToast(caught instanceof Error ? caught.message : t("설정을 저장하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("설정을 저장하지 못했어요."), "error");
     } finally {
       mutingConversationIds.current.delete(id);
     }
@@ -1969,11 +1996,12 @@ function LingoLoopScreens({
           if (next.id in current) return current;
           return {
             ...current,
-            [next.id]: dailyRecommendations.find((item) => item.partner.id === partner.id)?.icebreaker ?? dailyMatchDetails[partner.id]?.icebreaker ?? `Hi ${partner.name}! Nice to meet you.`,
+            // 오늘의 추천에서 연 대화만 서버가 준 첫인사를 미리 적어 둡니다. 그 밖에는 빈칸입니다.
+            [next.id]: dailyRecommendations.find((item) => item.partner.id === partner.id)?.icebreaker ?? "",
           };
         });
       } catch (caught) {
-        showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."));
+        showToast(caught instanceof Error ? caught.message : t("요청을 처리하지 못했어요."), "error");
         return;
       } finally {
         startingChatPartnerIds.current.delete(partner.id);
@@ -2040,7 +2068,7 @@ function LingoLoopScreens({
         ),
       );
       setDraft(text);
-      showToast(caught instanceof Error ? caught.message : t("메시지를 보내지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("메시지를 보내지 못했어요."), "error");
     }
   };
 
@@ -2076,7 +2104,7 @@ function LingoLoopScreens({
             : conversation,
         ),
       );
-      showToast(caught instanceof Error ? caught.message : t("보내지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("보내지 못했어요."), "error");
     }
   };
 
@@ -2091,7 +2119,7 @@ function LingoLoopScreens({
       await reload();
       return true;
     } catch (caught) {
-      showToast(caught instanceof Error ? caught.message : t("요청을 수락하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("요청을 수락하지 못했어요."), "error");
       return false;
     }
   };
@@ -2153,7 +2181,7 @@ function LingoLoopScreens({
         setSelectedChatId(id);
         setMobileThreadOpen(true);
       }
-      showToast(caught instanceof Error ? caught.message : t("요청을 삭제하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("요청을 삭제하지 못했어요."), "error");
       return false;
     } finally {
       dismissingRequestIds.current.delete(id);
@@ -2187,35 +2215,10 @@ function LingoLoopScreens({
       goToSection("community");
       showToast(options.requestCorrection ? t("커뮤니티에 게시했어요 · 원어민 교정을 요청했어요") : t("커뮤니티에 게시했어요"));
     } catch (caught) {
-      showToast(caught instanceof Error ? caught.message : t("글을 올리지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("글을 올리지 못했어요."), "error");
     } finally {
       publishingPost.current = false;
     }
-  };
-
-  const createVoiceRoom = (details: { title: string; topic: string; language: string; level: string }) => {
-    const room: PracticeRoom = {
-      id: `room-${Date.now()}`,
-      title: details.title,
-      topic: details.topic,
-      language: details.language,
-      level: details.level,
-      host: currentUser.name,
-      hostFlag: currentUser.flag,
-      listeners: 1,
-      speakers: [currentUser.name],
-      audience: [],
-      accent: "violet",
-    };
-    setPracticeRooms((items) => [room, ...items]);
-    // 내가 연 방이므로 호스트로 바로 입장합니다. 손들기 없이 처음부터 발언 가능합니다.
-    setRoomHandRaised(false);
-    setRoomMicOn(true);
-    setMinimizedRoom(null);
-    setRoomMessages([]);
-    setSection("practice");
-    setModal({ type: "room", room });
-    showToast(t("보이스룸을 열었어요 · 호스트로 입장했어요"));
   };
 
   /**
@@ -2247,7 +2250,7 @@ function LingoLoopScreens({
       setSafetyReports((current) => [report, ...current]);
       setModal(null);
       /* 함께 차단은 서버까지 반영해야 합니다 — 화면에서만 지우면 새로고침에 되살아납니다. */
-      const blocked = options.block ? await blockAuthor(options.targetId, target) : false;
+      const blocked = options.block ? await blockAuthor(options.blockId ?? options.targetId, target) : false;
       showToast(
         options.block && blocked
           ? t("신고를 접수하고 {name}님을 차단했어요 · 접수번호 {id}", { name: target, id: shortReportId(report.id) })
@@ -2257,7 +2260,7 @@ function LingoLoopScreens({
       );
     } catch (caught) {
       setModal(null);
-      showToast(caught instanceof Error ? caught.message : t("신고를 접수하지 못했어요."));
+      showToast(caught instanceof Error ? caught.message : t("신고를 접수하지 못했어요."), "error");
     }
   };
 
@@ -2271,7 +2274,6 @@ function LingoLoopScreens({
     savedItems,
     translated: translatedPosts,
     translations: postTranslations,
-    corrections: openCorrections,
     onProfile: (id: string) => {
       if (id === me.id) { goToSection("learn"); return; }
       const partner = findPartner(id);
@@ -2280,13 +2282,14 @@ function LingoLoopScreens({
     },
     onToggle: togglePost,
     onTranslate: translatePost,
-    onCorrection: (id: string) => toggleSetValue(setOpenCorrections, id),
     onOpenPhoto: setPhotoViewer,
     onShare: sharePost,
     onDeletePost: deletePost,
     onHideAuthor: hideAuthor,
     onBlockAuthor: blockAuthor,
-    onReport: (target: string, targetId?: string) => setModal({ type: "report", target, targetId }),
+    /* 글 신고는 글을 대상으로 접수합니다. 예전에는 글쓴이(사용자)로 접수돼 운영자가 어떤 글인지 알 수 없었습니다. */
+    onReport: (target: string, authorId?: string, postId?: string) =>
+      setModal(postId ? { type: "report", target, targetId: postId, targetType: "post", blockId: authorId } : { type: "report", target, targetId: authorId }),
     onTagSelect: setActiveTag,
   };
 
@@ -2497,7 +2500,7 @@ function LingoLoopScreens({
 
           {/* 편집·설정은 카드 안에 이미 있습니다. 여기 또 두면 같은 버튼이 둘입니다. */}
           {section === "learn" && !detail ? (
-            <div className="topbar-feed">
+            <div className="topbar-feed profile-topbar-feed">
               <span className="topbar-title">{t("프로필")}</span>
             </div>
           ) : null}
@@ -2529,7 +2532,7 @@ function LingoLoopScreens({
                   if (partner) openProfile(partner);
                   else showToast(t("이 작성자의 프로필을 열 수 없어요"));
                 }}
-                onReport={() => setModal({ type: "report", target: detail.post.author, targetId: detail.post.authorId })}
+                onReport={() => setModal({ type: "report", target: detail.post.author, targetId: detail.post.id, targetType: "post", blockId: detail.post.authorId })}
                 onToast={showToast}
                 saved={isSaved(detail.post.id)}
                 onSavePhrase={savePhrase}
@@ -2620,6 +2623,7 @@ function LingoLoopScreens({
                 preferences={matchPreferences}
                 dailyRecommendations={dailyRecommendations}
                 loadFailed={matchesFailed}
+                loading={matchesLoading}
                 index={partnerIndex}
                 signaledCount={signaledPartners.length}
                 onSkip={skipPartner}
@@ -2634,12 +2638,12 @@ function LingoLoopScreens({
             {!detail && section === "community" ? (
               <CommunityView
                 posts={posts}
+                loadState={feedState}
+                onRetry={() => void reload()}
                 tab={feedTab}
                 translated={translatedPosts}
                 translations={postTranslations}
-                corrections={openCorrections}
                 onTranslate={translatePost}
-                onCorrection={(id) => toggleSetValue(setOpenCorrections, id)}
                 onToggle={togglePost}
                 onProfile={(id) => {
                   if (id === me.id) { goToSection("learn"); return; }
@@ -2647,7 +2651,7 @@ function LingoLoopScreens({
                   if (partner) openProfile(partner);
                   else showToast(t("이 작성자의 프로필을 열 수 없어요"));
                 }}
-                onReport={(target, targetId) => setModal({ type: "report", target, targetId })}
+                onReport={(target, authorId, postId) => setModal(postId ? { type: "report", target, targetId: postId, targetType: "post", blockId: authorId } : { type: "report", target, targetId: authorId })}
                 onOpen={openPost}
                 hiddenAuthorIds={hiddenAuthorIds}
                 blockedAuthorIds={blockedAuthorIds}
@@ -2671,6 +2675,8 @@ function LingoLoopScreens({
             {!detail && section === "chats" ? (
               <ChatsView
                 conversations={conversations}
+                loadState={chatState}
+                onRetry={() => void reload()}
                 selected={selectedConversation}
                 listTab={chatListTab}
                 onListTabChange={setChatListTab}
@@ -2691,6 +2697,15 @@ function LingoLoopScreens({
                 onSendAttachment={sendAttachment}
                 onOpenPhoto={setPhotoViewer}
                 onExchange={() => setModal({ type: "exchange" })}
+                exchangeSession={exchangeSession}
+                exchangeLanguages={[tx(languageName(me.learningLanguages?.[0]?.code ?? "en")), tx(languageName(me.nativeLanguages?.[0] ?? "ko"))]}
+                learningCode={me.learningLanguages?.[0]?.code ?? ""}
+                notificationCount={notificationUnreadCount}
+                onOpenNotifications={() => {
+                  pushDetailRoute({ kind: "notifications" }, "chats", "#chats/notifications");
+                  void loadNotifications(true);
+                }}
+                onEndExchange={() => setExchangeSession(null)}
                 onProfile={() => {
                   const partner = findPartner(selectedConversation?.partnerId);
                   if (partner) openProfile(partner);
@@ -2705,19 +2720,6 @@ function LingoLoopScreens({
                 onNewChat={() => setModal({ type: "new-chat" })}
                 savedItems={savedItems}
                 onSavePhrase={savePhrase}
-              />
-            ) : null}
-            {!detail && section === "practice" ? (
-              <PracticeView
-                rooms={practiceRooms}
-                onJoin={(room) => {
-                  setRoomHandRaised(false);
-                  setRoomMicOn(false);
-                  setMinimizedRoom(null);
-                  setRoomMessages(initialRoomMessages);
-                  setModal({ type: "room", room });
-                }}
-                onCreate={() => setModal({ type: "create-room" })}
               />
             ) : null}
             {!detail && section === "learn" ? (
@@ -2771,7 +2773,10 @@ function LingoLoopScreens({
           settings={settings}
           onChangeSettings={applySettings}
           onDownloadChats={downloadChats}
-          onOnboarding={() => setModal({ type: "onboarding" })}
+          onOnboarding={() => {
+            setSettingsOpen(false);
+            openProfileEditor();
+          }}
           onOpenBlocked={() => {
             setSettingsOpen(false);
             pushDetailRoute({ kind: "blocked" }, "learn", "#learn/blocked");
@@ -2790,22 +2795,9 @@ function LingoLoopScreens({
           onStartChat={startChat}
           onOpenProfile={(partner) => { setModal(null); openProfile(partner); }}
           onPublish={publishPost}
-          onCreateRoom={createVoiceRoom}
           onReport={reportTarget}
           onToast={showToast}
-          mutedRoomIds={mutedRoomIds}
-          onToggleRoomMute={(id) => toggleIn(setMutedRoomIds, id, t("이 방의 알림을 껐어요"), t("이 방의 알림을 켰어요"))}
-          onCopyLink={copyLink}
           existingPartnerIds={conversations.map((item) => item.partnerId ?? "")}
-          onMinimizeRoom={(room) => { setMinimizedRoom(room); setModal(null); }}
-          onBlockHost={(room) => { blockAuthor(room.host.toLowerCase(), room.host); setModal(null); }}
-          onEndRoom={(room) => {
-            setPracticeRooms((items) => items.filter((item) => item.id !== room.id));
-            setMinimizedRoom((current) => (current?.id === room.id ? null : current));
-            setRoomHandRaised(false);
-            setRoomMicOn(false);
-            setModal(null);
-          }}
           posts={posts}
           me={me}
           exchangePartner={selectedConversation}
@@ -2813,17 +2805,12 @@ function LingoLoopScreens({
           savedItems={savedItems}
           likesReceived={likesReceived}
           sentLikes={sentLikes}
-          followingIds={followingIds}
-          onToggleFollow={(partner) => void toggleFollow(partner)}
           onOpenPost={(post) => { setModal(null); openPost(post); }}
-          roomMessages={roomMessages}
-          onSendRoomMessage={(text) => setRoomMessages((list) => [...list, { id: `rm-${list.length + 1}-${text.length}`, name: currentUser.name, text, mine: true }])}
-          roomHandRaised={roomHandRaised}
-          setRoomHandRaised={setRoomHandRaised}
-          roomMicOn={roomMicOn}
-          setRoomMicOn={setRoomMicOn}
           exchangeLength={exchangeLength}
           setExchangeLength={setExchangeLength}
+          onStartExchange={(length) => {
+            if (selectedConversation) setExchangeSession({ conversationId: selectedConversation.id, length, startedAt: Date.now() });
+          }}
           matchPreferences={matchPreferences}
           onSaveMatchPreferences={saveMatchPreferences}
           feedFilters={feedFilters}
@@ -2834,7 +2821,6 @@ function LingoLoopScreens({
           onJumpPartner={(position) => { setPartnerIndex(position); setModal(null); }}
           onOpenPartnerProfile={(partner) => { setModal(null); openProfile(partner); }}
             onAcceptLike={(partner) => void startChat(partner)}
-          onUpdateGoal={(goal) => void saveProfile({ ...profileDraftFrom(me), goal })}
         />
       ) : null}
 
@@ -2851,19 +2837,10 @@ function LingoLoopScreens({
         </div>
       ) : null}
 
-      {minimizedRoom && !modal ? (
-        <MiniRoom
-          room={minimizedRoom}
-          handRaised={roomHandRaised}
-          micOn={roomMicOn}
-          onExpand={() => { setModal({ type: "room", room: minimizedRoom }); setMinimizedRoom(null); }}
-          onLeave={() => { setMinimizedRoom(null); setRoomHandRaised(false); setRoomMicOn(false); showToast(t("보이스룸에서 나갔어요")); }}
-        />
-      ) : null}
 
       {toast ? (
-        <div className="toast" role="status">
-          <CheckCircle2 size={18} /> {toast}
+        <div className={toast.tone === "error" ? "toast toast-error" : "toast"} role={toast.tone === "error" ? "alert" : "status"}>
+          {toast.tone === "error" ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />} {toast.message}
         </div>
       ) : null}
     </div>
@@ -2883,7 +2860,7 @@ function PartnerCard({
 }) {
   const partner = match.partner;
   const top = depth === 0;
-  const localTime = useLocalTime(partner.timeOffset);
+  const localTime = useLocalTime(knowsLocalTime(partner.countryCode) ? partner.timeOffset : null);
   return (
     <article
       className={`single-match-card partner-card depth-${depth} ${exit ? `exit-${exit}` : ""}`.trim()}
@@ -2935,68 +2912,6 @@ function PartnerCard({
  * 선택 드롭다운. 브라우저 기본 select 는 OS마다 생김새가 달라 앱 안에서 혼자 튑니다.
  * 열리는 목록을 MenuPopover 와 같은 판(.menu-panel)으로 그려 «···» 메뉴와 문법을 맞춥니다.
  */
-function SelectField({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (next: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: MouseEvent) => {
-      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  return (
-    <div className="select-field" ref={wrap}>
-      <span className="field-label">{label}</span>
-      <button
-        type="button"
-        className="select-trigger"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <span>{value}</span>
-        <ChevronDown size={16} />
-      </button>
-      {open ? (
-        <div className="menu-panel menu-start select-panel" role="listbox" aria-label={label}>
-          {options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              role="option"
-              aria-selected={option === value}
-              className={option === value ? "selected" : ""}
-              onClick={() => { onChange(option); setOpen(false); }}
-            >
-              {option}
-              {option === value ? <Check size={16} /> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 /** 내 글인가. 새로 쓴 글과 데모의 내 글이 같은 id 를 써야 이 판정이 맞습니다. */
 /**
  * 지금 로그인한 사람의 id.
@@ -3188,6 +3103,22 @@ function MenuPopover({
 
 
 /** 게시물 상세 화면 — 원글(48px 그리드) → 액션 → 구분선 → 답글 → 답글 입력. */
+/**
+ * 서버는 답글을 오래된 순으로, 평평하게 줍니다. 대댓글(parentId)을 부모 아래로 모으고
+ * 맨 위 답글은 최신순으로 둡니다. 예전에는 parentId 를 버려서 새로고침하면 대댓글이
+ * 모두 맨 위로 흩어졌습니다.
+ */
+function nestReplies(flat: PostReply[]): PostReply[] {
+  const byId = new Map(flat.map((reply) => [reply.id, { ...reply, replies: [] as PostReply[] }]));
+  const top: PostReply[] = [];
+  for (const reply of byId.values()) {
+    const parent = reply.parentId ? byId.get(reply.parentId) : undefined;
+    if (parent && !parent.parentId) parent.replies.push(reply);
+    else top.push(reply);
+  }
+  return top.reverse();
+}
+
 function PostDetailView({
   post,
   me,
@@ -3212,7 +3143,7 @@ function PostDetailView({
   onReplied: (kind: "reply" | "correction") => void;
   onProfile: (authorId: string) => void;
   onReport: () => void;
-  onToast: (message: string) => void;
+  onToast: (message: string, tone?: ToastTone) => void;
   saved: boolean;
   onSavePhrase: (item: SavedPhrase) => void;
   onHideAuthor: (authorId: string, name: string) => void;
@@ -3230,12 +3161,11 @@ function PostDetailView({
   useEffect(() => {
     let cancelled = false;
     api<ApiReply[]>(`/api/posts/${encodeURIComponent(post.id)}/replies`)
-      .then((rows) => { if (!cancelled) setReplies((rows || []).map(toPostReply).reverse()); })
+      .then((rows) => { if (!cancelled) setReplies(nestReplies((rows || []).map(toPostReply))); })
       .catch(() => { /* 못 읽어도 글 본문은 보여야 합니다. */ });
     return () => { cancelled = true; };
   }, [post.id]);
   const [draft, setDraft] = useState("");
-  const [likedReplies, setLikedReplies] = useState<Set<string>>(new Set());
   const [replyTo, setReplyTo] = useState<{ id: string; author: string } | null>(null);
   const [replyKind, setReplyKind] = useState<"reply" | "correction">("reply");
   const [correctionSource, setCorrectionSource] = useState<string | null>(null);
@@ -3243,10 +3173,12 @@ function PostDetailView({
   /* 보내는 중에 Enter·버튼을 또 누르면 같은 답글이 두 번 달렸습니다. */
   const sendingReply = useRef(false);
   const [sending, setSending] = useState(false);
-  /* 인기순은 좋아요 많은 순, 최신순은 나중에 달린 순(배열 뒤쪽)입니다. */
+  /* replies 는 이미 최신순(새 답글이 앞)입니다. 예전에는 여기서 한 번 더 뒤집어
+     "최신순"이 오래된 순으로 보였습니다. 인기순은 대댓글이 많은 순입니다
+     (답글 좋아요는 서버에 없어 늘 0 이었습니다). */
   const sortedReplies = sort === "popular"
-    ? [...replies].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))
-    : [...replies].reverse();
+    ? [...replies].sort((a, b) => (b.replies?.length ?? 0) - (a.replies?.length ?? 0))
+    : replies;
 
   // 내용에 따라 입력창 높이를 맞춥니다 (프리필·삭제 포함).
   useEffect(() => {
@@ -3280,15 +3212,6 @@ function PostDetailView({
     setCorrectionSource(null);
   };
 
-  const toggleReplyLike = (id: string) => {
-    setLikedReplies((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const submitReply = () => {
     if (sendingReply.current) return;
     const checked = checkText(draft, "reply");
@@ -3314,9 +3237,9 @@ function PostDetailView({
         const mine = toPostReply(saved);
         setReplies((current) => {
           if (!replyTo) return [mine, ...current];
-          // 대댓글: 부모의 replies 앞에 붙입니다.
+          // 대댓글: 부모의 replies 끝에 붙입니다(대댓글은 시간 순, 새로고침 뒤와 같은 순서).
           return current.map((reply) =>
-            reply.id === replyTo.id ? { ...reply, replies: [mine, ...(reply.replies ?? [])] } : reply,
+            reply.id === replyTo.id ? { ...reply, replies: [...(reply.replies ?? []), mine] } : reply,
           );
         });
         setDraft("");
@@ -3326,7 +3249,7 @@ function PostDetailView({
         setReplyKind("reply");
         setCorrectionSource(null);
       } catch (caught) {
-        onToast(caught instanceof Error ? caught.message : t("남기지 못했어요."));
+        onToast(caught instanceof Error ? caught.message : t("남기지 못했어요."), "error");
       } finally {
         sendingReply.current = false;
         setSending(false);
@@ -3359,14 +3282,6 @@ function PostDetailView({
           <p className={reply.kind === "correction" ? "thread-text correction" : "thread-text"}>{reply.text}</p>
         )}
         <div className="reply-actions">
-          <button
-            type="button"
-            className={likedReplies.has(reply.id) ? "active" : ""}
-            onClick={() => toggleReplyLike(reply.id)}
-            aria-label={t("답글 좋아요")}
-          >
-            <Heart size={15} /> {reply.likes + (likedReplies.has(reply.id) ? 1 : 0) || ""}
-          </button>
           {!isChild ? (
             <button type="button" onClick={() => startReplyTo(reply)}>
               <MessageCircle size={15} /> {t("답글")}
@@ -3545,17 +3460,15 @@ function ProfileDetailView({
     savedItems: SavedPhrase[];
     translated: Set<string>;
     translations: Record<string, string>;
-    corrections: Set<string>;
     onProfile: (id: string) => void;
     onToggle: (id: string, key: "liked" | "saved") => void;
     onTranslate: (post: FeedPost) => void;
-    onCorrection: (id: string) => void;
     onOpenPhoto: (src: string) => void;
     onShare: (post: FeedPost) => Promise<void>;
     onDeletePost: (post: FeedPost) => void;
     onHideAuthor: (id: string, name: string) => void;
     onBlockAuthor: (id: string, name: string) => void;
-    onReport: (target: string, targetId?: string) => void;
+    onReport: (target: string, authorId?: string, postId?: string) => void;
     onTagSelect: (tag: string | null) => void;
   };
   /** 비슷한 사람을 뽑아 올 명부. */
@@ -3563,7 +3476,7 @@ function ProfileDetailView({
   onOpenProfile: (partner: Partner) => void;
 }) {
   const [tab, setTab] = useState<"profile" | "posts">("profile");
-  const localTime = useLocalTime(partner.timeOffset);
+  const localTime = useLocalTime(knowsLocalTime(partner.countryCode) ? partner.timeOffset : null);
   const similar = similarPartners(partner, directory);
 
   /* 상대가 실제로 등록한 것만 줄로 만듭니다. 비어 있는 값을 "미상" 으로
@@ -3743,6 +3656,9 @@ function similarPartners(partner: Partner, directory: Partner[], limit = 6): Par
 }
 
 /** 서버 프로필에서 편집용 값을 만듭니다. 저장된 값과 비교할 때도 같은 함수를 씁니다. */
+/** 목록에 있으면 빼고, 없으면 넣습니다. */
+const toggleListValue = (list: string[], value: string) => (list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
+
 function profileDraftFrom(me: ApiProfile): ProfileDraft {
   return {
     name: me.name,
@@ -3753,6 +3669,9 @@ function profileDraftFrom(me: ApiProfile): ProfileDraft {
     nativeCode: me.nativeLanguages?.[0] ?? "ko",
     learningCode: me.learningLanguages?.[0]?.code ?? "en",
     learningLevel: me.learningLanguages?.[0]?.level ?? "beginner",
+    countryCode: me.country?.code ?? "",
+    availability: me.availability ?? [],
+    interests: me.interests ?? [],
   };
 }
 
@@ -3876,7 +3795,7 @@ function ProfileEditView({
       <div className="form-section">
         <span className="field-label">{t("가르칠 수 있는 말")}</span>
         <div className="chip-row" role="group" aria-label={t("가르칠 수 있는 말")}>
-          {languageOptions.map((option) => (
+          {PROFILE_LANGUAGES.map((option) => (
             <button
               type="button"
               key={option.code}
@@ -3899,7 +3818,7 @@ function ProfileEditView({
       <div className="form-section">
         <span className="field-label">{t("배우는 말")}</span>
         <div className="chip-row" role="group" aria-label={t("배우는 말")}>
-          {languageOptions.filter((option) => option.code !== draft.nativeCode).map((option) => (
+          {PROFILE_LANGUAGES.filter((option) => option.code !== draft.nativeCode).map((option) => (
             <button
               type="button"
               key={option.code}
@@ -3929,6 +3848,57 @@ function ProfileEditView({
                 {[1, 2, 3, 4, 5].map((step) => <b key={step} className={step <= index + 1 ? "on" : ""} />)}
               </span>
               <small>{t(LEVEL_LABELS[level])}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="form-section">
+        <span className="field-label">{t("사는 나라")}</span>
+        <div className="chip-row" role="group" aria-label={t("사는 나라")}>
+          {Object.entries(countryLabels).map(([code, label]) => (
+            <button
+              type="button"
+              key={code}
+              className={draft.countryCode === code ? "chip active" : "chip"}
+              aria-pressed={draft.countryCode === code}
+              onClick={() => onChange({ ...draft, countryCode: code })}
+            >
+              {tx(label)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="form-section">
+        <span className="field-label">{t("주 활동 시간")}</span>
+        <div className="chip-row" role="group" aria-label={t("주 활동 시간")}>
+          {Object.entries(availabilityLabels).map(([value, label]) => (
+            <button
+              type="button"
+              key={value}
+              className={draft.availability.includes(value) ? "chip active" : "chip"}
+              aria-pressed={draft.availability.includes(value)}
+              onClick={() => onChange({ ...draft, availability: toggleListValue(draft.availability, value) })}
+            >
+              {t(label)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="form-section">
+        <span className="field-label">{t("관심사")}</span>
+        <div className="chip-row" role="group" aria-label={t("관심사")}>
+          {Object.entries(interestLabels).map(([value, label]) => (
+            <button
+              type="button"
+              key={value}
+              className={draft.interests.includes(value) ? "chip active" : "chip"}
+              aria-pressed={draft.interests.includes(value)}
+              onClick={() => onChange({ ...draft, interests: toggleListValue(draft.interests, value) })}
+            >
+              {t(label)}
             </button>
           ))}
         </div>
@@ -4214,6 +4184,7 @@ function DiscoverView({
   onOpenLikes,
   receivedCount,
   loadFailed,
+  loading,
 }: {
   preferences: MatchPreferences;
   dailyRecommendations: DailyMatchRecommendation[];
@@ -4227,6 +4198,7 @@ function DiscoverView({
   onOpenLikes: () => void;
   receivedCount: number;
   loadFailed: boolean;
+  loading: boolean;
 }) {
   // 부모가 이미 조건에 맞는 12명(또는 조건을 넓힌 후보 포함)을 내려줍니다. 조건 밖 fixture 를 섞지 않습니다.
   const queue = dailyRecommendations.slice(0, MAX_DAILY_PARTNERS);
@@ -4246,6 +4218,21 @@ function DiscoverView({
 
   const handleSkip = () => runExit("left", onSkip);
   const handleSignal = (partner: Partner) => runExit("right", () => onSignal(partner));
+
+  // 오늘의 추천을 처음 받는 중. 이때 "조건에 맞는 사람이 없어요"를 보이면 안 됩니다.
+  if (!match && loading) {
+    return (
+      <div className="view discover-view compact-discover">
+        <header className="simple-view-header partner-view-header">
+          <div><h1>{t("오늘의 파트너")}</h1></div>
+        </header>
+        <section className="partners-exhausted" role="status">
+          <span className="feed-spinner" aria-hidden="true" />
+          <strong>{t("오늘의 파트너를 찾고 있어요…")}</strong>
+        </section>
+      </div>
+    );
+  }
 
   // 오늘 볼 파트너를 모두 확인한 상태
   if (!match) {
@@ -4278,7 +4265,7 @@ function DiscoverView({
                 {t("오늘 {total}명을 모두 확인했어요", { total })}
                 {signaledCount > 0 ? t(" · {signaledCount}명에게 신호를 보냈어요", { signaledCount }) : ""}.
                 <br />
-                {t("내일 오전 9시에 새로운 파트너를 추천해드릴게요.")}
+                {t("내일 새로운 파트너를 추천해드릴게요.")}
               </>
             )}
           </p>
@@ -4290,7 +4277,8 @@ function DiscoverView({
       </div>
     );
   }
-  const targetLanguage = labelOf(languageLabels, preferences.targetLanguages[0] ?? "en");
+  // 세 언어만 아는 표를 쓰던 자리라 한국어·중국어 등을 고르면 "ko" 같은 코드가 그대로 보였습니다.
+  const targetLanguage = tx(languageName(preferences.targetLanguages[0] ?? "en"));
   // 내가 건 조건 — 카드가 아니라 헤더에 둡니다 (상대 정보와 섞이지 않게)
   const myFilters = [
     targetLanguage,
@@ -4381,12 +4369,10 @@ function PostCard({
   savedItems,
   translated,
   translations,
-  corrections,
   onOpen,
   onProfile,
   onToggle,
   onTranslate,
-  onCorrection,
   onOpenPhoto,
   onShare,
   onSavePhrase,
@@ -4402,12 +4388,10 @@ function PostCard({
   savedItems: SavedPhrase[];
   translated: Set<string>;
   translations: Record<string, string>;
-  corrections: Set<string>;
   onOpen: (post: FeedPost) => void;
   onProfile: (id: string) => void;
   onToggle: (id: string, key: "liked" | "saved") => void;
   onTranslate: (post: FeedPost) => void;
-  onCorrection: (id: string) => void;
   onOpenPhoto: (src: string) => void;
   onShare: (post: FeedPost) => Promise<void>;
   onSavePhrase: (item: SavedPhrase) => void;
@@ -4415,7 +4399,7 @@ function PostCard({
   onDeletePost: (post: FeedPost) => void;
   onHideAuthor: (id: string, name: string) => void;
   onBlockAuthor: (id: string, name: string) => void;
-  onReport: (target: string, targetId?: string) => void;
+  onReport: (target: string, authorId?: string, postId?: string) => void;
   onTagSelect: (tag: string | null) => void;
   /** 지금 고른 주제. 프로필처럼 주제 거르기가 없는 화면에서는 넘기지 않습니다. */
   activeTag?: string | null;
@@ -4446,7 +4430,7 @@ function PostCard({
                   onDelete: () => onDeletePost(post),
                   onHideAuthor: () => onHideAuthor(post.authorId, post.author),
                   onBlockAuthor: () => onBlockAuthor(post.authorId, post.author),
-                  onReport: () => onReport(post.author, post.authorId),
+                  onReport: () => onReport(post.author, post.authorId, post.id),
                 })}
               />
               </div>
@@ -4469,28 +4453,12 @@ function PostCard({
             <audio className="post-audio" src={post.audio} controls preload="none" />
           ) : null}
           <div className="post-tags">{post.tags.map((tag) => <button type="button" key={tag} className={activeTag === tag ? "active" : ""} onClick={() => onTagSelect(activeTag === tag ? null : tag)}>{tag}</button>)}</div>
-          {post.visual ? (
-            <div className={`post-visual visual-${post.accent}`}>
-              <span className="visual-grid" />
-              <span className="visual-emoji">{post.visual.emoji}</span>
-              <span className="visual-copy"><small>{post.visual.eyebrow}</small><strong>{post.visual.title}</strong><em>{post.visual.caption}</em></span>
-            </div>
-          ) : null}
-          {post.correction && corrections.has(post.id) ? (
-            <div className="correction-card">
-              <header><span><WandSparkles size={16} /> {t("문장 교정")}</span><small>{t("Jisoo 🇰🇷 · 2분 전")}</small></header>
-              <p className="before"><span>–</span>{post.correction.original}</p>
-              <p className="after"><span>+</span>{post.correction.fixed}</p>
-              <div className="correction-note"><BookOpenCheck size={15} /> {post.correction.note}</div>
-              <button type="button" className={savedItems.some((saved) => saved.id === post.id) ? "active" : ""} aria-pressed={savedItems.some((saved) => saved.id === post.id)} aria-label={t("복습에 저장")} onClick={() => onSavePhrase(savedFromPost(post))}><Bookmark size={16} /></button>
-            </div>
-          ) : null}
           <footer className="post-actions">
-            <button className={post.liked ? "active like" : ""} type="button" onClick={() => onToggle(post.id, "liked")}><Heart size={18} fill={post.liked ? "currentColor" : "none"} /> {post.likes}</button>
-            <button type="button" onClick={() => onOpen(post)}><MessageCircle size={18} /> {post.comments}</button>
+            <button className={post.liked ? "active like" : ""} type="button" aria-label={t("좋아요 {n}", { n: post.likes })} aria-pressed={Boolean(post.liked)} title={t("좋아요")} onClick={() => onToggle(post.id, "liked")}><Heart size={18} fill={post.liked ? "currentColor" : "none"} /> {post.likes}</button>
+            <button type="button" aria-label={t("답글 {n}", { n: post.comments })} title={t("답글")} onClick={() => onOpen(post)}><MessageCircle size={18} /> {post.comments}</button>
             {/* 낱말을 빼고 아이콘과 숫자만 남깁니다 — 줄이 짧아야 글이 먼저 읽힙니다.
                 무엇인지는 aria-label 과 title 로 알려줍니다. */}
-            <button className={corrections.has(post.id) ? "active correct" : ""} type="button" aria-label={t("교정")} title={t("교정")} onClick={() => (post.correction ? onCorrection(post.id) : onOpen(post))}><PenLine size={18} /> {post.corrections}</button>
+            <button type="button" aria-label={t("교정 {n}", { n: post.corrections })} title={t("교정")} onClick={() => onOpen(post)}><PenLine size={18} /> {post.corrections}</button>
             <button className={translated.has(post.id) ? "active" : ""} type="button" aria-label={t("번역")} title={t("번역")} onClick={() => onTranslate(post)}><Languages size={18} /></button>
             <button type="button" aria-label={t("공유")} title={t("공유")} onClick={() => void onShare(post)}><Share2 size={18} /></button>
             <button className={saved ? "active save" : "post-save"} type="button" aria-label={t("저장")} aria-pressed={saved} title={t("저장")} onClick={() => onToggle(post.id, "saved")}><Bookmark size={18} fill={saved ? "currentColor" : "none"} /></button>
@@ -4501,12 +4469,12 @@ function PostCard({
 
 function CommunityView({
   posts,
+  loadState,
+  onRetry,
   tab,
   translated,
   translations,
-  corrections,
   onTranslate,
-  onCorrection,
   onToggle,
   onProfile,
   onReport,
@@ -4552,13 +4520,13 @@ function CommunityView({
   onShare: (post: FeedPost) => Promise<void>;
   translated: Set<string>;
   translations: Record<string, string>;
-  corrections: Set<string>;
   onTranslate: (post: FeedPost) => void;
-  onCorrection: (id: string) => void;
   onToggle: (id: string, key: "liked" | "saved") => void;
   onProfile: (id: string) => void;
-  onReport: (target: string, targetId?: string) => void;
+  onReport: (target: string, authorId?: string, postId?: string) => void;
   onOpen: (post: FeedPost) => void;
+  loadState: LoadState;
+  onRetry: () => void;
 }) {
   const PAGE = 12;
   const [count, setCount] = useState(PAGE);
@@ -4632,12 +4600,10 @@ function CommunityView({
               savedItems={savedItems}
               translated={translated}
               translations={translations}
-              corrections={corrections}
               onOpen={onOpen}
               onProfile={onProfile}
               onToggle={onToggle}
               onTranslate={onTranslate}
-              onCorrection={onCorrection}
               onOpenPhoto={onOpenPhoto}
               onShare={onShare}
               onSavePhrase={onSavePhrase}
@@ -4655,6 +4621,16 @@ function CommunityView({
       {hasMore ? (
         <div className="feed-sentinel" ref={sentinel} aria-hidden="true">
           <span className="feed-spinner" />
+        </div>
+      ) : filteredPosts.length === 0 && loadState !== "ready" ? (
+        <div className="empty-state" role="status">
+          {loadState === "loading" ? <span className="feed-spinner" aria-hidden="true" /> : <UsersRound size={30} strokeWidth={1.5} />}
+          <strong>{loadState === "loading" ? t("글을 불러오고 있어요…") : t("글을 불러오지 못했어요")}</strong>
+          {loadState === "error" ? (
+            <button className="secondary-button" type="button" onClick={onRetry}>
+              <RefreshCw size={15} /> {t("다시 시도")}
+            </button>
+          ) : null}
         </div>
       ) : filteredPosts.length === 0 ? (
         <div className="empty-state">
@@ -4684,6 +4660,8 @@ function CommunityView({
 
 function ChatsView({
   conversations,
+  loadState,
+  onRetry,
   selected,
   listTab,
   onListTabChange,
@@ -4699,6 +4677,12 @@ function ChatsView({
   onSendAttachment,
   onOpenPhoto,
   onExchange,
+  exchangeSession,
+  exchangeLanguages,
+  learningCode,
+  notificationCount,
+  onOpenNotifications,
+  onEndExchange,
   onProfile,
   onReport,
   onToast,
@@ -4734,9 +4718,18 @@ function ChatsView({
   onSendAttachment: (kind: "image" | "voice", media: string, label: string) => Promise<void>;
   onOpenPhoto: (src: string) => void;
   onExchange: () => void;
+  exchangeSession: ExchangeSession | null;
+  /** 세션 앞·뒤 절반에 쓰는 말(내가 배우는 말, 내 모국어). */
+  exchangeLanguages: [string, string];
+  onEndExchange: () => void;
   onProfile: () => void;
   onReport: () => void;
-  onToast: (message: string) => void;
+  onToast: (message: string, tone?: ToastTone) => void;
+  loadState: LoadState;
+  onRetry: () => void;
+  learningCode: string;
+  notificationCount: number;
+  onOpenNotifications: () => void;
 }) {
   const [listQuery, setListQuery] = useState("");
   const [translatedMessages, setTranslatedMessages] = useState<Set<string>>(new Set(["m1"]));
@@ -4818,7 +4811,9 @@ function ChatsView({
     }
   };
 
-  /** 메시지 번역 — 열려 있으면 닫고, fixture 번역이 없으면 mock 번역 API 를 호출합니다. */
+  /** 도구(번역·교정·저장·듣기)를 펼친 메시지. */
+  const [toolsFor, setToolsFor] = useState<string | null>(null);
+  /** 메시지 번역 — 열려 있으면 닫고, 처음이면 번역 API 를 부릅니다. */
   const translateMessage = async (message: ChatMessage) => {
     if (!message.text) return;
     if (translatedMessages.has(message.id) || message.translated || messageTranslations[message.id]) {
@@ -4826,20 +4821,15 @@ function ChatsView({
       return;
     }
     try {
-      const targetLanguage = HANGUL_PATTERN.test(message.text) ? "en" : "ko";
-      const response = await fetch("/api/translate", {
+      const { translatedText } = await api<{ translatedText?: string }>("/api/translate", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: message.text, targetLanguage }),
+        body: JSON.stringify({ text: message.text, targetLanguage: translationTarget(message.text, learningCode) }),
       });
-      if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-      const body = await response.json() as { data?: { translatedText?: string } };
-      const translatedText = body.data?.translatedText;
-      if (!translatedText) throw new Error("Missing mock translation");
+      if (!translatedText) throw new Error(t("번역을 불러오지 못했어요."));
       setMessageTranslations((current) => ({ ...current, [message.id]: translatedText }));
       toggleLocalSet(setTranslatedMessages, message.id);
-    } catch {
-      onToast(t("번역을 불러오지 못했어요."));
+    } catch (caught) {
+      onToast(caught instanceof Error ? caught.message : t("번역을 불러오지 못했어요."), "error");
     }
   };
   const [coachLoading, setCoachLoading] = useState(false);
@@ -4885,7 +4875,7 @@ function ChatsView({
 
   /* 상대 지역의 시각. 나라를 모르면(시차 0) 감춥니다 — 내 시각을 상대 시각인 척
      보여주면 새벽에 말을 걸게 됩니다. 마운트 뒤에 계산합니다(하이드레이션). */
-  const partnerClock = useLocalTime(selected?.timeOffset ?? 0);
+  const partnerClock = useLocalTime(selected && knowsLocalTime(selected.countryCode) ? (selected.timeOffset ?? 0) : null);
 
   const messageCount = selected?.messages.length ?? 0;
   useEffect(() => {
@@ -4949,7 +4939,7 @@ function ChatsView({
       // 것으로 충분해서 따로 알리지 않습니다.
       if (polishDraft && data.improvedDraft) setDraft(data.improvedDraft);
     } catch (caught) {
-      onToast(caught instanceof Error ? caught.message : t("대화 코치를 부르지 못했어요."));
+      onToast(caught instanceof Error ? caught.message : t("대화 코치를 부르지 못했어요."), "error");
     } finally {
       setCoachLoading(false);
     }
@@ -4960,6 +4950,14 @@ function ChatsView({
       <section className="conversation-panel">
         <header className="conversation-title">
           <div><h1>{t("대화")}</h1>{unreadTotal > 0 ? <Pill tone="soft">{t("안 읽음 {n}", { n: unreadTotal })}</Pill> : null}</div>
+          {/* 휴대폰에서는 대화 탭에 상단바가 없어 알림으로 갈 길이 없었습니다. */}
+          <IconButton
+            className="mobile-only"
+            label={t("알림")}
+            icon={Bell}
+            badge={notificationCount > 99 ? "99+" : notificationCount}
+            onClick={onOpenNotifications}
+          />
           <IconButton label={t("새 대화")} icon={PenLine} onClick={onNewChat} />
         </header>
         <label className="chat-search"><Search size={16} /><input type="search" value={listQuery} onChange={(event) => setListQuery(event.target.value)} placeholder={t("이름 또는 대화 검색")} />{listQuery ? <button type="button" className="chat-search-clear" aria-label={t("검색어 지우기")} onClick={() => setListQuery("")}><X size={14} /></button> : null}</label>
@@ -4989,9 +4987,8 @@ function ChatsView({
                   <span className="conversation-name"><strong>{conversation.name}</strong>{mutedChatIds.has(conversation.id) ? <BellOff size={12} className="conversation-muted" /> : null}<small>{tx(conversation.time)}</small></span>
                   <span className={conversation.typing ? "typing" : ""}>{conversation.typing ? t("입력 중…") : conversation.preview}</span>
                   <span className="conversation-labels">
-                    {requestIds.has(conversation.id) ? <i>{tx(msg("새 메시지 요청"))}</i> : <i><ShieldCheck size={10} /> {conversation.group ? t("그룹") : tx(msg("매칭됨"))}</i>}
+                    {requestIds.has(conversation.id) ? <i>{tx(msg("새 메시지 요청"))}</i> : <i><ShieldCheck size={10} /> {tx(msg("매칭됨"))}</i>}
                     {conversation.myTurn ? <i>{t("내 차례")}</i> : null}
-                    {conversation.group ? <i className="group-label"><Users size={11} /> {t("그룹")}</i> : null}
                     {conversation.muted || mutedChatIds.has(conversation.id) ? <i>{t("알림 끔")}</i> : null}
                   </span>
                 </span>
@@ -5005,9 +5002,23 @@ function ChatsView({
 
       {!selectedVisible ? (
         <section className="chat-thread chat-thread-empty" aria-label={t("대화")}>
-          <MessageCircle size={30} />
-          <strong>{hasAnyChat ? t("왼쪽에서 대화를 골라주세요") : t("아직 대화가 없어요")}</strong>
-          <p>{hasAnyChat ? t("고른 대화가 여기에 열립니다.") : t("왼쪽에서 새 대화를 시작해보세요.")}</p>
+          {!hasAnyChat && loadState !== "ready" ? (
+            <>
+              {loadState === "loading" ? <span className="feed-spinner" aria-hidden="true" /> : <MessageCircle size={30} />}
+              <strong role="status">{loadState === "loading" ? t("대화를 불러오고 있어요…") : t("대화를 불러오지 못했어요")}</strong>
+              {loadState === "error" ? (
+                <button className="secondary-button" type="button" onClick={onRetry}>
+                  <RefreshCw size={15} /> {t("다시 시도")}
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <MessageCircle size={30} />
+              <strong>{hasAnyChat ? t("왼쪽에서 대화를 골라주세요") : t("아직 대화가 없어요")}</strong>
+              <p>{hasAnyChat ? t("고른 대화가 여기에 열립니다.") : t("왼쪽에서 새 대화를 시작해보세요.")}</p>
+            </>
+          )}
         </section>
       ) : selected ? (
       <section className="chat-thread" aria-label={t("{name}님과의 대화", { name: selected.name })}>
@@ -5020,7 +5031,6 @@ function ChatsView({
             <span><strong>{selected.name}</strong>{partnerClock ? <small>{t("현지 {clock}", { clock: partnerClock })}</small> : null}</span>
           </button>
           <div className="thread-actions">
-            <IconButton label={t("전화하기")} icon={Phone} onClick={() => onToast(t("음성 통화는 아직 준비 중이에요"))} />
             <MenuPopover
               label={t("대화 메뉴")}
               items={[
@@ -5036,12 +5046,15 @@ function ChatsView({
 
         {selectedIsRequest ? <div className="dm-request-banner"><ShieldCheck size={18} /><span><strong>{tx(msg("{name}님의 메시지 요청"), { name: selected.name })}</strong><small>{tx(msg("수락하기 전까지 읽음 여부와 활동 상태가 상대에게 보이지 않아요."))}</small></span><button type="button" onClick={() => removeRequest(selected.id, selected.name)}>{tx(msg("삭제"))}</button><button type="button" onClick={() => acceptRequest(selected.id, selected.name)}>{tx(msg("수락"))}</button></div> : null}
 
-        <div className="exchange-banner">
-          <span className="exchange-banner-icon"><Languages size={18} /></span>
-          <span><strong>{t("오늘의 교환 균형")}</strong><small>{t("영어 8분 · 한국어 7분")}</small></span>
-          <div className="balance-bar"><i style={{ width: "53%" }} /></div>
-          <button type="button" onClick={onExchange}>{t("15분 이어하기")} <ChevronRight size={15} /></button>
-        </div>
+        {exchangeSession && exchangeSession.conversationId === selected.id ? (
+          <ExchangeSessionBar
+            session={exchangeSession}
+            firstLanguage={exchangeLanguages[0]}
+            secondLanguage={exchangeLanguages[1]}
+            onEnd={onEndExchange}
+            onToast={onToast}
+          />
+        ) : null}
 
         {/* 예전에는 메시지와 입력창 사이에 큰 배너로 끼어 있었습니다. 대화를 가리고
             읽을 것도 많아서, 눌러 쓸 수 있는 한 줄 제안으로 바꿨습니다.
@@ -5078,33 +5091,32 @@ function ChatsView({
             const mark = needsTimeMark(message.sentAt, selected.messages[index - 1]?.sentAt)
               ? <div className="time-divider" key={`${message.id}-time`}><span>{groupTime(message.sentAt!)}</span></div>
               : null;
-            if (message.system) return <Fragment key={message.id}>{mark}<div className="system-message"><ShieldCheck size={14} />{message.text}</div></Fragment>;
-            if (message.correction) {
-              return (
-                <Fragment key={message.id}>
-                {mark}
-                <div className="message-row correction-message">
-                  <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} avatarMode={selected.avatarMode} avatarConfig={selected.avatarConfig} countryCode={selected.countryCode} />
-                  <div className="chat-correction-card">
-                    <span className="correction-label"><PenLine size={14} /> {t("{name}님이 문장을 고쳤어요", { name: selected.name })}</span>
-                    <p className="before">{message.correction.original}</p>
-                    <p className="after">{message.correction.fixed}</p>
-                    <small>{message.correction.note}</small>
-                    <button type="button" className={savedItems.some((saved) => saved.id === message.id) ? "active" : ""} aria-pressed={savedItems.some((saved) => saved.id === message.id)} aria-label={t("표현 저장")} onClick={() => onSavePhrase(savedFromMessage(message, selected.name))}><Bookmark size={16} /></button>
-                  </div>
-                </div>
-                </Fragment>
-              );
-            }
             const lastMine = message.mine && !selected.messages.slice(index + 1).some((later) => later.mine);
             return (
               <Fragment key={message.id}>
               {mark}
-              <div className={`message-row ${message.mine ? "mine" : "theirs"}`}>
+              <div className={`message-row ${message.mine ? "mine" : "theirs"}${toolsFor === message.id ? " tools-open" : ""}`}>
                 {!message.mine ? <Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} avatarMode={selected.avatarMode} avatarConfig={selected.avatarConfig} countryCode={selected.countryCode} /> : null}
                 <div className="message-stack">
-                  <div className={message.kind ? "message-bubble message-bubble-media" : "message-bubble"}>
-                    {message.voice ? <button className="voice-message" type="button" onClick={() => { if (message.text && !speakText(message.text)) onToast(t("이 브라우저에서는 음성 재생을 지원하지 않아요")); }}><span className="play-dot"><Play size={13} fill="currentColor" /></span><span className="waveform"><i /><i /><i /><i /><i /><i /><i /><i /><i /></span><small>{message.voice}</small></button> : null}
+                  {/* 글 말풍선을 누르면 번역·교정·저장·듣기가 열립니다. 터치 화면에는 hover 가 없어서
+                      예전에는 휴대폰에서 이 기능들을 쓸 방법이 없었습니다. */}
+                  <div
+                    className={message.kind ? "message-bubble message-bubble-media" : "message-bubble"}
+                    {...(message.kind
+                      ? {}
+                      : {
+                          role: "button",
+                          tabIndex: 0,
+                          "aria-expanded": toolsFor === message.id,
+                          "aria-label": t("메시지 도구 열기"),
+                          onClick: () => setToolsFor((current) => (current === message.id ? null : message.id)),
+                          onKeyDown: (event: React.KeyboardEvent) => {
+                            if (event.key !== "Enter" && event.key !== " ") return;
+                            event.preventDefault();
+                            setToolsFor((current) => (current === message.id ? null : message.id));
+                          },
+                        })}
+                  >
                     {message.kind === "image" && message.media ? (
                       <button type="button" className="message-media-open" onClick={() => onOpenPhoto(message.media!)} aria-label={t("사진 크게 보기")}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -5135,7 +5147,6 @@ function ChatsView({
               </Fragment>
             );
           })}
-          {selected.typing ? <div className="typing-indicator"><Avatar name={selected.name} accent={selected.accent} size="xs" photo={selected.photo} avatarMode={selected.avatarMode} avatarConfig={selected.avatarConfig} countryCode={selected.countryCode} /><span><i /><i /><i /></span><small>{t("{name}님이 입력 중", { name: selected.name })}</small></div> : null}
         </div>
 
         {selectedIsRequest ? <div className="request-composer-lock"><LockKeyhole size={17} /><span><strong>{tx(msg("요청을 수락하면 답장할 수 있어요"))}</strong><small>{tx(msg("삭제하거나 수락해도 상대에게 별도 알림은 가지 않아요."))}</small></span></div> : <form className="message-composer" onSubmit={onSend}>
@@ -5223,43 +5234,6 @@ function toggleLocalSet(setter: React.Dispatch<React.SetStateAction<Set<string>>
   });
 }
 
-function PracticeView({
-  rooms: availableRooms,
-  onJoin,
-  onCreate,
-}: {
-  rooms: PracticeRoom[];
-  onJoin: (room: PracticeRoom) => void;
-  onCreate: () => void;
-}) {
-  return (
-    <div className="view practice-view simple-practice">
-      <header className="simple-view-header">
-        <div><h1>{t("보이스룸")}</h1><p>{t("관심 있는 주제의 방을 골라 듣거나 직접 만들어보세요.")}</p></div>
-        <button className="primary-button" type="button" onClick={onCreate}><Plus size={17} /> {t("보이스룸 만들기")}</button>
-      </header>
-
-      <div className="voice-room-toolbar"><strong>{t("열려 있는 방")}</strong><span>{t("{n}개", { n: availableRooms.length })}</span></div>
-      <div className="voice-room-list">
-        {availableRooms.map((room) => (
-          <article className={`voice-room-list-card room-${room.accent}`} key={room.id}>
-            <div className="room-card-head">
-              <span className="room-language"><Globe2 size={14} /> {room.language}</span>
-              {room.scheduled ? <Pill tone="neutral"><CalendarDays size={12} /> {room.scheduled}</Pill> : <span className="room-live"><i /> LIVE</span>}
-            </div>
-            <div className="voice-room-main">
-              <span className="voice-room-host"><Avatar name={room.host} flag={room.hostFlag} accent={room.accent} size="sm" online={!room.scheduled} /></span>
-              <span><h2>{room.title}</h2><p>{tx(room.topic)} · {tx(room.level)}</p><small>{room.host} · {t("{n}명 참여 중", { n: room.listeners ?? 1 })}</small></span>
-              <button type="button" onClick={() => onJoin(room)}>{room.scheduled ? t("미리보기") : t("입장")}<ChevronRight size={16} /></button>
-            </div>
-          </article>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-
 /** 밑줄형 탭. 활성은 검정 밑줄 2px, 굵기는 그대로 400. */
 function Tabs({
   tabs,
@@ -5305,7 +5279,7 @@ function SettingsModal({
   onDownloadChats: () => Promise<void>;
   onOnboarding: () => void;
   onOpenBlocked: () => void;
-  onToast: (message: string) => void;
+  onToast: (message: string, tone?: ToastTone) => void;
   safetyReports: SafetyReportInfo[];
   onCloseSettings: () => void;
   onSignOut: () => Promise<void> | void;
@@ -5320,43 +5294,27 @@ function SettingsModal({
   const [verificationSteps, setVerificationSteps] = useState<VerificationStepInfo[] | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/account/verification")
-      .then((response) => (response.ok ? (response.json() as Promise<{ data?: { steps?: VerificationStepInfo[] } }>) : Promise.reject(new Error(`Mock API returned ${response.status}`))))
+    api<{ steps?: VerificationStepInfo[] }>("/api/account/verification")
       .then((body) => {
-        if (!cancelled && body.data?.steps) setVerificationSteps(body.data.steps);
+        if (!cancelled && body.steps) setVerificationSteps(body.steps);
       })
       .catch(() => {
-        // 오프라인이면 기본 목업 단계를 보여줍니다.
+        // 못 받아오면 각 단계를 "확인 대기"로 둡니다.
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const advanceVerification = async (type: VerificationStepInfo["type"], action: "start" | "verify") => {
-    try {
-      const response = await fetch("/api/account/verification", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type, action }),
-      });
-      if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-      const body = await response.json() as { data?: { verification?: { steps?: VerificationStepInfo[] } } };
-      if (body.data?.verification?.steps) setVerificationSteps(body.data.verification.steps);
-      onToast(action === "verify" ? t("인증을 완료했어요") : t("인증을 시작했어요 · 확인 중"));
-    } catch {
-      onToast(t("지금은 인증 서버에 연결할 수 없어요."));
-    }
-  };
-
+  /* 이메일은 서버가 알려준 실제 상태입니다. 전화번호·신원 확인은 아직 없습니다 — 예전에는
+     "인증하기" 버튼이 있었지만 서버에 그 기능이 없어 누르면 늘 실패했습니다. */
   const verificationRow = (
     type: VerificationStepInfo["type"],
     Icon: LucideIcon,
     title: string,
     subtitle: string,
-    fallbackStatus: VerificationStepInfo["status"],
   ) => {
-    const status = verificationSteps?.find((step) => step.type === type)?.status ?? fallbackStatus;
+    const status = verificationSteps?.find((step) => step.type === type)?.status;
     if (status === "verified") {
       return <div className="verification-step done"><CheckCircle2 size={17} /><span><strong>{title}</strong><small>{tx(msg("완료됨"))}</small></span><Pill tone="success">{tx(msg("완료"))}</Pill></div>;
     }
@@ -5364,9 +5322,7 @@ function SettingsModal({
       <div className="verification-step">
         <Icon size={17} />
         <span><strong>{title}</strong><small>{subtitle}</small></span>
-        <button type="button" onClick={() => void advanceVerification(type, status === "pending" ? "verify" : "start")}>
-          {status === "pending" ? t("인증 확인") : tx(msg("인증하기"))}
-        </button>
+        <Pill tone="soft">{type === "email" ? t("확인 대기") : t("준비 중")}</Pill>
       </div>
     );
   };
@@ -5431,9 +5387,9 @@ function SettingsModal({
 
                   {settingsPane === "verification" ? (
                     <>
-                      <div className="verification-step done"><CheckCircle2 size={17} /><span><strong>{tx(msg("1단계 · 이메일 인증"))}</strong><small>{tx(msg("완료됨"))}</small></span><Pill tone="success">{tx(msg("완료"))}</Pill></div>
-                      {verificationRow("phone", Phone, tx(msg("2단계 · 전화번호 인증")), tx(msg("재가입 악용과 대량 계정 생성을 줄여요")), "not-started")}
-                      {verificationRow("identity", ShieldCheck, tx(msg("3단계 · 신원 확인")), tx(msg("선택 사항이며 인증 배지만 표시해요")), "not-started")}
+                      {verificationRow("email", Mail, tx(msg("1단계 · 이메일 인증")), t("로그인한 소셜 계정의 이메일이에요"))}
+                      {verificationRow("phone", Phone, tx(msg("2단계 · 전화번호 인증")), tx(msg("재가입 악용과 대량 계정 생성을 줄여요")))}
+                      {verificationRow("identity", ShieldCheck, tx(msg("3단계 · 신원 확인")), tx(msg("선택 사항이며 인증 배지만 표시해요")))}
                       <div className="settings-subhead"><strong>{t("이 기기에서 나가기")}</strong><small>{t("다시 로그인하면 대화와 기록이 그대로 돌아와요.")}</small></div>
                       <button className="danger-button settings-signout" type="button" onClick={() => void onSignOut()}><LogOut size={16} /> {t("로그아웃")}</button>
                     </>
@@ -5502,7 +5458,7 @@ function LearnView({
   onOpenSettings: () => void;
   onStartReview: () => void;
   savedCount: number;
-  onToast: (message: string) => void;
+  onToast: (message: string, tone?: ToastTone) => void;
   onOpenTag: (tag: string) => void;
   onToggleLike: (id: string) => void;
   myPostList: FeedPost[];
@@ -5744,16 +5700,9 @@ function ModalLayer({
   onStartChat,
   onOpenProfile,
   onPublish,
-  onCreateRoom,
   onReport,
   onToast,
-  mutedRoomIds,
-  onToggleRoomMute,
-  onCopyLink,
   existingPartnerIds,
-  onMinimizeRoom,
-  onBlockHost,
-  onEndRoom,
   posts,
   me,
   exchangePartner,
@@ -5761,16 +5710,9 @@ function ModalLayer({
   savedItems,
   likesReceived,
   sentLikes,
-  followingIds,
-  onToggleFollow,
   onOpenPost,
-  roomMessages,
-  onSendRoomMessage,
-  roomHandRaised,
-  setRoomHandRaised,
-  roomMicOn,
-  setRoomMicOn,
   exchangeLength,
+  onStartExchange,
   setExchangeLength,
   matchPreferences,
   onSaveMatchPreferences,
@@ -5782,23 +5724,15 @@ function ModalLayer({
   onJumpPartner,
   onOpenPartnerProfile,
   onAcceptLike,
-  onUpdateGoal,
 }: {
   modal: Exclude<ModalState, null>;
   onClose: () => void;
   onStartChat: (partner: Partner) => void;
   onOpenProfile: (partner: Partner) => void;
   onPublish: (text: string, options: PublishOptions) => Promise<void>;
-  onCreateRoom: (details: { title: string; topic: string; language: string; level: string }) => void;
   onReport: (target: string, options?: ReportOptions) => void;
-  mutedRoomIds: Set<string>;
-  onToggleRoomMute: (id: string) => void;
-  onCopyLink: (url: string) => void;
   existingPartnerIds: string[];
-  onToast: (message: string) => void;
-  onMinimizeRoom: (room: PracticeRoom) => void;
-  onBlockHost: (room: PracticeRoom) => void;
-  onEndRoom: (room: PracticeRoom) => void;
+  onToast: (message: string, tone?: ToastTone) => void;
   posts: FeedPost[];
   me: ApiProfile;
   /** 교환 세션을 여는 상대 — 지금 열려 있는 대화입니다. */
@@ -5807,16 +5741,9 @@ function ModalLayer({
   savedItems: SavedPhrase[];
   likesReceived: ApiReceivedLike[];
   sentLikes: ApiReceivedLike[];
-  followingIds: string[];
-  onToggleFollow: (partner: Partner) => void;
   onOpenPost: (post: FeedPost) => void;
-  roomMessages: RoomMessage[];
-  onSendRoomMessage: (text: string) => void;
-  roomHandRaised: boolean;
-  setRoomHandRaised: (value: boolean) => void;
-  roomMicOn: boolean;
-  setRoomMicOn: (value: boolean) => void;
   exchangeLength: number;
+  onStartExchange: (length: number) => void;
   setExchangeLength: (value: number) => void;
   matchPreferences: MatchPreferences;
   onSaveMatchPreferences: (preferences: MatchPreferences) => Promise<boolean>;
@@ -5828,7 +5755,6 @@ function ModalLayer({
   onJumpPartner: (position: number) => void;
   onOpenPartnerProfile: (partner: Partner) => void;
   onAcceptLike: (partner: Partner) => void;
-  onUpdateGoal: (goal: string) => void;
 }) {
   const [closing, setClosing] = useState(false);
 
@@ -5853,14 +5779,11 @@ function ModalLayer({
     <div className={`modal-backdrop ${closing ? "is-closing" : ""}`.trim()} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
       <div className={`modal modal-${modal.type}`} role="dialog" aria-modal="true" aria-label={modalLabel(modal.type)}>
         <button className="modal-close" type="button" onClick={requestClose} aria-label={t("닫기")}><X size={20} /></button>
-        {modal.type === "profile" ? <ProfileModal partner={modal.partner} following={followingIds.includes(modal.partner.id)} onToggleFollow={onToggleFollow} onStartChat={onStartChat} onReport={() => onReport(modal.partner.name)} /> : null}
         {modal.type === "filters" ? <MatchingPreferencesModal initial={matchPreferences} nativeCodes={me.nativeLanguages ?? []} onClose={onClose} onSave={onSaveMatchPreferences} /> : null}
         {modal.type === "community-filters" ? <CommunityFiltersModal initial={feedFilters} onClose={onClose} onApply={onApplyFeedFilters} /> : null}
         {modal.type === "compose" ? <ComposeModal onPublish={onPublish} onToast={onToast} /> : null}
         {modal.type === "search" ? <SearchModal directory={directory} posts={posts} savedItems={savedItems} onOpenProfile={onOpenProfile} onOpenPost={onOpenPost} onToast={onToast} /> : null}
-        {modal.type === "create-room" ? <CreateRoomModal onCreate={onCreateRoom} onToast={onToast} /> : null}
-        {modal.type === "room" ? <RoomModal room={modal.room} handRaised={roomHandRaised} setHandRaised={setRoomHandRaised} micOn={roomMicOn} setMicOn={setRoomMicOn} messages={roomMessages} onSendMessage={onSendRoomMessage} onMinimize={() => onMinimizeRoom(modal.room)} onLeave={onClose} onReport={() => onReport(modal.room.title, { targetType: "room", targetId: modal.room.id })} onToast={onToast} onBlockHost={() => onBlockHost(modal.room)} onEndRoom={() => onEndRoom(modal.room)} mutedRoom={mutedRoomIds.has(modal.room.id)} onToggleRoomMute={onToggleRoomMute} onCopyLink={onCopyLink} /> : null}
-        {modal.type === "exchange" ? <ExchangeModal length={exchangeLength} setLength={setExchangeLength} onClose={onClose} onToast={onToast} me={me} partner={exchangePartner} /> : null}
+        {modal.type === "exchange" ? <ExchangeModal length={exchangeLength} setLength={setExchangeLength} onClose={onClose} onStart={onStartExchange} me={me} partner={exchangePartner} /> : null}
         {modal.type === "review" ? <ReviewModal items={modal.items} onClose={onClose} /> : null}
         {modal.type === "new-chat" ? (
           <NewChatModal
@@ -5883,8 +5806,7 @@ function ModalLayer({
             onProfile={onOpenPartnerProfile}
           />
         ) : null}
-        {modal.type === "report" ? <ReportModal target={modal.target} onCancel={onClose} onConfirm={(options) => onReport(modal.target, { ...options, targetId: modal.targetId, targetType: modal.targetType })} /> : null}
-        {modal.type === "onboarding" ? <OnboardingModal onClose={onClose} onToast={onToast} onUpdateGoal={onUpdateGoal} /> : null}
+        {modal.type === "report" ? <ReportModal target={modal.target} onCancel={onClose} onConfirm={(options) => onReport(modal.target, { ...options, targetId: modal.targetId, targetType: modal.targetType, blockId: modal.blockId })} /> : null}
         {modal.type === "confirm" ? (
           <ConfirmModal
             title={modal.title}
@@ -5926,7 +5848,7 @@ function matchReasonList(match: { matchReasons: string[]; matchReasonCodes?: Mat
 }
 
 function modalLabel(type: Exclude<ModalState, null>["type"]) {
-  const labels: Record<Exclude<ModalState, null>["type"], string> = { review: t("4분 복습 시작"), "new-chat": t("새 대화"), profile: t("파트너 프로필"), filters: t("매칭 설정"), "community-filters": t("커뮤니티 필터"), compose: t("새 게시물"), search: t("통합 검색"), "create-room": t("보이스룸 만들기"), room: t("보이스룸"), exchange: t("언어 교환 세션"), "partner-list": t("오늘의 파트너 목록"), likes: t("주고받은 마음"), report: t("신고 및 차단"), onboarding: t("학습 목표 설정"), confirm: t("확인") };
+  const labels: Record<Exclude<ModalState, null>["type"], string> = { review: t("4분 복습 시작"), "new-chat": t("새 대화"), filters: t("매칭 설정"), "community-filters": t("커뮤니티 필터"), compose: t("새 게시물"), search: t("통합 검색"), exchange: t("언어 교환 세션"), "partner-list": t("오늘의 파트너 목록"), likes: t("주고받은 마음"), report: t("신고 및 차단"), confirm: t("확인") };
   return labels[type];
 }
 
@@ -6056,7 +5978,7 @@ function NotificationsView({
 
 /** 마음 목록 행의 메타 줄. 현지 시각을 마운트 이후에 채웁니다. */
 function LikeMeta({ partner, time }: { partner: Partner; time: string }) {
-  const localTime = useLocalTime(partner.timeOffset);
+  const localTime = useLocalTime(knowsLocalTime(partner.countryCode) ? partner.timeOffset : null);
   return (
     <small>
       <CountryFlag code={partner.countryCode} size={15} /> {tx(partner.country)}
@@ -6256,28 +6178,6 @@ function PartnerListModal({
   );
 }
 
-function ProfileModal({ partner, following, onToggleFollow, onStartChat, onReport }: { partner: Partner; following: boolean; onToggleFollow: (partner: Partner) => void; onStartChat: (partner: Partner) => void; onReport: () => void }) {
-  return (
-    <div className="profile-modal-content">
-      <div className={`profile-cover cover-${partner.accent}`}><span className="cover-pattern" /></div>
-      <div className="profile-modal-head">
-        <Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="xl" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} />
-        <div><span><h2>{partner.name}</h2>{partner.verified ? <BadgeCheck size={18} className="verified" /> : null}</span><p>{partner.handle} · {partner.city}</p></div>
-        <div className="profile-head-actions"><button className="primary-button" type="button" onClick={() => onStartChat(partner)}><MessageCircle size={17} /> {t("대화 시작")}</button><button className={following ? "secondary-button active" : "secondary-button"} type="button" aria-pressed={following} onClick={() => onToggleFollow(partner)}><UserPlus size={16} /> {following ? t("팔로잉") : t("팔로우")}</button><button className="secondary-button" type="button" onClick={onReport}><Flag size={16} /> {t("신고")}</button></div>
-      </div>
-      <div className="profile-match-strip"><span><Sparkles size={17} /><b>{partner.compatibility}%</b> {t("교환 궁합")}</span><span><Timer size={17} /><b>{partner.balance}</b></span><span><ShieldCheck size={17} />{t("안전 프로필 확인됨")}</span></div>
-      <div className="profile-modal-grid">
-        <div className="profile-main">
-          <section><h3>{t("자기소개")}</h3><p>{partner.bio}</p></section>
-          <section><h3>{t("언어 교환")}</h3><div className="profile-language-grid"><span><small>{t("가르칠 수 있어요")}</small><strong><CountryFlag code={partner.countryCode} size={15} /> {tx(partner.native)}</strong><em>{t("원어민")}</em></span><span><small>{t("배우고 있어요")}</small><strong>{tx(partner.learning)}</strong><em>{levelStep(partner.learningLevel) ? t(LEVEL_LABELS[partner.learningLevel as LearningLevel]) : partner.level}</em></span></div></section>
-          <section><h3>{t("관심사")}</h3><div className="interest-row large">{partner.interests.map((item) => <span key={item}>{labelOf(interestLabels, item)}</span>)}</div></section>
-        </div>
-        <aside className="profile-details"><h3>{t("잘 맞는 이유")}</h3><p><Clock3 size={16} /><span><strong>{t("활동 시간")}</strong><small>{partner.activeTime}</small></span></p><p><Trophy size={16} /><span><strong>{t("학습 목표")}</strong><small>{partner.goal}</small></span></p><p><PenLine size={16} /><span><strong>{t("교정 스타일")}</strong><small>{t("중요한 오류를 대화 후에")}</small></span></p></aside>
-      </div>
-    </div>
-  );
-}
-
 /**
  * 양쪽 끝을 따로 잡는 범위 슬라이더.
  *
@@ -6386,7 +6286,7 @@ function CommunityFiltersModal({
             >
               {t("모든 언어")}
             </button>
-            {languageOptions.map((option) => (
+            {PROFILE_LANGUAGES.map((option) => (
               <button
                 type="button"
                 key={option.code}
@@ -6425,7 +6325,7 @@ function MatchingPreferencesModal({
   const [preferences, setPreferences] = useState<MatchPreferences>(initial);
   const [saving, setSaving] = useState(false);
   const availabilityOptions = Object.entries(availabilityLabels) as Array<[MatchAvailability, MessageKey]>;
-  const targetLanguageOptions = languageOptions.filter((option) => !nativeCodes.includes(option.code));
+  const targetLanguageOptions = PROFILE_LANGUAGES.filter((option) => !nativeCodes.includes(option.code));
   const levelSummary = preferences.levelMin === preferences.levelMax
     ? t(LEVEL_LABELS[preferences.levelMin])
     : `${t(LEVEL_LABELS[preferences.levelMin])} – ${t(LEVEL_LABELS[preferences.levelMax])}`;
@@ -6635,17 +6535,6 @@ function AgeGender({ age, gender }: { age?: number; gender?: string }) {
   );
 }
 
-/** 배우는 단계 다섯. 서버의 LEARNING_LEVELS 와 같은 순서입니다. */
-const LEARNING_LEVELS = ["beginner", "elementary", "intermediate", "upper", "advanced"] as const;
-type LearningLevel = (typeof LEARNING_LEVELS)[number];
-
-const LEVEL_LABELS: Record<LearningLevel, MessageKey> = {
-  beginner: msg("이제 시작했어요"),
-  elementary: msg("짧은 문장은 말해요"),
-  intermediate: msg("일상 대화는 해요"),
-  upper: msg("어려운 얘기도 해요"),
-  advanced: msg("거의 불편함이 없어요"),
-};
 
 
 /** 몇 번째 단계인가. 점을 몇 개 칠할지 정합니다. */
@@ -6808,7 +6697,7 @@ const POST_TOPICS: MessageKey[] = [
   msg("음악"),
 ];
 
-function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, options: PublishOptions) => Promise<void>; onToast: (message: string) => void }) {
+function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, options: PublishOptions) => Promise<void>; onToast: (message: string, tone?: ToastTone) => void }) {
   const [text, setText] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [correction, setCorrection] = useState(true);
@@ -6938,13 +6827,13 @@ function ComposeModal({ onPublish, onToast }: { onPublish: (text: string, option
   );
 }
 
-function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, onToast }: { directory: Partner[]; posts: FeedPost[]; savedItems: SavedPhrase[]; onOpenProfile: (partner: Partner) => void; onOpenPost: (post: FeedPost) => void; onToast: (message: string) => void }) {
+function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, onToast }: { directory: Partner[]; posts: FeedPost[]; savedItems: SavedPhrase[]; onOpenProfile: (partner: Partner) => void; onOpenPost: (post: FeedPost) => void; onToast: (message: string, tone?: ToastTone) => void }) {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
   /* 자리표시자가 약속하는 대로 사람 · 게시물 · 저장한 표현을 함께 찾습니다.
      검색어가 없으면 아무것도 내지 않습니다 — 예전에는 빈 검색어가 모두와 일치해서
      아직 찾지도 않은 사람이 결과처럼 보였습니다. */
-  const partnerResults = needle ? directory.filter((partner) => `${partner.name} ${partner.handle} ${partner.native} ${partner.interests.join(" ")}`.toLowerCase().includes(needle)).slice(0, 3) : [];
+  const partnerResults = needle ? directory.filter((partner) => `${partner.name} ${partner.handle} ${partner.native} ${partner.interests.join(" ")} ${partner.interests.map(interestName).join(" ")}`.toLowerCase().includes(needle)).slice(0, 3) : [];
   const postResults = needle ? posts.filter((post) => `${post.text} ${post.tags.join(" ")} ${post.author}`.toLowerCase().includes(needle)).slice(0, 4) : [];
   const phraseResults = needle ? savedItems.filter((item) => `${item.phrase} ${item.meaning}`.toLowerCase().includes(needle)).slice(0, 3) : [];
   /** 글에 달린 주제를 세어 많이 쓰인 순으로 넷. */
@@ -6960,7 +6849,7 @@ function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, 
       await navigator.clipboard.writeText(phrase);
       onToast(t("표현을 복사했어요"));
     } catch {
-      onToast(t("복사하지 못했어요 · 브라우저가 막았어요"));
+      onToast(t("복사하지 못했어요 · 브라우저가 막았어요"), "error");
     }
   };
 
@@ -6973,10 +6862,10 @@ function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, 
         <div className="search-chips"><span>{t("많이 쓰는 주제")}</span>{popularTags.map((tag) => <button type="button" key={tag} onClick={() => setQuery(tag.replace("#", ""))}>{tag}</button>)}</div>
       ) : null}
       {/* 결과가 없는 구역은 아예 그리지 않습니다 — 제목만 남으면 빈 칸으로 보입니다. */}
-      {partnerResults.length || nothingFound || !needle ? (
+      {partnerResults.length || nothingFound ? (
       <section>
-        <h3>{query ? t("“{query}” 검색 결과", { query }) : t("추천 파트너")}</h3>
-        {partnerResults.map((partner) => <button className="search-result" type="button" key={partner.id} aria-label={t("{name} 프로필 보기", { name: partner.name })} onClick={() => onOpenProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning} · {partner.interests.join(" · ")}</small></span><Pill tone="success">{partner.compatibility}%</Pill><ChevronRight size={16} /></button>)}
+        <h3>{t("“{query}” 검색 결과", { query })}</h3>
+        {partnerResults.map((partner) => <button className="search-result" type="button" key={partner.id} aria-label={t("{name} 프로필 보기", { name: partner.name })} onClick={() => onOpenProfile(partner)}><Avatar name={partner.name} flag={partner.flag} accent={partner.accent} size="sm" online={partner.online} photo={partner.photo} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} countryCode={partner.countryCode} /><span><strong>{partner.name}</strong><small>{partner.native} ⇄ {partner.learning}{partner.interests.length ? ` · ${partner.interests.map(interestName).join(" · ")}` : ""}</small></span>{partner.compatibility > 0 ? <Pill tone="success">{partner.compatibility}%</Pill> : null}<ChevronRight size={16} /></button>)}
         {nothingFound ? <div className="empty-search"><Search size={28} /><strong>{t("검색 결과가 없어요")}</strong><p>{t("언어나 관심사를 더 짧게 입력해보세요.")}</p></div> : null}
       </section>
       ) : null}
@@ -6996,292 +6885,6 @@ function SearchModal({ directory, posts, savedItems, onOpenProfile, onOpenPost, 
   );
 }
 
-function CreateRoomModal({ onCreate, onToast }: { onCreate: (details: { title: string; topic: string; language: string; level: string }) => void; onToast: (message: string) => void }) {
-  const [title, setTitle] = useState("");
-  const [topic, setTopic] = useState("");
-  const [language, setLanguage] = useState(t("영어"));
-  const [level, setLevel] = useState(t("모든 레벨"));
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const checkedTitle = checkText(title, "roomTitle");
-    if (!checkedTitle.ok) { if (checkedTitle.error) onToast(checkedTitle.error); return; }
-    const checkedTopic = checkText(topic, "roomTopic");
-    if (!checkedTopic.ok) { if (checkedTopic.error) onToast(checkedTopic.error); return; }
-    onCreate({ title: checkedTitle.value, topic: checkedTopic.value, language, level });
-  };
-
-  return (
-    <form className="create-room-form" onSubmit={submit}>
-      <header><span className="summary-icon violet"><Mic size={20} /></span><div><h2>{t("보이스룸 만들기")}</h2><p>{t("제목과 대화 주제만 정하면 바로 목록에 추가돼요.")}</p></div></header>
-      <label><span className="field-label">{t("방 제목")}</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("예: 퇴근 후 15분 영어")} maxLength={LIMITS.roomTitle} /></label>
-      <label><span className="field-label">{t("대화 주제")}</span><input value={topic} onChange={(event) => setTopic(event.target.value)} placeholder={t("예: 여행에서 기억에 남는 순간")} maxLength={LIMITS.roomTopic} /></label>
-      <div className="create-room-options">
-        <SelectField label={t("사용 언어")} value={language} onChange={setLanguage} options={[t("영어"), t("한국어"), t("일본어"), t("스페인어")]} />
-        <SelectField label={t("참여 레벨")} value={level} onChange={setLevel} options={[t("모든 레벨"), t("초급"), t("중급"), t("고급")]} />
-      </div>
-      <div className="modal-footer"><small>{t("생성 결과는 현재 브라우저에서만 유지되는 mock입니다.")}</small><button className="primary-button" type="submit" disabled={!title.trim() || !topic.trim()}><Plus size={16} /> {t("방 만들기")}</button></div>
-    </form>
-  );
-}
-
-function MiniRoom({ room, handRaised, micOn, onExpand, onLeave }: { room: PracticeRoom; handRaised: boolean; micOn: boolean; onExpand: () => void; onLeave: () => void }) {
-  const status = micOn ? t("마이크 켜짐") : handRaised ? t("발언 승인 대기 중") : t("{host} · 말하는 중", { host: room.host });
-  return (
-    <aside className="mini-room" aria-label={t("보이스룸 미니 플레이어")}>
-      <button className="mini-room-open" type="button" onClick={onExpand}>
-        <span className="mini-room-wave" aria-hidden="true"><i /><i /><i /><i /></span>
-        <span className="mini-room-copy"><strong>{room.title}</strong><small>{status}</small></span>
-      </button>
-      <IconButton label={t("보이스룸 펼치기")} icon={Maximize2} onClick={onExpand} />
-      <IconButton label={t("보이스룸 나가기")} icon={X} onClick={onLeave} />
-    </aside>
-  );
-}
-
-function RoomModal({
-  room,
-  handRaised,
-  setHandRaised,
-  micOn,
-  setMicOn,
-  messages,
-  onSendMessage,
-  onMinimize,
-  onLeave,
-  onReport,
-  onToast,
-  mutedRoom,
-  onToggleRoomMute,
-  onCopyLink,
-  onBlockHost,
-  onEndRoom,
-}: {
-  mutedRoom: boolean;
-  onToggleRoomMute: (id: string) => void;
-  onCopyLink: (url: string) => void;
-  onBlockHost: () => void;
-  onEndRoom: () => void;
-  room: PracticeRoom;
-  handRaised: boolean;
-  setHandRaised: (value: boolean) => void;
-  micOn: boolean;
-  setMicOn: (value: boolean) => void;
-  messages: RoomMessage[];
-  onSendMessage: (text: string) => void;
-  onMinimize: () => void;
-  onLeave: () => void;
-  onReport: () => void;
-  onToast: (message: string) => void;
-}) {
-  const [draft, setDraft] = useState("");
-  const [audienceOpen, setAudienceOpen] = useState(false);
-  const [captionTranslation, setCaptionTranslation] = useState<string | null>(null);
-  const chatRef = useRef<HTMLDivElement | null>(null);
-
-  /** 자막 번역 — mock 번역 API 를 부르고, 오프라인이면 준비된 번역을 보여줍니다. */
-  const translateCaption = async () => {
-    if (captionTranslation) {
-      setCaptionTranslation(null);
-      return;
-    }
-    try {
-      const response = await fetch("/api/translate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: ROOM_CAPTION, targetLanguage: "ko" }),
-      });
-      if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
-      const body = await response.json() as { data?: { translatedText?: string } };
-      if (!body.data?.translatedText) throw new Error("Missing mock translation");
-      setCaptionTranslation(body.data.translatedText);
-      onToast(t("선택한 문장을 번역했어요"));
-    } catch {
-      setCaptionTranslation(t("오늘 하루 작은 성공이 있었다면 무엇인가요?"));
-      onToast(t("준비된 번역을 보여드려요 · 오프라인 데모"));
-    }
-  };
-
-  useEffect(() => {
-    const node = chatRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [messages.length]);
-
-  const send = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const text = draft.trim();
-    if (!text) return;
-    onSendMessage(text);
-    setDraft("");
-  };
-
-  const toggleMic = () => {
-    setMicOn(!micOn);
-    onToast(micOn ? t("마이크를 껐어요") : t("마이크를 켰어요 · 데모"));
-  };
-
-  const toggleHand = () => {
-    setHandRaised(!handRaised);
-    if (handRaised) setMicOn(false);
-    onToast(handRaised ? t("발언 요청을 취소했어요") : t("손을 들었어요. 호스트 승인을 기다려요"));
-  };
-
-  /** 내가 연 방인지. 호스트는 손들기 없이 바로 발언하고, 신고·차단 대상이 되지 않습니다. */
-  const isHost = room.host === currentUser.name;
-  const canSpeak = isHost || handRaised;
-  const micLabel = !canSpeak ? t("발언 요청을 먼저 해주세요") : micOn ? t("마이크 끄기") : t("마이크 켜기");
-
-  return (
-    <div className={`room-modal-content room-state-${room.accent}`}>
-      <header>
-        <div>
-          <Pill tone="live"><span className="live-dot" /> LIVE · {t("{n}명", { n: room.listeners || 1 })}</Pill>
-          <h2>{room.title}</h2>
-          <p>{tx(room.language)} · {tx(room.level)} · {isHost ? t("내가 호스트") : `${t("호스트")} ${room.hostFlag} ${room.host}`}</p>
-        </div>
-        <div className="room-header-actions">
-          <IconButton label={t("보이스룸 축소")} icon={Minimize2} onClick={onMinimize} />
-          <MenuPopover
-            label={t("방 메뉴")}
-            items={[
-              { id: "link", label: t("방 링크 복사"), icon: LinkIcon, onSelect: () => onCopyLink(`${window.location.origin}/#practice/room/${room.id}`) },
-              { id: "mute", label: mutedRoom ? t("이 방 알림 켜기") : t("이 방 알림 끄기"), icon: BellOff, onSelect: () => onToggleRoomMute(room.id) },
-              ...(isHost
-                ? [{ id: "end", label: t("방 종료하기"), icon: LogOut, danger: true, onSelect: () => { onToast(t("보이스룸을 종료했어요")); onEndRoom(); } }]
-                : [
-                    { id: "leave", label: t("방 나가기"), icon: LogOut, onSelect: () => { onToast(t("보이스룸에서 나왔어요")); onLeave(); } },
-                    { id: "block", label: t("호스트 차단하기"), icon: Ban, danger: true, onSelect: onBlockHost },
-                    { id: "report", label: t("신고하기"), icon: Flag, danger: true, onSelect: onReport },
-                  ]),
-            ]}
-          />
-        </div>
-      </header>
-
-      <div className="room-stage">
-        <div className={`stage-seat ${isHost && !micOn ? "" : "speaking"}`}>
-          <Avatar name={room.host} flag={room.hostFlag} accent={room.accent} size="lg" online />
-          <strong>{isHost ? t("나") : room.host}</strong>
-          <small>{isHost && !micOn ? t("호스트 · 음소거") : t("호스트 · 말하는 중")}</small>
-          <span>{isHost && !micOn ? <MicOff size={13} /> : <Mic size={13} />}</span>
-        </div>
-        {room.speakers.slice(1).map((speaker, index) => (
-          <div className="stage-seat" key={speaker}>
-            <Avatar name={speaker} accent={(["mint", "amber", "blue"] as Accent[])[index % 3]} size="md" />
-            <strong>{speaker}</strong>
-            <small>{index === 0 ? t("모더레이터") : t("스피커")}</small>
-            <span><Mic size={13} /></span>
-          </div>
-        ))}
-        {isHost ? (
-          <div className="stage-seat empty is-host">
-            <span><Hand size={20} /></span>
-            <strong>{t("발언 요청 없음")}</strong>
-            <small>{t("요청이 오면 여기에 표시돼요")}</small>
-          </div>
-        ) : (
-          <button
-            className={`stage-seat empty ${handRaised ? "waiting" : ""}`}
-            type="button"
-            onClick={toggleHand}
-          >
-            <span><Plus size={20} /></span>
-            <strong>{handRaised ? t("승인 대기 중") : t("빈 자리")}</strong>
-            <small>{handRaised ? t("호스트가 확인하고 있어요") : t("눌러서 발언 요청")}</small>
-          </button>
-        )}
-      </div>
-
-      <section className="room-audience">
-        <button
-          className="room-audience-toggle"
-          type="button"
-          aria-expanded={audienceOpen}
-          onClick={() => setAudienceOpen((open) => !open)}
-        >
-          <span className="room-audience-stack" aria-hidden="true">
-            {room.audience.slice(0, 5).map((listener) => (
-              <Avatar key={listener.name} name={listener.name} accent="blue" size="xs" />
-            ))}
-          </span>
-          <strong>{t("듣는 사람 {n}명", { n: room.listeners })}</strong>
-          <ChevronDown size={16} className={audienceOpen ? "rotated" : ""} />
-        </button>
-        {audienceOpen ? (
-          <ul className="room-audience-list">
-            {room.audience.map((listener) => (
-              <li key={listener.name}>
-                <Avatar name={listener.name} flag={listener.flag} accent="blue" size="xs" />
-                <span>{listener.name}</span>
-              </li>
-            ))}
-            {room.audience.length === 0 ? (
-              <li className="room-audience-more">{t("아직 듣는 사람이 없어요")}</li>
-            ) : null}
-            {room.listeners > room.audience.length ? (
-              <li className="room-audience-more">{t("외 {n}명", { n: room.listeners - room.audience.length })}</li>
-            ) : null}
-          </ul>
-        ) : null}
-      </section>
-
-      <div className="live-caption">
-        <span><Volume2 size={15} /> {t("실시간 자막 · 데모")}</span>
-        <p>“{ROOM_CAPTION}”</p>
-        {captionTranslation ? <p><Languages size={13} /> {captionTranslation}</p> : null}
-        <button type="button" onClick={() => void translateCaption()}>{captionTranslation ? t("번역 닫기") : t("문장 번역")}</button>
-      </div>
-
-      <div className="room-chat" ref={chatRef} role="log" aria-label={t("보이스룸 채팅")}>
-        {messages.length === 0 ? <p className="room-chat-empty">{t("아직 대화가 없어요. 먼저 인사해보세요")}</p> : null}
-        {messages.map((message) => (
-          <p key={message.id} className={message.mine ? "mine" : ""}>
-            <b>{message.mine ? t("나") : message.name}</b> {message.text}
-          </p>
-        ))}
-      </div>
-
-      <footer>
-        <button
-          className={`room-action ${micOn ? "mic-active" : canSpeak ? "mic-muted" : ""}`}
-          type="button"
-          onClick={toggleMic}
-          disabled={!canSpeak}
-          aria-label={micLabel}
-          aria-pressed={micOn}
-          title={micLabel}
-        >
-          {micOn ? <Mic size={19} /> : <MicOff size={19} />}
-        </button>
-        {isHost ? null : (
-          <button
-            className={`room-action ${handRaised ? "hand-active" : ""}`}
-            type="button"
-            onClick={toggleHand}
-            aria-label={handRaised ? t("손 내리기") : t("손들기")}
-            aria-pressed={handRaised}
-            title={handRaised ? t("손 내리기") : t("손들기")}
-          >
-            <Hand size={19} />
-          </button>
-        )}
-        <form className="room-composer" onSubmit={send}>
-          <input
-            type="text"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={t("채팅으로 인사해보세요")}
-            aria-label={t("보이스룸 채팅 입력")}
-          />
-          <button type="submit" disabled={!draft.trim()} aria-label={t("채팅 보내기")} title={t("채팅 보내기")}>
-            <Send size={17} />
-          </button>
-        </form>
-      </footer>
-    </div>
-  );
-}
-
 /**
  * 언어 교환 세션.
  *
@@ -7292,14 +6895,15 @@ function ExchangeModal({
   length,
   setLength,
   onClose,
-  onToast,
+  onStart,
   me,
   partner,
 }: {
   length: number;
   setLength: (value: number) => void;
   onClose: () => void;
-  onToast: (message: string) => void;
+  /** 대화방 위에 턴 타이머를 띄웁니다. 예전에는 "타이머 데모" 토스트만 떴습니다. */
+  onStart: (length: number) => void;
   me: ApiProfile;
   partner?: Conversation;
 }) {
@@ -7313,7 +6917,7 @@ function ExchangeModal({
         <span className="exchange-modal-icon"><Timer size={24} /></span>
         <Pill tone="soft">BALANCED SESSION</Pill>
         <h2>{t("언어 교환 세션")}</h2>
-        <p>{t("한 언어씩 공평하게 연습하고, 끝나면 서로 짧은 피드백을 남겨요.")}</p>
+        <p>{t("한 언어씩 공평하게 번갈아 연습해요. 절반이 지나면 차례를 알려 드려요.")}</p>
       </header>
       <div className="exchange-partners">
         <span>
@@ -7346,10 +6950,9 @@ function ExchangeModal({
           <small>{t("{name}의 {language}", { name: partnerName, language: theirLanguage })}</small>
         </span>
       </div>
-      <div className="exchange-features"><span><CheckCircle2 size={15} /> {t("턴 타이머")}</span><span><CheckCircle2 size={15} /> {t("실시간 메모")}</span><span><CheckCircle2 size={15} /> {t("종료 후 피드백")}</span></div>
+      <div className="exchange-features"><span><CheckCircle2 size={15} /> {t("턴 타이머")}</span></div>
       <div className="modal-footer">
-        <button className="secondary-button" type="button" onClick={() => { onClose(); onToast(t("내일 오후 8시에 세션을 예약했어요")); }}><CalendarDays size={16} /> {t("예약하기")}</button>
-        <button className="primary-button" type="button" onClick={() => { onClose(); onToast(t("{length}분 교환 세션을 시작했어요 · 타이머 데모", { length })); }}><Phone size={16} /> {t("지금 시작")}</button>
+        <button className="primary-button" type="button" onClick={() => { onStart(length); onClose(); }}><Timer size={16} /> {t("지금 시작")}</button>
       </div>
     </div>
   );
@@ -7377,135 +6980,6 @@ function ReportModal({ target, onCancel, onConfirm }: { target: string; onCancel
       </label>
       <div className="reporter-protection-note"><ShieldCheck size={17} /><span><strong>{tx(msg("신고자 보호 원칙"))}</strong><small>{tx(msg("신고했다는 이유만으로 계정을 정지하지 않으며, 자동 제재 없이 안전팀이 맥락을 검토해요."))}</small></span></div>
       <div className="modal-footer"><button className="secondary-button" type="button" onClick={onCancel}>{t("취소")}</button><button className="danger-button" type="button" onClick={() => onConfirm({ reason, block })}><Flag size={16} /> {t("신고 보내기")}</button></div>
-    </div>
-  );
-}
-
-const RHYTHM_TIMES = [msg("평일 낮"), msg("평일 저녁 7–10시"), msg("주말 오전"), msg("밤 늦게")];
-const RHYTHM_CORRECTIONS = [msg("바로바로 고쳐주기"), msg("대화 후 중요한 오류만"), msg("요청할 때만")];
-
-function OnboardingModal({ onClose, onToast, onUpdateGoal }: { onClose: () => void; onToast: (message: string) => void; onUpdateGoal: (goal: string) => void }) {
-  const [step, setStep] = useState(1);
-  const [goal, setGoal] = useState("conversation");
-  const [nativeCode, setNativeCode] = useState("ko");
-  const [learningCode, setLearningCode] = useState("en");
-  const [openRhythm, setOpenRhythm] = useState<"time" | "correction" | null>(null);
-  const [activeTime, setActiveTime] = useState<string>(RHYTHM_TIMES[1]);
-  const [correctionStyle, setCorrectionStyle] = useState<string>(RHYTHM_CORRECTIONS[1]);
-  const goals: Array<[string, LucideIcon, string, string]> = [
-    ["conversation", MessageCircle, t("일상 대화"), t("자연스럽고 편하게 말하기")],
-    ["career", Trophy, t("업무 · 커리어"), t("회의와 발표 자신감")],
-    ["travel", Globe2, t("여행"), t("현지에서 바로 쓰기")],
-    ["exam", BookOpenCheck, t("시험 · 자격"), t("정확한 문법과 어휘")],
-  ];
-
-  return (
-    <div className="onboarding-content">
-      <header>
-        <strong>{t("언어 및 목표")}</strong>
-        <span>{t("STEP {step} / 3", { step })}</span>
-      </header>
-      <div className="onboarding-progress"><i style={{ width: `${step * 33.333}%` }} /></div>
-
-      {step === 1 ? (
-        <section>
-          <Pill tone="soft">LANGUAGE</Pill>
-          <h2>{t("어떤 언어를 함께 나누고 싶나요?")}</h2>
-          <p>{t("나중에 프로필에서 언제든 바꿀 수 있어요.")}</p>
-          <div className="onboarding-language-groups">
-            <div className="form-section">
-              <span className="field-label">{t("내 모국어")}</span>
-              <div className="chip-options">
-                {languageOptions.map((option) => (
-                  <button
-                    key={option.code}
-                    type="button"
-                    className={nativeCode === option.code ? "active" : ""}
-                    aria-pressed={nativeCode === option.code}
-                    onClick={() => { setNativeCode(option.code); if (learningCode === option.code) setLearningCode(languageOptions.find((item) => item.code !== option.code)!.code); }}
-                  >
-                    <span aria-hidden="true">{option.flag}</span> {tx(option.label)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="form-section">
-              <span className="field-label">{t("배울 언어")}</span>
-              <div className="chip-options">
-                {languageOptions.map((option) => (
-                  <button
-                    key={option.code}
-                    type="button"
-                    className={learningCode === option.code ? "active" : ""}
-                    aria-pressed={learningCode === option.code}
-                    disabled={nativeCode === option.code}
-                    onClick={() => setLearningCode(option.code)}
-                  >
-                    <span aria-hidden="true">{option.flag}</span> {tx(option.label)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {step === 2 ? (
-        <section>
-          <Pill tone="soft">GOAL</Pill>
-          <h2>{t("지금 가장 중요한 학습 목표는?")}</h2>
-          <p>{t("추천 파트너와 연습 콘텐츠가 이 목표에 맞춰져요.")}</p>
-          <div className="goal-picker">
-            {goals.map(([id, GoalIcon, title, description]) => (
-              <button className={goal === id ? "selected" : ""} type="button" key={id} onClick={() => setGoal(id)}>
-                <GoalIcon size={19} /><span><strong>{title}</strong><small>{description}</small></span>{goal === id ? <CheckCircle2 size={18} /> : null}
-              </button>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {step === 3 ? (
-        <section>
-          <Pill tone="soft">YOUR RHYTHM</Pill>
-          <h2>{t("언제, 어떻게 교정받고 싶나요?")}</h2>
-          <p>{t("편안한 대화를 위한 기본 약속을 정해요.")}</p>
-          <div className="rhythm-options">
-            <div className={`rhythm-row ${openRhythm === "time" ? "open" : ""}`}>
-              <button type="button" aria-expanded={openRhythm === "time"} onClick={() => setOpenRhythm(openRhythm === "time" ? null : "time")}>
-                <Clock3 size={18} /><span><strong>{t("주 활동 시간")}</strong><small>{tx(activeTime)}</small></span><ChevronDown size={16} />
-              </button>
-              {openRhythm === "time" ? (
-                <div className="chip-options">
-                  {RHYTHM_TIMES.map((option) => (
-                    <button key={option} type="button" className={activeTime === option ? "active" : ""} aria-pressed={activeTime === option} onClick={() => { setActiveTime(option); setOpenRhythm(null); }}>{tx(option)}</button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            <div className={`rhythm-row ${openRhythm === "correction" ? "open" : ""}`}>
-              <button type="button" aria-expanded={openRhythm === "correction"} onClick={() => setOpenRhythm(openRhythm === "correction" ? null : "correction")}>
-                <PenLine size={18} /><span><strong>{t("교정 선호")}</strong><small>{tx(correctionStyle)}</small></span><ChevronDown size={16} />
-              </button>
-              {openRhythm === "correction" ? (
-                <div className="chip-options">
-                  {RHYTHM_CORRECTIONS.map((option) => (
-                    <button key={option} type="button" className={correctionStyle === option ? "active" : ""} aria-pressed={correctionStyle === option} onClick={() => { setCorrectionStyle(option); setOpenRhythm(null); }}>{tx(option)}</button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            <div className="rhythm-row">
-              <label><ShieldCheck size={18} /><span><strong>{t("프로필 공개 범위")}</strong><small>{t("위치는 도시 수준까지만 공개")}</small></span><input aria-label={t("정밀 위치 숨기기")} type="checkbox" defaultChecked /><i className="toggle" /></label>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      <footer>
-        <button className="secondary-button" type="button" onClick={() => step === 1 ? onClose() : setStep(step - 1)}>{step === 1 ? t("나중에") : t("이전")}</button>
-        <button className="primary-button" type="button" onClick={() => { if (step < 3) setStep(step + 1); else { onUpdateGoal(goals.find(([id]) => id === goal)?.[2] ?? t("일상 대화")); onClose(); onToast(t("학습 목표를 업데이트했어요")); } }}>{step < 3 ? t("다음") : t("추천 시작")}<ChevronRight size={16} /></button>
-      </footer>
     </div>
   );
 }
@@ -7557,8 +7031,9 @@ export default function LingoLoopApp() {
  */
 function AuthGate() {
   useLocaleRerender();
-  const [state, setState] = useState<"checking" | "in" | "out">("checking");
+  const [state, setState] = useState<"checking" | "in" | "out" | "offline">("checking");
   const [me, setMe] = useState<ApiProfile | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -7568,13 +7043,32 @@ function AuthGate() {
         setMe(result.user);
         setState("in");
       })
-      .catch(() => {
-        if (!cancelled) setState("out");
+      .catch((caught) => {
+        if (cancelled) return;
+        /* 로그인 화면은 "세션이 없다"(401·403)는 답을 받았을 때만 보여줍니다. 서버가 잠깐
+           답하지 못한 것(네트워크·5xx)까지 로그아웃으로 보면, 멀쩡한 세션을 두고 다시
+           로그인하라고 하게 됩니다. */
+        const status = caught instanceof ApiError ? caught.status : 0;
+        setState(status === 401 || status === 403 ? "out" : "offline");
       });
     return () => { cancelled = true; };
+  }, [attempt]);
+
+  // 쓰는 도중 세션이 끝나면(다른 기기에서 로그아웃 등) 로그인 화면으로 돌아갑니다.
+  // 예전에는 401 을 받아도 망가진 화면에 오류 토스트만 쌓였습니다.
+  useEffect(() => {
+    const expired = () => { setMe(null); setState("out"); };
+    window.addEventListener(SESSION_EXPIRED_EVENT, expired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, expired);
   }, []);
 
-  if (state === "checking") {
+  const signOut = async () => {
+    await api("/api/auth/logout", { method: "POST", body: JSON.stringify({}) }).catch(() => undefined);
+    setMe(null);
+    setState("out");
+  };
+
+  if (state === "checking" || state === "offline") {
     return (
       <main className="signin-page">
         <section className="signin-intro">
@@ -7582,7 +7076,16 @@ function AuthGate() {
             <span className="brand-mark"><Languages size={22} /></span>
             <span>Timo<strong>Talk</strong></span>
           </div>
-          <p>{t("로그인 상태를 확인하고 있어요.")}</p>
+          {state === "checking" ? (
+            <p>{t("로그인 상태를 확인하고 있어요.")}</p>
+          ) : (
+            <>
+              <p role="alert">{t("서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.")}</p>
+              <button className="primary-button" type="button" onClick={() => { setState("checking"); setAttempt((value) => value + 1); }}>
+                <RefreshCw size={16} /> {t("다시 시도")}
+              </button>
+            </>
+          )}
         </section>
       </main>
     );
@@ -7590,6 +7093,11 @@ function AuthGate() {
 
   if (state === "out" || !me) {
     return <SignIn onSignedIn={(user) => { setMe(user); setState("in"); }} />;
+  }
+
+  // 첫 설정을 마치지 않은 새 계정은 앱 안으로 들어가기 전에 언어·나이·나라를 정합니다.
+  if (me.onboardedAt === null) {
+    return <FirstRunSetup me={me} onDone={setMe} onSignOut={() => void signOut()} />;
   }
 
   // 계정이 바뀌면 화면 상태를 처음부터 다시 만듭니다.

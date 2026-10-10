@@ -16,6 +16,7 @@ import { decideDmRoute, spamSignals } from "./policy.mjs";
 import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-limit.mjs";
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import { registerHomeRoutes } from "./homes.mjs";
+import { isDiscoverable, presenceIsStale, presenceOf } from "./discovery.mjs";
 import {
   AvatarValidationError,
   avatarFields,
@@ -278,7 +279,7 @@ function parseCookies(header = "") {
 function publicProfile(profile) {
   if (!profile) return null;
   const privateFields = new Set(["email", "accountStatus", "createdAt", "updatedAt"]);
-  const normalized = { ...profile, ...avatarFields(profile), ...roomFields(profile) };
+  const normalized = { ...profile, ...avatarFields(profile), ...roomFields(profile), status: presenceOf(profile) };
   return Object.fromEntries(Object.entries(normalized).filter(([key]) => !privateFields.has(key)));
 }
 
@@ -304,6 +305,7 @@ function profileForOthers(profile) {
   const { hideLocation, ...rest } = shown;
   delete rest.roomConfig; // A house is readable only through its privacy-checked API.
   delete rest.lastActiveAt; // 마지막 접속 시각은 본인만 봅니다.
+  delete rest.onboardedAt;
   // 이 설정이 생기기 전 프로필에는 값이 없습니다. 화면·PATCH처럼 "없음"도 숨김으로 봅니다.
   return hideLocation === false ? rest : { ...rest, city: "" };
 }
@@ -346,6 +348,8 @@ function defaultProfile(uid, email, name) {
     responseRate: 100,
     exchangeScore: 50,
     accountStatus: "active",
+    // 첫 설정을 마치면 시각이 들어갑니다. 그 전에는 다른 사람의 추천·검색에 나오지 않습니다.
+    onboardedAt: null,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastActiveAt: timestamp,
@@ -364,10 +368,14 @@ async function ensureProfile(uid, email, name) {
       !Object.hasOwn(stored, "avatarConfig") ||
       stored.avatarMode !== normalizedAvatar.avatarMode ||
       !sameAvatarConfig(storedConfig, normalizedAvatar.avatarConfig);
+    // 마지막 활동 시각. 몇 분에 한 번만 써서 접속 표시는 살리고 쓰기는 줄입니다.
+    const presencePatch = presenceIsStale(stored) ? { lastActiveAt: nowIso() } : {};
     if (needsAvatarBackfill) {
-      await reference.update({ ...normalizedAvatar, updatedAt: nowIso() });
+      await reference.update({ ...normalizedAvatar, ...presencePatch, updatedAt: nowIso() });
+    } else if (presencePatch.lastActiveAt) {
+      await reference.update(presencePatch).catch((error) => console.warn("presence update failed", error?.message));
     }
-    return { ...stored, ...normalizedAvatar };
+    return { ...stored, ...normalizedAvatar, ...presencePatch };
   }
   const profile = defaultProfile(uid, email || "unknown@example.invalid", name);
   await reference.create(profile);
@@ -548,7 +556,7 @@ function matchCandidate(candidate, me, preferences, date) {
     candidate.age >= preferences.ageMin &&
     candidate.age <= preferences.ageMax &&
     (!preferences.verifiedOnly || candidate.verified) &&
-    (!preferences.onlineOnly || candidate.status === "online") &&
+    (!preferences.onlineOnly || presenceOf(candidate) === "online") &&
     (preferences.intents.length === 0 || matchedIntents.length > 0);
   let score = 35;
   // 매칭 이유는 화면에 그대로 나오는 문구입니다. 서버가 한국어 문장으로 만들어 보내면
@@ -600,7 +608,7 @@ function matchCandidate(candidate, me, preferences, date) {
   }
   if (matchedIntents.length) score += 6;
   if (candidate.verified) score += 4;
-  if (candidate.status === "online") score += 4;
+  if (presenceOf(candidate) === "online") score += 4;
   score += stableHash(date + ":" + candidate.id) % 5;
   if (!exact) {
     reasons.unshift("일부 조건을 넓혀 찾은 가까운 파트너예요");
@@ -840,6 +848,10 @@ async function conversationView(conversation, uid, includeMessages = false) {
     partner,
     preview: conversation.lastMessage || "새 대화를 시작해 보세요.",
     updatedAt: conversation.updatedAt,
+    /** 마지막 메시지를 보낸 사람. 상대가 마지막이면 "내 차례"입니다. */
+    lastSenderId: conversation.lastSenderId || null,
+    /** 상대가 어디까지 읽었는지. 새 메시지만 받아 와도 내 말풍선의 "읽음"을 고칠 수 있습니다. */
+    partnerReadAt: (partnerId && conversation.readAt?.[partnerId]) || null,
     /** 내가 아직 안 읽은 메시지 수. 보낼 때 올리고 읽을 때 0 으로 돌립니다. */
     unreadCount: conversation.unread?.[uid] || 0,
     /* 요청함에서 받는 사람이 먼저 알아보라고 붙이는 표시입니다. 막지는 않습니다. */
@@ -1149,12 +1161,8 @@ app.get("/api/languages", async (req, res) => success(res, req, LANGUAGES));
 app.get("/api/countries", async (req, res) => success(res, req, COUNTRIES));
 
 app.get("/api/bootstrap", requireUser, async (req, res) => {
-  await db.collection("profiles").doc(req.auth.uid).update({
-    status: "online",
-    lastActiveAt: nowIso(),
-    updatedAt: nowIso(),
-  });
-  const profile = { ...req.auth.profile, status: "online", lastActiveAt: nowIso() };
+  await db.collection("profiles").doc(req.auth.uid).update({ lastActiveAt: nowIso() });
+  const profile = { ...req.auth.profile, lastActiveAt: nowIso() };
   const notifications = await unreadNotificationCount(req.auth.uid);
   return success(res, req, {
     currentUser: publicProfile(profile),
@@ -1363,6 +1371,18 @@ app.patch("/api/profile", requireUser, async (req, res) => {
   if (!merged.nativeLanguages?.length || !merged.learningLanguages?.length) {
     throw new ApiError(422, "VALIDATION_ERROR", "모국어와 학습 언어를 한 개 이상 선택해 주세요.");
   }
+  // 첫 설정 완료. 새 계정에는 나이·국가·언어 기본값이 들어 있어서, 사용자가 직접 고른 값이
+  // 이 요청에 함께 와야 마친 것으로 봅니다(기본값 그대로 추천에 나가지 않게).
+  if (body.completeOnboarding !== undefined) {
+    if (body.completeOnboarding !== true) {
+      throw new ApiError(422, "VALIDATION_ERROR", "첫 설정 완료 값을 확인해 주세요.", { field: "completeOnboarding" });
+    }
+    const missing = ["age", "countryCode", "nativeLanguages", "learningLanguages"].filter((field) => body[field] === undefined);
+    if (missing.length) {
+      throw new ApiError(422, "VALIDATION_ERROR", "나이, 국가, 모국어와 배울 언어를 골라 주세요.", { field: missing[0] });
+    }
+    if (current.onboardedAt === null) patch.onboardedAt = nowIso();
+  }
   patch.updatedAt = nowIso();
   await db.collection("profiles").doc(req.auth.uid).update(patch);
   return success(res, req, { ...publicProfile({ ...current, ...patch }), email: req.auth.email, emailVerified: req.auth.emailVerified });
@@ -1376,7 +1396,7 @@ app.get("/api/partners", requireUser, async (req, res) => {
   const query = String(req.query.q || "").trim().toLocaleLowerCase();
   const partners = snapshot.docs
     .map((document) => document.data())
-    .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
+    .filter((profile) => profile.id !== req.auth.uid && isDiscoverable(profile))
     .filter((profile) => !blocked.has(profile.id))
     .filter((profile) => {
       if (!query) return true;
@@ -1425,7 +1445,7 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
       blockedBothWays(req.auth.uid),
     ]);
     const recommendations = (stored.recommendations || [])
-      .filter((item) => profileMap.get(item.partnerId)?.accountStatus === "active")
+      .filter((item) => isDiscoverable(profileMap.get(item.partnerId)))
       .filter((item) => !blockedNow.has(item.partnerId))
       .map((item) => ({ ...item, partner: profileForOthers(profileMap.get(item.partnerId)) }));
     return success(res, req, {
@@ -1443,7 +1463,7 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
   ]);
   const candidates = snapshot.docs
     .map((document) => document.data())
-    .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
+    .filter((profile) => profile.id !== req.auth.uid && isDiscoverable(profile))
     .filter((profile) => !blocked.has(profile.id))
     .map((profile) => matchCandidate(profile, req.auth.profile, preferences, date))
     .filter((item) => item.partner.nativeLanguages.some((code) => preferences.targetLanguages.includes(code)))
@@ -2681,7 +2701,7 @@ app.get("/api/search", requireUser, async (req, res) => {
   ]);
   const partners = profilesSnapshot.docs
     .map((document) => document.data())
-    .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
+    .filter((profile) => profile.id !== req.auth.uid && isDiscoverable(profile))
     .filter((profile) => !blocked.has(profile.id))
     .filter((profile) => [profile.name, profile.handle, profile.bio, ...(profile.interests || [])].join(" ").toLocaleLowerCase().includes(query))
     .map(profileForOthers);

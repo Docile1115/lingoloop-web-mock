@@ -2614,7 +2614,10 @@ p {
   transition: opacity .18s ease;
 }
 
-.message-row:hover .message-tools { opacity: 1; pointer-events: auto; }
+.message-row:hover .message-tools,
+.message-row:focus-within .message-tools,
+.message-row.tools-open .message-tools { opacity: 1; pointer-events: auto; }
+.message-bubble[role="button"] { cursor: pointer; }
 .message-tools button { display: flex; min-width: 24px; min-height: 24px; align-items: center; justify-content: center; gap: var(--sp-1); padding: 0; border: 0; background: transparent; color: var(--subtle); font-size: 12px; }
 
 .voice-message { display: flex; min-width: 190px; align-items: center; gap: var(--sp-2); padding: 0; border: 0; background: transparent; color: inherit; }
@@ -4093,6 +4096,7 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
 }
 
 .toast svg { color: var(--success); }
+.toast-error svg { color: var(--danger); }
 @keyframes toast-up { from { opacity: 0; transform: translate(-50%,10px); } }
 
 /* Mid-size desktop */
@@ -4157,7 +4161,8 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   .topbar-actions .icon-button { width: 34px; height: 34px; border: 0; background: transparent; }
   /* 모바일에는 사이드바가 없으므로 커뮤니티 알림·검색·글쓰기를 상단에서
      숨기면 안 됩니다. 피드 선택기는 남는 폭만 쓰고 액션은 한 줄에 유지합니다. */
-  .topbar:has(.community-topbar-feed) .topbar-actions { display: flex; flex: 0 0 auto; }
+  .topbar:has(.community-topbar-feed) .topbar-actions,
+  .topbar:has(.profile-topbar-feed) .topbar-actions { display: flex; flex: 0 0 auto; }
   .app-root .topbar:has(.community-topbar-feed) {
     height: var(--mobile-topbar-total);
     gap: 2px;
@@ -4337,10 +4342,9 @@ input[type="search"]::-webkit-search-decoration { display: none; -webkit-appeara
   .message-stack { max-width: 79%; }
   .message-bubble p { font-size: 13px; }
   /* 터치에는 hover 가 없다고 늘 띄워뒀더니 말풍선마다 번역·교정·듣기가 붙어
-     화면이 글자로 뒤덮였습니다. 모바일에서는 감춥니다 — 말풍선을 눌러 여는
-     상세 화면에 같은 기능이 있습니다. */
+     화면이 글자로 뒤덮였습니다. 모바일에서는 누른 말풍선 하나에만, 말풍선 아래에 엽니다. */
   .message-tools { display: none; }
-  .message-tools button:nth-child(n+3) { display: none; }
+  .message-row.tools-open .message-stack > .message-tools { position: static; display: flex; margin-top: var(--sp-1); }
   .voice-message { min-width: 170px; }
   .message-composer { padding: var(--sp-2) var(--sp-2) calc(var(--sp-2) + env(safe-area-inset-bottom)); }
   .writing-language { margin-left: var(--sp-1); }
@@ -7734,4 +7738,38 @@ label > svg { flex: none; }
 /* 뒤쪽 모바일 공통 .view 여백보다 우선해 고정 저장바와 하단 탐색 사이 빈 띠를 없앱니다. */
 @media (max-width: 720px) {
   .view.avatar-editor-view { padding-bottom: 0; }
+}
+
+/* 휴대폰에서만 보이는 버튼(예: 대화 목록 머리의 알림). 큰 화면에는 왼쪽 메뉴에 같은 것이 있습니다. */
+.mobile-only { display: none; }
+@media (max-width: 720px) {
+  .mobile-only { display: inline-flex; }
+}
+
+/* ─────────────────────────────────────────────
+   첫 설정 — 새 계정이 앱에 들어가기 전에 언어·나이·나라를 정합니다.
+   로그인 화면과 같은 바탕에 카드 하나를 가운데 둡니다.
+   ───────────────────────────────────────────── */
+.signin-page.first-run { align-items: start; grid-template-rows: auto; }
+.first-run-card {
+  width: 100%;
+  max-width: 560px;
+  margin: var(--sp-5) auto;
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  text-align: left;
+}
+.first-run-card > header { margin-top: 0; padding-right: 0; }
+.first-run-card > header > strong { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.first-run-card .onboarding-progress { margin-right: calc(-1 * var(--sp-5)); margin-left: calc(-1 * var(--sp-5)); }
+.first-run-card fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.first-run-card > fieldset > section { min-height: 0; padding-top: var(--sp-5); }
+.first-run-error { margin-top: var(--sp-3); text-align: left; }
+@media (max-width: 720px) {
+  .signin-page.first-run { padding: 0; }
+  .first-run-card { margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .first-run-card .onboarding-progress { margin-right: calc(-1 * var(--sp-4)); margin-left: calc(-1 * var(--sp-4)); }
+  .first-run-card > footer { position: sticky; bottom: 0; background: var(--surface); padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom)); }
 }
