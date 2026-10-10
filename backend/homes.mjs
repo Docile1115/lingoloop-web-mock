@@ -103,11 +103,12 @@ export function registerHomeRoutes(app, {db, requireUser, success, ApiError, ass
     const docs=page.docs.slice(0,limit);
     const rows=await Promise.all(docs.map(document=>{
       const row=document.data(); const owner=kind==='favorites'?row.ownerId:kind==='followers'?row.fromUserId:row.toUserId;
-      return db.runTransaction(async tx=>{try { const state=await access(tx,req.auth.uid,owner); return {owner:profileForOthers(state.profile),status:state.settings.status}; } catch(error) {if(error instanceof HomeError || error.code==='PARTNER_BLOCKED') return null; throw error;} });
+      return db.runTransaction(async tx=>{try { const state=await access(tx,req.auth.uid,owner); return {owner:profileForOthers(state.profile),status:state.settings.status}; } catch(error) {if(error instanceof HomeError || error.code==='PARTNER_BLOCKED') return null; throw error;} },{readOnly:true});
     }));
     return {items:rows.filter(Boolean),nextCursor:page.size>limit ? (kind==='favorites'?docs.at(-1).data().ownerId:docs.at(-1).id):null};
   });
 
+  // Reads use read-only transactions: one consistent snapshot without locking every document read.
   route('get','/api/homes/:ownerId',req=>db.runTransaction(async tx=>{
     const owner=uid(req.params.ownerId), viewer=req.auth.uid;
     const state=await access(tx,viewer,owner);
@@ -126,7 +127,7 @@ export function registerHomeRoutes(app, {db, requireUser, success, ApiError, ass
     const visitors=await decorate(tx,await visibleRows(tx,viewer,(stamps?.docs||[]).map(d=>({...d.data(),id:d.id}))));
     const displayed=display?.exists?(await decorate(tx,await visibleRows(tx,viewer,[{...display.data(),id:display.id}])))[0]||null:null;
     return {viewerId:viewer,owner:profileForOthers(state.profile),roomConfig:roomFields(state.profile).roomConfig,room3d:readRoom3D(state.home.room3d),room3dRevision:state.home.room3dRevision||0,settings:state.relation.own?state.settings:{...state.settings,displayedGiftId:''},own:state.relation.own,canWrite:canEnterHome(state.settings.writing,state.relation),favorite:favorite.exists,stampedToday:mine.data()?.day===todayInSeoul(),photos:photos.docs.map(d=>({...d.data(),id:d.id})).filter(p=>canEnterHome(p.visibility,state.relation)),entries:decorated,visitors,displayedGift:displayed,nextCursor:entries.size>20?entries.docs[19].id:null};
-  }));
+  },{readOnly:true}));
 
   route('put','/api/homes/:ownerId/room3d',req=>db.runTransaction(async tx=>{
     const owner=uid(req.params.ownerId);
@@ -148,7 +149,7 @@ export function registerHomeRoutes(app, {db, requireUser, success, ApiError, ass
     const rows=await visibleRows(tx,req.auth.uid,page.docs.slice(0,20).map(d=>({...d.data(),id:d.id})).filter(row=>!row.deletedAt));
     const hearts=rows.length?await tx.getAll(...rows.map(e=>child(owner,'entries').doc(e.id).collection('hearts').doc(req.auth.uid))):[];
     return {items:await decorate(tx,rows.map((row,i)=>({...row,hearted:hearts[i].exists}))),nextCursor:page.size>20?page.docs[19].id:null};
-  }));
+  },{readOnly:true}));
 
   route('patch','/api/homes/:ownerId/settings',req=>db.runTransaction(async tx=>{
     const owner=uid(req.params.ownerId); if(owner!==req.auth.uid) throw new HomeError('집주인만 변경할 수 있어요.',403);
