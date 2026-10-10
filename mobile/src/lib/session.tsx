@@ -40,6 +40,14 @@ export type Me = {
   country?: { code: string; name: string; flag: string };
   nativeLanguages?: string[];
   learningLanguages?: Array<{ code: string; level: string; goal?: string }>;
+  interests?: string[];
+  availability?: string[];
+  /**
+   * 처음 설정을 마친 시각. null 이면 아직 안 마쳤고(서버 기본값으로 만들어진 계정),
+   * 다른 사람의 탐색에도 보이지 않습니다. 값이 아예 없으면 이 필드가 생기기 전의
+   * 계정(또는 예전 서버)이라 마친 것으로 봅니다.
+   */
+  onboardedAt?: string | null;
 };
 
 type SessionValue = {

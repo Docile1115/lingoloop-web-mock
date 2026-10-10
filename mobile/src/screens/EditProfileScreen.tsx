@@ -1,4 +1,9 @@
-/** 프로필 편집. 저장하면 서버에 남고 웹에서도 바로 보입니다. */
+/**
+ * 프로필 편집. 저장하면 서버에 남고 웹에서도 바로 보입니다.
+ *
+ * 웹의 프로필 편집과 같은 칸(이름·자기소개·나이·성별·사는 곳·가르칠 수 있는 말·
+ * 배우는 말·단계·목표)을 고칠 수 있습니다. 칸 모양과 검사는 처음 설정과 같이 씁니다.
+ */
 import { useCallback, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -7,26 +12,28 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ApiError, api } from "../lib/api";
 import { t } from "../lib/i18n";
+import {
+  draftFromMe,
+  fieldFromServer,
+  profileErrors,
+  profilePatch,
+  type ProfileDraft,
+  type ProfileField,
+} from "../lib/profile";
 import { useSession, type Me } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
-import { radius, space, tapSize } from "../lib/theme";
-import { Avatar, Chip, Loading, PrimaryButton } from "../ui";
+import { radius, space } from "../lib/theme";
+import { Avatar, Loading, PrimaryButton } from "../ui";
+import { ProfileFields } from "../ui/ProfileFields";
 
-/** 서버가 받는 단계. backend/server.mjs 의 LEARNING_LEVELS 와 같은 순서입니다. */
-const LEVELS = ["beginner", "elementary", "intermediate", "upper", "advanced"] as const;
-const LEVEL_LABELS: Record<(typeof LEVELS)[number], string> = {
-  beginner: "이제 시작했어요",
-  elementary: "짧은 문장은 말해요",
-  intermediate: "일상 대화는 해요",
-  upper: "어려운 얘기도 해요",
-  advanced: "거의 불편함이 없어요",
-};
+const FIELDS: readonly ProfileField[] = [
+  "name", "bio", "age", "gender", "country", "native", "learning", "level", "goal",
+];
 
 export function EditProfileScreen({
   onDone,
@@ -37,52 +44,49 @@ export function EditProfileScreen({
 }) {
   const { me, applyMe } = useSession();
   const c = useTheme();
-  const [name, setName] = useState(me?.name ?? "");
-  const [bio, setBio] = useState(me?.bio ?? "");
-  const [goal, setGoal] = useState(me?.learningLanguages?.[0]?.goal ?? "");
-  const [level, setLevel] = useState(me?.learningLanguages?.[0]?.level ?? "beginner");
+  const [draft, setDraft] = useState<ProfileDraft | null>(() => (me ? draftFromMe(me) : null));
+  const [serverErrors, setServerErrors] = useState<Partial<Record<ProfileField, string>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const change = (next: ProfileDraft) => {
+    setDraft(next);
+    setServerErrors({});
+    setError("");
+  };
+
   const save = useCallback(async () => {
-    if (busy || !me) return;
-    // 서버 규칙(이름 2자 이상, 목표는 비우거나 2자 이상)을 먼저 확인합니다.
-    if (name.trim().length < 2) {
-      setError(t("이름은 2자 이상 적어 주세요."));
-      return;
-    }
-    if (goal.trim().length === 1) {
-      setError(t("학습 목표는 2자 이상 적어 주세요."));
+    if (busy || !me || !draft) return;
+    // 서버 규칙(이름 2자 이상, 나이 18~100, 목표는 비우거나 2자 이상)을 먼저 확인합니다.
+    const problems = profileErrors(draft, false);
+    const first = Object.values(problems)[0];
+    if (first) {
+      setError(first);
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const learning = me.learningLanguages?.[0];
       const saved = await api<Me>("/api/profile", {
         method: "PATCH",
-        body: JSON.stringify({
-          name: name.trim(),
-          bio: bio.trim(),
-          // 서버는 배열 전체를 바꿉니다. 첫 언어만 고치고 나머지는 그대로 보냅니다.
-          learningLanguages: learning
-            ? [
-                { code: learning.code, level, goal: goal.trim() },
-                ...(me.learningLanguages ?? []).slice(1),
-              ]
-            : undefined,
-        }),
+        body: JSON.stringify({ ...profilePatch(draft, me), bio: draft.bio.trim() }),
       });
       applyMe(saved);
       onDone();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : t("요청을 처리하지 못했어요."));
+      const field = caught instanceof ApiError ? fieldFromServer(caught.field) : null;
+      const message = caught instanceof ApiError ? caught.message : t("요청을 처리하지 못했어요.");
+      if (field) setServerErrors({ [field]: message });
+      setError(message);
     } finally {
       setBusy(false);
     }
-  }, [busy, me, name, bio, goal, level, applyMe, onDone]);
+  }, [busy, me, draft, applyMe, onDone]);
 
-  if (!me) return <Loading />;
+  if (!me || !draft) return <Loading />;
+
+  // 고치는 동안 칸마다 이유를 바로 보여줍니다. 편집은 이미 채워진 값에서 시작하기 때문입니다.
+  const errors = { ...profileErrors(draft, false), ...serverErrors };
 
   return (
     <KeyboardAvoidingView
@@ -119,57 +123,15 @@ export function EditProfileScreen({
           <Ionicons name="chevron-forward" size={20} color={c.subtle} />
         </Pressable>
 
-        <Text style={[styles.label, { color: c.ink }]}>{t("이름")}</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: c.surfaceSoft, borderColor: c.line, color: c.ink }]}
-          value={name}
-          onChangeText={setName}
-          maxLength={40}
-          editable={!busy}
-        />
+        <ProfileFields draft={draft} onChange={change} errors={errors} disabled={busy} fields={FIELDS} />
 
-        <Text style={[styles.label, { color: c.ink }]}>{t("자기소개")}</Text>
-        <TextInput
-          style={[styles.area, { backgroundColor: c.surfaceSoft, borderColor: c.line, color: c.ink }]}
-          value={bio}
-          onChangeText={setBio}
-          multiline
-          maxLength={500}
-          editable={!busy}
-          placeholder={t("어떤 사람인지 짧게 알려주세요.")}
-          placeholderTextColor={c.subtle}
-        />
-
-        <Text style={[styles.label, { color: c.ink }]}>{t("학습 목표")}</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: c.surfaceSoft, borderColor: c.line, color: c.ink }]}
-          value={goal}
-          onChangeText={setGoal}
-          maxLength={100}
-          editable={!busy}
-          placeholder={t("예: 면접에서 막힘 없이 말하기")}
-          placeholderTextColor={c.subtle}
-        />
-
-        <Text style={[styles.label, { color: c.ink }]}>{t("지금 어느 정도인가요")}</Text>
-        <View style={styles.chips}>
-          {LEVELS.map((one) => (
-            <Chip
-              key={one}
-              label={t(LEVEL_LABELS[one] as never)}
-              active={level === one}
-              onPress={() => setLevel(one)}
-            />
-          ))}
-        </View>
-
-        {error ? <Text style={[styles.error, { color: c.danger }]}>{error}</Text> : null}
+        {error ? <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text> : null}
 
         <View style={{ marginTop: space.lg }}>
           <PrimaryButton
             label={t("저장")}
             onPress={() => void save()}
-            disabled={!name.trim()}
+            disabled={!draft.name.trim()}
             busy={busy}
           />
         </View>
@@ -191,23 +153,5 @@ const styles = StyleSheet.create({
   },
   avatarTitle: { fontSize: 15, fontWeight: "700" },
   avatarHint: { fontSize: 12, lineHeight: 17 },
-  label: { fontSize: 13, fontWeight: "600", marginTop: space.md },
-  input: {
-    height: tapSize + 4,
-    paddingHorizontal: space.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.button,
-    fontSize: 15,
-  },
-  area: {
-    minHeight: 96,
-    padding: space.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.button,
-    fontSize: 15,
-    lineHeight: 21,
-    textAlignVertical: "top",
-  },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: space.xs },
   error: { fontSize: 13, marginTop: space.md },
 });

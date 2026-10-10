@@ -939,4 +939,13 @@ export const en: Record<MessageKey, string> = {
   "마이크를 쓸 수 없어요. 설정에서 마이크 권한을 허용해 주세요.": "Can't use the microphone. Allow microphone access in Settings.",
   "응답이 늦어요. 연결을 확인하고 다시 시도해 주세요.": "The server is taking too long. Check your connection and try again.",
   "로그인 상태를 확인하지 못했어요. 연결되면 다시 시도해 주세요.": "We couldn't check your sign-in. Try again once you're connected.",
+  "성별을 골라 주세요.": "Please choose your gender.",
+  "사는 나라를 골라 주세요.": "Please choose the country you live in.",
+  "가르칠 수 있는 말을 골라 주세요.": "Please choose a language you can teach.",
+  "지금 어느 정도인지 골라 주세요.": "Please choose your current level.",
+  "빠진 칸을 채워 주세요.": "Please fill in the missing fields.",
+  "시작하기 전에 나를 알려 주세요": "Tell us about yourself before you start",
+  "설정을 마치면 다른 사람에게 내 프로필이 보여요. 나중에 프로필에서 언제든 바꿀 수 있어요.": "Others can see your profile once you finish. You can change this any time in your profile.",
+  "시작하기": "Get started",
+  "고르지 않아도 돼요.": "Optional.",
 };

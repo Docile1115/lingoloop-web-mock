@@ -10,6 +10,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { I18nProvider, useLocaleRerender } from "./src/lib/i18n";
 import { SessionProvider, useSession } from "./src/lib/session";
 import { Navigation } from "./src/Navigation";
+import { OnboardingScreen } from "./src/screens/OnboardingScreen";
 import { SessionUnavailableScreen } from "./src/screens/SessionUnavailableScreen";
 import { SignInScreen } from "./src/screens/SignInScreen";
 import { Loading } from "./src/ui";
@@ -22,7 +23,10 @@ function Gate() {
   if (checking) return <Loading />;
   // 서버에 닿지 않았을 뿐이면 로그인 화면으로 보내지 않습니다.
   if (!me && unavailable) return <SessionUnavailableScreen message={unavailable} />;
-  return me ? <Navigation /> : <SignInScreen />;
+  if (!me) return <SignInScreen />;
+  // 처음 설정을 안 마친 계정(null)은 탭보다 먼저 설정을 받습니다. 값이 없으면 예전 계정이라 마친 것으로 봅니다.
+  if (me.onboardedAt === null) return <OnboardingScreen />;
+  return <Navigation />;
 }
 
 export default function App() {
