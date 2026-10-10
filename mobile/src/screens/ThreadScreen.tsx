@@ -4,7 +4,7 @@
  * 시각 표기는 카카오톡 규칙을 따릅니다 — 같은 시간대의 말은 한 덩어리로 두고,
  * 30분이 지나거나 날짜가 바뀌면 다시 적습니다. 웹과 같은 규칙입니다.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AppState,
   FlatList,
@@ -187,6 +187,8 @@ function VoiceMessage({
   ink: string;
   muted: string;
 }) {
+  // 내 말풍선(초록) 위에는 흰색 대신 어두운 잉크를 씁니다. 흰색은 대비가 3.1:1 이라 기준(4.5:1)에 못 미칩니다.
+  const onMine = useTheme().onPrimary;
   const [source, setSource] = useState<string | null>(media.startsWith("data:") ? null : media);
   const [unsupported, setUnsupported] = useState(false);
   const player = useAudioPlayer(source);
@@ -245,8 +247,8 @@ function VoiceMessage({
   if (unsupported) {
     return (
       <View style={styles.voiceMessage} accessible accessibilityLabel={t("이 기기에서는 재생할 수 없는 음성이에요.")}>
-        <Ionicons name="volume-mute-outline" size={17} color={mine ? "#ffffff" : muted} />
-        <Text style={{ color: mine ? "#ffffff" : muted, fontSize: 12, flexShrink: 1 }}>
+        <Ionicons name="volume-mute-outline" size={17} color={mine ? onMine : muted} />
+        <Text style={{ color: mine ? onMine : muted, fontSize: 12, flexShrink: 1 }}>
           {t("이 기기에서는 재생할 수 없는 음성이에요.")}
         </Text>
       </View>
@@ -261,13 +263,13 @@ function VoiceMessage({
       accessibilityLabel={t("음성 메시지")}
       style={styles.voiceMessage}
     >
-      <Ionicons name={status.playing ? "pause" : "play"} size={17} color={mine ? "#ffffff" : ink} />
+      <Ionicons name={status.playing ? "pause" : "play"} size={17} color={mine ? onMine : ink} />
       <View style={styles.voiceWave}>
         {[8, 14, 19, 11, 17, 9, 15].map((height, index) => (
-          <View key={`${height}-${index}`} style={{ width: 2, height, borderRadius: 2, backgroundColor: mine ? "#ffffff" : muted }} />
+          <View key={`${height}-${index}`} style={{ width: 2, height, borderRadius: 2, backgroundColor: mine ? onMine : muted }} />
         ))}
       </View>
-      <Text style={{ color: mine ? "#ffffff" : muted, fontSize: 12 }}>
+      <Text style={{ color: mine ? onMine : muted, fontSize: 12 }}>
         {status.duration ? `${Math.ceil(status.duration)}s` : t("음성")}
       </Text>
     </Pressable>
@@ -395,12 +397,9 @@ export function ThreadScreen({
     void fetchMessages(true);
   };
 
-  // 새 말이 오면 바닥으로. 보내고 나서 위쪽만 보이면 보낸 게 안 보입니다.
-  useEffect(() => {
-    if (!messageRows.length) return;
-    const timer = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
-    return () => clearTimeout(timer);
-  }, [messageRows.length]);
+  /* 목록은 뒤집어 그립니다(inverted) — 새 말이 늘 바닥에 붙고, 처음 열 때도 타이머로
+     맨 아래까지 굴릴 필요가 없습니다. 그래서 데이터도 최신이 앞에 오게 둡니다. */
+  const newestFirst = useMemo(() => [...messageRows].reverse(), [messageRows]);
 
   const sendPayload = useCallback(async (
     payload: { text: string; type?: "text" | "image" | "voice"; media?: string },
@@ -427,6 +426,8 @@ export function ThreadScreen({
       );
       // 보낸 시각을 latestAt 으로 쓰지 않습니다 — 그 사이 상대가 보낸 말을 다음 갱신에서 건너뛰게 됩니다.
       setMessageRows((rows) => mergeMessages(rows, [toChatMessage(created.message, me?.id ?? "")]));
+      // 위로 올려 읽던 중이어도 방금 보낸 말이 보이게 바닥(뒤집힌 목록의 0)으로 갑니다.
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
       pendingMessage.current = null;
       if (clearDraft) setDraft("");
       return true;
@@ -781,21 +782,28 @@ export function ThreadScreen({
 
       <FlatList
         ref={listRef}
-        data={messageRows}
+        data={newestFirst}
+        inverted
+        // 바닥 가까이 있으면 새 말을 따라 내려가고, 위로 올려 읽는 중이면 그 자리를 지킵니다.
+        maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 40 }}
         keyExtractor={(row) => row.id}
         contentContainerStyle={messageRows.length ? styles.list : { flexGrow: 1 }}
+        // 뒤집힌 목록은 빈 화면에 뒤집기 스타일을 덧입혀 바로 세웁니다. 스타일을 받는 View 로 감싸야 거꾸로 보이지 않습니다.
         ListEmptyComponent={
-          loadError ? (
-            <EmptyState title={loadError} onRetry={retryMessages} />
-          ) : (
-            <EmptyState
-              title={t("첫 마디를 건네보세요")}
-              body={t("짧아도 괜찮아요. 틀려도 괜찮아요.")}
-            />
-          )
+          <View style={{ flex: 1 }}>
+            {loadError ? (
+              <EmptyState title={loadError} onRetry={retryMessages} />
+            ) : (
+              <EmptyState
+                title={t("첫 마디를 건네보세요")}
+                body={t("짧아도 괜찮아요. 틀려도 괜찮아요.")}
+              />
+            )}
+          </View>
         }
         renderItem={({ item, index }) => {
-          const previous = messageRows[index - 1];
+          // 뒤집힌 목록이라 바로 앞(더 오래된) 말은 다음 칸에 있습니다.
+          const previous = newestFirst[index + 1];
           // 서버가 시각을 안 주는 옛 메시지가 섞여 있을 수 있습니다.
           // 없으면 구분선도 시각도 그리지 않습니다 — 지어내지 않습니다.
           const sentAt = item.sentAt ?? "";
@@ -836,7 +844,7 @@ export function ThreadScreen({
                       muted={c.muted}
                     />
                   ) : (
-                    <Text style={{ color: item.mine ? "#ffffff" : c.ink, fontSize: 15, lineHeight: 21 }}>
+                    <Text style={{ color: item.mine ? c.onPrimary : c.ink, fontSize: 15, lineHeight: 21 }}>
                       {item.text}
                     </Text>
                   )}
