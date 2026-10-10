@@ -162,6 +162,12 @@ test('photo scopes protect image content and report evidence, owner-only changes
   db.rows.set('homes/owner',{uploadDay:new Date(Date.now()+9*3600000).toISOString().slice(0,10),uploadCount:60});
   assert.equal((await call('/owner/photos/frame','PUT',photo,'owner')).status,429);
 });
+test('ids that Firestore cannot address as one document are rejected',async t=>{
+  const {call}=await fixture(t);
+  for(const path of ['/a%2Fb','/__name__','/owner/entries?cursor=..','/directory?cursor=.'])assert.equal((await call(path)).status,422,path);
+  assert.equal((await call('/owner/entries/__x__','PATCH',{hearted:true})).status,422);
+  assert.equal((await call('/owner/reports','POST',{kind:'entry',id:'..',reason:'r'})).status,422);
+});
 test('directory excludes blocked/private houses and favorite writes are reversible',async t=>{
   const {db,call}=await fixture(t);assert.equal((await call('/directory')).data.items[0].owner.id,'owner');
   await call('/owner/favorite','PUT',{favorite:true});assert.equal((await call('/directory?kind=favorites')).data.items.length,1);

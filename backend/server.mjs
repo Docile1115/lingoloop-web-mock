@@ -17,6 +17,7 @@ import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-lim
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import { registerHomeRoutes } from "./homes.mjs";
 import { isDiscoverable, presenceIsStale, presenceOf } from "./discovery.mjs";
+import { createValidators, isDocumentId } from "./validate.mjs";
 import {
   AvatarValidationError,
   avatarFields,
@@ -157,6 +158,9 @@ class ApiError extends Error {
     this.details = details;
   }
 }
+
+/* .doc() 에 들어가는 경로 값·본문 값은 모두 docId 로 확인합니다(validate.mjs). */
+const { docId, optionalDocId } = createValidators(ApiError);
 
 function nowIso() {
   return new Date().toISOString();
@@ -1218,7 +1222,7 @@ app.get("/api/notifications", requireUser, async (req, res) => {
 });
 
 app.patch("/api/notifications/:notificationId/read", requireUser, async (req, res) => {
-  const notificationId = safeString(req.params.notificationId, "notificationId", { min: 40, max: 40 });
+  const notificationId = docId(req.params.notificationId, "notificationId", { min: 40, max: 40 });
   const expectedEventId = safeString(req.body?.eventId, "eventId", { min: 1, max: 128 });
   const reference = notificationItems(req.auth.uid).doc(notificationId);
   const result = await db.runTransaction(async (transaction) => {
@@ -1497,7 +1501,7 @@ app.get("/api/blocks", requireUser, async (req, res) => {
 });
 
 app.post("/api/partners/:partnerId/block", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.params.partnerId, "partnerId");
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인을 차단할 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists) throw new ApiError(404, "PARTNER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
@@ -1525,7 +1529,7 @@ app.post("/api/partners/:partnerId/block", requireUser, async (req, res) => {
 });
 
 app.delete("/api/partners/:partnerId/block", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.params.partnerId, "partnerId");
   const reference = db.collection("blocks").doc(blockId(req.auth.uid, partnerId));
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
@@ -1539,7 +1543,7 @@ app.delete("/api/partners/:partnerId/block", requireUser, async (req, res) => {
 });
 
 app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.params.partnerId, "partnerId");
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인에게 마음을 보낼 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
@@ -1586,7 +1590,7 @@ app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
 });
 
 app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.params.partnerId, "partnerId");
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인을 팔로우할 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
@@ -1638,7 +1642,7 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
  * 차단한 사이는 서로 세지 않습니다 — 화면에서 지워진 사람이 숫자로 남으면 어색합니다.
  */
 app.get("/api/partners/:partnerId/follow-counts", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.params.partnerId, "partnerId");
   const [followingSnapshot, followerSnapshot, postSnapshot, blocked, partnerIds] = await Promise.all([
     db.collection("follows").where("fromUserId", "==", partnerId).limit(500).get(),
     db.collection("follows").where("toUserId", "==", partnerId).limit(500).get(),
@@ -1754,7 +1758,7 @@ app.post("/api/posts", requireUser, async (req, res) => {
  * 좋아요 하위 컬렉션도 함께 지워 고아 문서를 남기지 않습니다.
  */
 app.delete("/api/posts/:postId", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   const postReference = db.collection("posts").doc(postId);
   const snapshot = await postReference.get();
   if (!snapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
@@ -1783,7 +1787,7 @@ async function readablePost(postId, uid) {
 }
 
 app.get("/api/posts/:postId", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   const post = await readablePost(postId, req.auth.uid);
   const [reaction, authorSnapshot] = await Promise.all([
     db.collection("posts").doc(postId).collection("reactions").doc(req.auth.uid).get(),
@@ -1805,7 +1809,7 @@ app.get("/api/posts/:postId", requireUser, async (req, res) => {
  * 정렬하는 일을 매번 해야 합니다.
  */
 app.get("/api/posts/:postId/replies", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   await readablePost(postId, req.auth.uid);
   const [snapshot, blocked] = await Promise.all([
     db.collection("posts").doc(postId).collection("replies").orderBy("createdAt", "asc").limit(200).get(),
@@ -1835,13 +1839,13 @@ app.get("/api/posts/:postId/replies", requireUser, async (req, res) => {
 });
 
 app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   await readablePost(postId, req.auth.uid);
   const text = safeString(req.body?.text, "text", { min: 1, max: 1000 });
   const kind = req.body?.kind === "correction" ? "correction" : "reply";
   // 교정은 어느 문장을 고쳤는지 있어야 의미가 있습니다.
   const original = kind === "correction" ? safeString(req.body?.original, "original", { min: 1, max: 1000 }) : "";
-  const parentId = optionalString(req.body?.parentId, "parentId", 128) || "";
+  const parentId = optionalDocId(req.body?.parentId, "parentId");
   const timestamp = nowIso();
   const postNotificationEventId = crypto.randomUUID();
   const parentNotificationEventId = crypto.randomUUID();
@@ -2025,7 +2029,8 @@ app.get("/api/saved-phrases", requireUser, async (req, res) => {
 
 app.post("/api/saved-phrases", requireUser, async (req, res) => {
   const phrase = safeString(req.body?.phrase, "phrase", { min: 1, max: 500 });
-  const id = optionalString(req.body?.id, "id", 128) || "saved-" + crypto.randomUUID();
+  // 예전처럼 짧은 ID 도 받습니다(아래 DELETE 와 같은 규칙).
+  const id = optionalDocId(req.body?.id, "id", { min: 1 }) || "saved-" + crypto.randomUUID();
   const item = {
     id,
     phrase,
@@ -2039,7 +2044,7 @@ app.post("/api/saved-phrases", requireUser, async (req, res) => {
 });
 
 app.delete("/api/saved-phrases/:itemId", requireUser, async (req, res) => {
-  const itemId = safeString(req.params.itemId, "itemId", { min: 1, max: 128 });
+  const itemId = docId(req.params.itemId, "itemId", { min: 1 });
   const reference = db.collection("savedPhrases").doc(req.auth.uid).collection("items").doc(itemId);
   const snapshot = await reference.get();
   if (!snapshot.exists) throw new ApiError(404, "SAVED_PHRASE_NOT_FOUND", "저장한 표현을 찾을 수 없습니다.");
@@ -2048,7 +2053,7 @@ app.delete("/api/saved-phrases/:itemId", requireUser, async (req, res) => {
 });
 
 app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   await readablePost(postId, req.auth.uid);
   const postReference = db.collection("posts").doc(postId);
   const reactionReference = postReference.collection("reactions").doc(req.auth.uid);
@@ -2099,7 +2104,7 @@ app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
 });
 
 app.post("/api/conversations", requireUser, async (req, res) => {
-  const partnerId = safeString(req.body?.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.body?.partnerId, "partnerId");
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인과 대화할 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
@@ -2192,7 +2197,7 @@ app.get("/api/conversations", requireUser, async (req, res) => {
 });
 
 app.post("/api/conversations/:conversationId/accept", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
   const reference = db.collection("conversations").doc(id);
   const notificationEventId = crypto.randomUUID();
   const conversation = await db.runTransaction(async (transaction) => {
@@ -2236,7 +2241,7 @@ app.post("/api/conversations/:conversationId/accept", requireUser, async (req, r
 });
 
 app.delete("/api/conversations/:conversationId/request", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
   const reference = db.collection("conversations").doc(id);
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
@@ -2279,7 +2284,7 @@ app.delete("/api/conversations/:conversationId/request", requireUser, async (req
 });
 
 app.delete("/api/conversations/:conversationId", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
   const reference = db.collection("conversations").doc(id);
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
@@ -2306,7 +2311,7 @@ app.delete("/api/conversations/:conversationId", requireUser, async (req, res) =
 });
 
 app.patch("/api/conversations/:conversationId/mute", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
   if (typeof req.body?.muted !== "boolean") {
     throw new ApiError(422, "VALIDATION_ERROR", "알림 설정 값을 확인해 주세요.", { field: "muted" });
   }
@@ -2325,7 +2330,7 @@ app.patch("/api/conversations/:conversationId/mute", requireUser, async (req, re
 });
 
 app.get("/api/conversations/:conversationId/messages", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
   const conversationReference = db.collection("conversations").doc(id);
   /* 큰 media payload를 transaction에 넣지 않습니다. 먼저 권한을 빠르게 확인한 뒤
      메시지와 당시의 알림 event identity를 일반 조회로 고정합니다. */
@@ -2410,7 +2415,7 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
 });
 
 async function createMessage(req, res, conversationId) {
-  const id = safeString(conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(conversationId, "conversationId");
   const type = req.body?.type ?? "text";
   if (!["text", "voice", "image"].includes(type)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 메시지 형식입니다.", { field: "type" });
@@ -2431,10 +2436,9 @@ async function createMessage(req, res, conversationId) {
     type === "text"
       ? safeString(req.body?.text, "text", { min: 1, max: 4000 })
       : optionalString(req.body?.text, "text", 200) || (type === "image" ? "사진" : "음성 메시지");
-  const clientMessageId =
-    typeof req.body?.clientMessageId === "string" && /^[a-zA-Z0-9_-]{8,128}$/.test(req.body.clientMessageId)
-      ? req.body.clientMessageId
-      : "message-" + crypto.randomUUID();
+  const clientMessageId = isDocumentId(req.body?.clientMessageId, { min: 8 })
+    ? req.body.clientMessageId
+    : "message-" + crypto.randomUUID();
   const conversationReference = db.collection("conversations").doc(id);
   const messageReference = conversationReference.collection("messages").doc(clientMessageId);
   const result = await db.runTransaction(async (transaction) => {
@@ -2600,7 +2604,10 @@ app.get("/api/admin/reports", requireUser, requireAdmin, async (req, res) => {
     .map((document) => document.data())
     .filter((row) => (status === "all" ? true : status === "open" ? row.status === "received" : row.status !== "received"))
     .sort((left, right) => String(right.submittedAt).localeCompare(String(left.submittedAt)));
-  const profiles = await profilesByIds([...rows.map((r) => r.reporterId), ...rows.map((r) => r.targetId)]);
+  // 예전 신고의 targetId 는 검증 없이 저장됐습니다. "a/b" 하나로 목록 전체가 500 이 되지 않게 거릅니다.
+  const profiles = await profilesByIds(
+    [...rows.map((r) => r.reporterId), ...rows.map((r) => r.targetId)].filter((id) => isDocumentId(id, { min: 1 })),
+  );
   const named = (id) => (profiles.get(id) ? { id, name: profiles.get(id).name, handle: profiles.get(id).handle } : { id, name: null, handle: null });
   return success(
     res,
@@ -2623,7 +2630,7 @@ app.get("/api/admin/reports", requireUser, requireAdmin, async (req, res) => {
 
 /** 신고를 닫습니다. 어떻게 판단했는지 한 줄 남겨야 나중에 이유를 알 수 있습니다. */
 app.patch("/api/admin/reports/:reportId", requireUser, requireAdmin, async (req, res) => {
-  const reportId = safeString(req.params.reportId, "reportId", { min: 4, max: 128 });
+  const reportId = docId(req.params.reportId, "reportId");
   const outcome = safeString(req.body?.outcome, "outcome", { min: 2, max: 24 });
   if (!["actioned", "dismissed", "received"].includes(outcome)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 처리 결과입니다.", { field: "outcome" });
@@ -2651,7 +2658,8 @@ app.post("/api/reports", requireUser, async (req, res) => {
   const targetTypes = ["user", "post", "message"];
   const reasons = ["spam", "scam", "harassment", "dating", "sexual_content", "hate", "impersonation", "other"];
   const targetType = safeString(req.body?.targetType, "targetType", { min: 2, max: 32 });
-  const targetId = safeString(req.body?.targetId, "targetId", { min: 2, max: 128 });
+  // 운영자 목록이 이 값으로 프로필을 읽습니다(profilesByIds → .doc()).
+  const targetId = docId(req.body?.targetId, "targetId", { min: 2 });
   const reason = safeString(req.body?.reason, "reason", { min: 2, max: 64 });
   if (!targetTypes.includes(targetType) || !reasons.includes(reason)) {
     throw new ApiError(422, "VALIDATION_ERROR", "신고 대상 또는 사유를 확인해 주세요.");
@@ -2757,7 +2765,7 @@ app.post("/api/translate", requireUser, async (req, res) => {
 });
 
 app.post("/api/conversation-support", requireUser, async (req, res) => {
-  const partnerId = safeString(req.body?.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.body?.partnerId, "partnerId");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
     throw new ApiError(404, "PARTNER_NOT_FOUND", "대화 상대를 찾을 수 없습니다.");

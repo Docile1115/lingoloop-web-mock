@@ -63,7 +63,8 @@ export async function sanitizeFrameImage(value) {
 export function registerHomeRoutes(app, {db, requireUser, success, ApiError, assertNotBlockedInTransaction, profileForOthers, putNotification, removeNotification, nowIso, todayInSeoul}) {
   const homeRef=id=>db.collection('homes').doc(id);
   const child=(id,name)=>homeRef(id).collection(name);
-  const uid=value=> { const id=text(value,128,true); if(id.includes('/')) throw new HomeError('대상을 확인해 주세요.'); return id; };
+  // Firestore rejects '.', '..' and reserved __name__ ids (500); '/' would address another document.
+  const uid=value=> { const id=text(value,128,true); if(id.includes('/')||id==='.'||id==='..'||/^__.*__$/.test(id)) throw new HomeError('대상을 확인해 주세요.'); return id; };
   const route=(method,path,handler)=>app[method](path,requireUser,async(req,res)=>{
     try { return success(res,req,await handler(req)); }
     catch(error) { if(error instanceof HomeError) throw new ApiError(error.status,'HOME_ERROR',error.message); throw error; }

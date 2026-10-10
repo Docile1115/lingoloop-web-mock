@@ -229,6 +229,27 @@ test("post author cards overlay the author's current identity everywhere posts a
   for (const route of routes) assert.match(route, /author: postAuthorView\(post, /);
 });
 
+test("route params and id body fields go through the shared document-id validator", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /safeString\(req\.params\./);
+  const paramUses = [...source.matchAll(/(.{0,32})req\.params\.(\w+)/g)];
+  assert.ok(paramUses.length >= 15, "expected the current id routes to be audited");
+  for (const [use, before] of paramUses) {
+    // createMessage 는 받은 값을 docId 로 확인합니다(아래).
+    assert.match(before, /(?:docId\(|createMessage\(req, res, )$/, use);
+  }
+  const messageRoute = source.slice(source.indexOf("async function createMessage"), source.indexOf('app.post("/api/conversations/:conversationId/messages"'));
+  assert.match(messageRoute, /const id = docId\(conversationId, "conversationId"\)/);
+  assert.match(messageRoute, /isDocumentId\(req\.body\?\.clientMessageId, \{ min: 8 \}\)/);
+
+  for (const field of ["partnerId", "targetId"]) {
+    assert.match(source, new RegExp("docId\\(req\\.body\\?\\." + field + ", \"" + field + "\""));
+  }
+  assert.match(source, /optionalDocId\(req\.body\?\.parentId, "parentId"\)/);
+  assert.match(source, /optionalDocId\(req\.body\?\.id, "id", \{ min: 1 \}\)/);
+});
+
 test("pending message requests never expose the recipient's read receipt", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const route = source.slice(
