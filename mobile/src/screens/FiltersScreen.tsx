@@ -11,6 +11,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-nat
 import { Ionicons } from "@expo/vector-icons";
 import { ApiError, get, post } from "../lib/api";
 import { t } from "../lib/i18n";
+import { emitSignal } from "../lib/signals";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, type } from "../lib/theme";
 import { Chip, Loading, PrimaryButton } from "../ui";
@@ -88,6 +89,8 @@ export function FiltersScreen({ onDone }: { onDone: () => void }) {
     setError("");
     try {
       await post("/api/matching/preferences", draft);
+      // 조건이 바뀌면 오늘의 파트너도 바뀝니다. 탭에 받아 둔 목록을 다시 받게 알립니다.
+      emitSignal("matching-preferences");
       onDone();
     } catch (caught) {
       // 서버가 거절하면 화면을 닫지 않습니다 — 저장된 척하면 조건이 조용히 되돌아갑니다.
