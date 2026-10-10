@@ -12,6 +12,7 @@ import { SessionProvider, useSession } from "./src/lib/session";
 import { Navigation } from "./src/Navigation";
 import { SignInScreen } from "./src/screens/SignInScreen";
 import { Loading } from "./src/ui";
+import { ToastHost } from "./src/ui/Toast";
 
 function Gate() {
   // 언어가 바뀌면 이 아래가 전부 다시 그려집니다. 화면들은 훅이 아니라 t() 를 씁니다.
@@ -29,6 +30,7 @@ export default function App() {
         <SessionProvider>
           <StatusBar barStyle={scheme === "dark" ? "light-content" : "dark-content"} />
           <Gate />
+          <ToastHost />
         </SessionProvider>
       </I18nProvider>
     </SafeAreaProvider>

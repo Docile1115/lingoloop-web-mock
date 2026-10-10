@@ -4,7 +4,7 @@
  * 시각 표기는 카카오톡 규칙을 따릅니다 — 같은 시간대의 말은 한 덩어리로 두고,
  * 30분이 지나거나 날짜가 바뀌면 다시 적습니다. 웹과 같은 규칙입니다.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AppState,
   FlatList,
@@ -14,11 +14,13 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import {
@@ -33,14 +35,17 @@ import {
 import { File, Paths } from "expo-file-system";
 import { toChatMessage, type ApiCreateMessageResult, type ApiMessage } from "@shared/live-data";
 import type { ChatMessage, Conversation } from "@shared/demo-data";
-import { ApiError, post as apiPost } from "../lib/api";
+import { ApiError, api, post as apiPost } from "../lib/api";
+import { useChats } from "../lib/chats";
 import { clockOf, dayLabel, needsTimeMark } from "../lib/format";
-import { t } from "../lib/i18n";
+import { msg, t, type MessageKey } from "../lib/i18n";
 import { useApi } from "../lib/useApi";
 import { useSession } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
-import { radius, space, type } from "../lib/theme";
-import { EmptyState, Loading } from "../ui";
+import { radius, space, tapSize, type } from "../lib/theme";
+import { EmptyState, HeaderButton, Loading, Sheet, SheetItem } from "../ui";
+import { showToast } from "../ui/Toast";
+import { acceptRequest, confirmDeclineRequest } from "./ChatsScreen";
 
 type ConversationSupport = {
   topics: string[];
@@ -52,6 +57,20 @@ type ConversationSupport = {
 
 const MAX_MEDIA_DATA_URI = 520_000;
 const voiceCacheUsers = new Map<string, number>();
+
+/** 신고 사유. 웹의 신고 창과 같은 목록입니다. 서버가 모르는 사유(개인정보 요구)는 기타로 접수합니다. */
+const REPORT_REASONS: Array<[string, MessageKey]> = [
+  ["spam", msg("스팸 또는 광고")],
+  ["scam", msg("사기 · 금전 요구")],
+  ["dating", msg("데이트·연애 목적")],
+  ["harassment", msg("괴롭힘 또는 혐오 표현")],
+  ["privacy", msg("개인정보 요구")],
+  ["other", msg("기타")],
+];
+const SERVER_REPORT_REASONS = ["spam", "scam", "harassment", "dating", "other"];
+
+/** 접수번호. 웹과 같은 모양으로 보여줍니다. */
+const shortReportId = (id: string): string => `LL-${id.replace(/^report-/, "").slice(0, 8).toUpperCase()}`;
 
 function retainVoiceCache(uri: string) {
   voiceCacheUsers.set(uri, (voiceCacheUsers.get(uri) ?? 0) + 1);
@@ -188,10 +207,35 @@ function VoiceMessage({
   );
 }
 
-export function ThreadScreen({ conversation }: { conversation: Conversation }) {
+export function ThreadScreen({
+  conversation,
+  request = false,
+  onClose,
+}: {
+  conversation: Conversation;
+  /** 내가 받은 메시지 요청으로 열었는가. 수락하기 전에는 답장할 수 없습니다. */
+  request?: boolean;
+  /** 나가기·차단·요청 삭제 뒤 대화방을 닫습니다. */
+  onClose: () => void;
+}) {
   const c = useTheme();
   const { me } = useSession();
+  const navigation = useNavigation();
+  const chats = useChats();
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  const [sheet, setSheet] = useState<"menu" | "block" | "report" | null>(null);
+  const [reportReason, setReportReason] = useState("spam");
+  const [reportBlock, setReportBlock] = useState(false);
+  const [acting, setActing] = useState(false);
+  const actingNow = useRef(false);
+  const [accepted, setAccepted] = useState(false);
+  const [mutedOverride, setMutedOverride] = useState<boolean | null>(null);
+  const known = chats.conversations.find((row) => row.id === conversation.id);
+  const incoming = !accepted && (request || chats.requests.some((row) => row.id === conversation.id));
+  const muted = mutedOverride ?? known?.muted ?? conversation.muted ?? false;
+  // 서버는 수락된 대화만 "나가기"를 받습니다. 대기 중인 요청은 삭제하거나 그대로 둡니다.
+  const canLeave = !incoming && !chats.pendingIds.has(conversation.id);
+  const name = conversation.name;
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -432,6 +476,129 @@ export function ThreadScreen({ conversation }: { conversation: Conversation }) {
     if (opening && !support) void requestCoach();
   };
 
+  /* 대화 메뉴(알림·나가기·차단·신고). 웹의 대화 메뉴와 같은 항목입니다. */
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <HeaderButton icon="ellipsis-horizontal" label={t("대화 메뉴")} onPress={() => setSheet("menu")} />
+      ),
+    });
+  }, [navigation]);
+
+  /** 서버에 보내는 동작은 한 번에 하나만. 두 번 눌러 같은 요청이 두 번 가지 않게 합니다. */
+  const act = async (task: () => Promise<void>) => {
+    if (actingNow.current) return;
+    actingNow.current = true;
+    setActing(true);
+    try {
+      await task();
+    } finally {
+      actingNow.current = false;
+      setActing(false);
+    }
+  };
+
+  const toggleMute = () => act(async () => {
+    const next = !muted;
+    setSheet(null);
+    setMutedOverride(next);
+    try {
+      const result = await api<{ muted: boolean }>(
+        `/api/conversations/${encodeURIComponent(conversation.id)}/mute`,
+        { method: "PATCH", body: JSON.stringify({ muted: next }) },
+      );
+      setMutedOverride(result.muted);
+      chats.update(conversation.id, { muted: result.muted });
+      showToast(result.muted ? t("{name}님과의 알림을 껐어요", { name }) : t("{name}님과의 알림을 켰어요", { name }));
+    } catch (caught) {
+      setMutedOverride(!next);
+      showToast(caught instanceof Error ? caught.message : t("설정을 저장하지 못했어요."));
+    }
+  });
+
+  /** 나가도 대화와 메시지는 남습니다. 상대가 새 메시지를 보내면 다시 보입니다(서버 규칙). */
+  const leave = () => act(async () => {
+    setSheet(null);
+    try {
+      await api(`/api/conversations/${encodeURIComponent(conversation.id)}`, { method: "DELETE" });
+      chats.remove(conversation.id);
+      showToast(t("{name}님과의 대화방에서 나갔어요", { name }));
+      onClose();
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : t("대화방에서 나가지 못했어요."));
+    }
+  });
+
+  const blockPartner = async () => {
+    if (!conversation.partnerId) return false;
+    try {
+      await api(`/api/partners/${encodeURIComponent(conversation.partnerId)}/block`, { method: "POST", body: "{}" });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** 서버에 차단이 확정된 뒤에만 방을 치웁니다. 실패하면 대화를 그대로 둡니다. */
+  const block = () => act(async () => {
+    setSheet(null);
+    if (await blockPartner()) {
+      chats.remove(conversation.id);
+      showToast(t("{name}님을 차단하고 대화방에서 나갔어요", { name }));
+      onClose();
+    } else {
+      showToast(t("차단하지 못했어요."));
+    }
+  });
+
+  /**
+   * 신고 접수. 운영자 화면으로 그대로 가므로 지어낸 값을 넣지 않습니다.
+   * 함께 차단을 고르면 서버 차단까지 끝나야 "차단했어요"라고 알립니다.
+   */
+  const submitReport = () => act(async () => {
+    if (!conversation.partnerId) {
+      setSheet(null);
+      showToast(t("이 대상은 신고할 수 없어요"));
+      return;
+    }
+    try {
+      const report = await apiPost<{ id: string }>("/api/reports", {
+        targetType: "user",
+        targetId: conversation.partnerId,
+        reason: SERVER_REPORT_REASONS.includes(reportReason) ? reportReason : "other",
+      });
+      setSheet(null);
+      const id = shortReportId(report.id);
+      if (!reportBlock) {
+        showToast(t("신고가 접수되었어요 · 접수번호 {id}", { id }));
+        return;
+      }
+      if (await blockPartner()) {
+        chats.remove(conversation.id);
+        showToast(t("신고를 접수하고 {name}님을 차단했어요 · 접수번호 {id}", { name, id }));
+        onClose();
+      } else {
+        showToast(t("신고는 접수했지만 차단하지 못했어요 · 접수번호 {id}", { id }));
+      }
+    } catch (caught) {
+      setSheet(null);
+      showToast(caught instanceof Error ? caught.message : t("신고를 접수하지 못했어요."));
+    }
+  });
+
+  const accept = () => act(async () => {
+    if (await acceptRequest(conversation.id, name)) {
+      setAccepted(true);
+      await chats.reload();
+    }
+  });
+
+  const decline = () =>
+    confirmDeclineRequest(conversation.id, name, () => {
+      chats.remove(conversation.id);
+      onClose();
+    });
+
   if (messages.loading) return <Loading />;
 
   const composerBusy = sending || mediaBusy || recorderState.isRecording;
@@ -442,6 +609,39 @@ export function ThreadScreen({ conversation }: { conversation: Conversation }) {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={90}
     >
+      {/* 받은 메시지 요청. 수락하기 전에는 답장할 수 없고, 읽음·활동 상태도 상대에게 보이지 않습니다. */}
+      {incoming ? (
+        <View style={[styles.requestBanner, { backgroundColor: c.surfaceSoft, borderBottomColor: c.line }]}>
+          <View style={styles.requestCopy}>
+            <Ionicons name="shield-checkmark-outline" size={18} color={c.primaryStrong} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[type.name, { color: c.ink }]}>{t("{name}님의 메시지 요청", { name })}</Text>
+              <Text style={[type.caption, { color: c.muted }]}>
+                {t("수락하기 전까지 읽음 여부와 활동 상태가 상대에게 보이지 않아요.")}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.requestActions}>
+            <Pressable
+              onPress={decline}
+              disabled={acting}
+              accessibilityRole="button"
+              style={[styles.requestButton, { backgroundColor: c.sunken }]}
+            >
+              <Text style={{ color: c.ink, fontSize: 14, fontWeight: "700" }}>{t("삭제")}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void accept()}
+              disabled={acting}
+              accessibilityRole="button"
+              style={[styles.requestButton, { backgroundColor: c.primary, opacity: acting ? 0.5 : 1 }]}
+            >
+              <Text style={{ color: c.onPrimary, fontSize: 14, fontWeight: "800" }}>{t("수락")}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
       <FlatList
         ref={listRef}
         data={messages.data}
@@ -602,7 +802,9 @@ export function ThreadScreen({ conversation }: { conversation: Conversation }) {
       {/* 웹과 같은 배치입니다 — 첨부는 칸 밖 왼쪽, 이모지·코치는 칸 안 왼쪽,
           보내기는 칸 안 오른쪽에 쓸 것이 있을 때만.
           ＋ 와 칸의 한 줄 높이를 COMPOSER_H 하나로 묶습니다. 높이가 다르면
-          바닥만 맞고 중심이 몇 px 어긋납니다. */}
+          바닥만 맞고 중심이 몇 px 어긋납니다.
+          받은 요청은 수락하기 전에는 답장할 수 없으므로(서버 규칙) 입력칸을 두지 않습니다. */}
+      {incoming ? null : (
       <View style={[styles.composer, { borderTopColor: c.line, backgroundColor: c.surface }]}>
         <Pressable
           onPress={() => recorderState.isRecording ? void finishRecording() : setAttachOpen((open) => !open)}
@@ -674,6 +876,89 @@ export function ThreadScreen({ conversation }: { conversation: Conversation }) {
           ) : null}
         </View>
       </View>
+      )}
+
+      {/* 메뉴·차단 확인·신고는 시트 하나에서 내용만 바꿉니다(iOS 는 Modal 을 겹쳐 열 수 없습니다). */}
+      <Sheet
+        visible={sheet !== null}
+        onClose={() => { if (!acting) setSheet(null); }}
+        title={sheet === "report" ? t("안전하게 이용할 수 있도록 도와주세요") : sheet === "block" ? t("이 사용자를 차단할까요?") : name}
+      >
+        {sheet === "menu" ? (
+          <>
+            <SheetItem
+              icon={muted ? "notifications-outline" : "notifications-off-outline"}
+              label={muted ? t("알림 켜기") : t("알림 끄기")}
+              disabled={acting}
+              onPress={() => void toggleMute()}
+            />
+            {canLeave ? (
+              <SheetItem icon="exit-outline" label={t("대화방 나가기")} disabled={acting} onPress={() => void leave()} />
+            ) : null}
+            <SheetItem icon="ban-outline" label={t("차단하기")} danger disabled={acting} onPress={() => setSheet("block")} />
+            <SheetItem icon="flag-outline" label={t("신고하기")} danger disabled={acting} onPress={() => setSheet("report")} />
+            <SheetItem label={t("취소")} onPress={() => setSheet(null)} />
+          </>
+        ) : sheet === "block" ? (
+          <>
+            <Text style={[type.meta, { color: c.muted, paddingHorizontal: space.sm }]}>
+              {t("프로필과 메시지가 서로 보이지 않아요.")}
+            </Text>
+            <SheetItem icon="ban-outline" label={t("차단")} danger disabled={acting} onPress={() => void block()} />
+            <SheetItem label={t("취소")} disabled={acting} onPress={() => setSheet(null)} />
+          </>
+        ) : sheet === "report" ? (
+          <>
+            <Text style={[type.meta, { color: c.muted, paddingHorizontal: space.sm }]}>
+              <Text style={{ fontWeight: "700", color: c.ink }}>{name}</Text>
+              {t("을(를) 신고하거나 차단할 수 있어요. 신고 내용은 상대에게 알려지지 않습니다.")}
+            </Text>
+            {REPORT_REASONS.map(([id, label]) => (
+              <SheetItem
+                key={id}
+                label={t(label)}
+                selected={reportReason === id}
+                disabled={acting}
+                onPress={() => setReportReason(id)}
+              />
+            ))}
+            <View style={styles.reportBlock}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={[type.body, { color: c.ink }]}>{t("이 사용자도 함께 차단")}</Text>
+                <Text style={[type.caption, { color: c.muted }]}>{t("프로필과 메시지가 서로 보이지 않아요.")}</Text>
+              </View>
+              <Switch
+                value={reportBlock}
+                onValueChange={setReportBlock}
+                disabled={acting}
+                accessibilityLabel={t("이 사용자도 함께 차단")}
+                trackColor={{ true: c.primary, false: c.lineStrong }}
+              />
+            </View>
+            <Text style={[type.caption, { color: c.muted, paddingHorizontal: space.sm }]}>
+              {t("신고했다는 이유만으로 계정을 정지하지 않으며, 자동 제재 없이 안전팀이 맥락을 검토해요.")}
+            </Text>
+            <View style={styles.reportActions}>
+              <Pressable
+                onPress={() => setSheet(null)}
+                disabled={acting}
+                accessibilityRole="button"
+                style={[styles.reportButton, { backgroundColor: c.sunken }]}
+              >
+                <Text style={{ color: c.ink, fontSize: 15, fontWeight: "700" }}>{t("취소")}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void submitReport()}
+                disabled={acting}
+                accessibilityRole="button"
+                style={[styles.reportButton, { backgroundColor: c.danger, opacity: acting ? 0.5 : 1 }]}
+              >
+                <Text style={{ color: c.bg, fontSize: 15, fontWeight: "800" }}>{t("신고 보내기")}</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+      </Sheet>
     </KeyboardAvoidingView>
   );
 }
@@ -762,4 +1047,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.sm,
     borderRadius: radius.sm,
   },
+  requestBanner: { gap: space.sm, padding: space.md, borderBottomWidth: StyleSheet.hairlineWidth },
+  requestCopy: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },
+  requestActions: { flexDirection: "row", justifyContent: "flex-end", gap: space.sm },
+  requestButton: { minHeight: tapSize, minWidth: 76, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center", borderRadius: radius.pill },
+  reportBlock: { flexDirection: "row", alignItems: "center", gap: space.md, paddingHorizontal: space.sm, paddingVertical: space.sm },
+  reportActions: { flexDirection: "row", gap: space.sm, marginTop: space.xs },
+  reportButton: { flex: 1, minHeight: tapSize + 4, alignItems: "center", justifyContent: "center", borderRadius: radius.button },
 });
