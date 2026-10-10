@@ -20,7 +20,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import {
@@ -35,11 +35,10 @@ import {
 import { File, Paths } from "expo-file-system";
 import { toChatMessage, type ApiCreateMessageResult, type ApiMessage } from "@shared/live-data";
 import type { ChatMessage, Conversation } from "@shared/demo-data";
-import { ApiError, api, post as apiPost } from "../lib/api";
+import { ApiError, api, get, post as apiPost } from "../lib/api";
 import { useChats } from "../lib/chats";
 import { clockOf, dayLabel, needsTimeMark } from "../lib/format";
 import { msg, t, type MessageKey } from "../lib/i18n";
-import { useApi } from "../lib/useApi";
 import { useSession } from "../lib/session";
 import { useTheme } from "../lib/useTheme";
 import { radius, space, tapSize, type } from "../lib/theme";
@@ -71,6 +70,17 @@ const SERVER_REPORT_REASONS = ["spam", "scam", "harassment", "dating", "other"];
 
 /** 접수번호. 웹과 같은 모양으로 보여줍니다. */
 const shortReportId = (id: string): string => `LL-${id.replace(/^report-/, "").slice(0, 8).toUpperCase()}`;
+
+/** 대화방을 보는 동안 새 메시지를 받는 간격. */
+const THREAD_POLL_MS = 12_000;
+
+/** 같은 id 는 새 값으로 바꾸고 보낸 시각 순서로 둡니다. 내가 보낸 말이 갱신으로 또 와도 한 번만 보입니다. */
+function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  if (!incoming.length) return current;
+  const byId = new Map(current.map((row) => [row.id, row]));
+  for (const row of incoming) byId.set(row.id, row);
+  return [...byId.values()].sort((a, b) => (a.sentAt ?? "").localeCompare(b.sentAt ?? ""));
+}
 
 function retainVoiceCache(uri: string) {
   voiceCacheUsers.set(uri, (voiceCacheUsers.get(uri) ?? 0) + 1);
@@ -230,7 +240,9 @@ export function ThreadScreen({
   const actingNow = useRef(false);
   const [accepted, setAccepted] = useState(false);
   const [mutedOverride, setMutedOverride] = useState<boolean | null>(null);
-  const known = chats.conversations.find((row) => row.id === conversation.id);
+  const known =
+    chats.conversations.find((row) => row.id === conversation.id) ??
+    chats.requests.find((row) => row.id === conversation.id);
   const incoming = !accepted && (request || chats.requests.some((row) => row.id === conversation.id));
   const muted = mutedOverride ?? known?.muted ?? conversation.muted ?? false;
   // 서버는 수락된 대화만 "나가기"를 받습니다. 대기 중인 요청은 삭제하거나 그대로 둡니다.
@@ -253,18 +265,84 @@ export function ThreadScreen({
   const coachRequestNow = useRef(false);
   const pendingMessage = useRef<{ signature: string; id: string } | null>(null);
 
-  const messages = useApi<ChatMessage[]>(
-    `/api/conversations/${conversation.id}/messages`,
-    [],
-    (raw: ApiMessage[]) => raw.map((row) => toChatMessage(row, me?.id ?? "")),
+  const [messageRows, setMessageRows] = useState<ChatMessage[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  /** 서버에서 받은 가장 최근 메시지 시각. 다음 갱신은 이것보다 새것만 받습니다. */
+  const latestAt = useRef("");
+  const fetching = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+
+  /**
+   * 메시지 받기. 처음에는 최근 것을 통째로, 그 뒤로는 ?after= 로 새것만 받습니다.
+   * 예전 서버는 after 를 모르고 최근 200개를 그대로 주는데, id 로 합치므로 결과는 같습니다.
+   * 대화방을 여는 것만으로 서버가 읽음 처리합니다.
+   */
+  const fetchMessages = useCallback(async (initial = false) => {
+    if (fetching.current) return;
+    fetching.current = true;
+    const after = initial ? "" : latestAt.current;
+    try {
+      const rows = await get<ApiMessage[]>(
+        `/api/conversations/${encodeURIComponent(conversation.id)}/messages${after ? `?after=${encodeURIComponent(after)}` : ""}`,
+      );
+      if (!alive.current) return;
+      for (const row of rows ?? []) {
+        if (row.sentAt && row.sentAt > latestAt.current) latestAt.current = row.sentAt;
+      }
+      setMessageRows((current) => mergeMessages(current, (rows ?? []).map((row) => toChatMessage(row, me?.id ?? ""))));
+      setLoadError("");
+    } catch (caught) {
+      // 주기적 갱신이 실패하면 조용히 넘기고 다음 차례에 다시 받습니다. 처음 받기만 알립니다.
+      if (alive.current && initial) setLoadError(caught instanceof ApiError ? caught.message : t("불러오지 못했어요."));
+    } finally {
+      fetching.current = false;
+      if (alive.current && initial) setLoadingMessages(false);
+    }
+  }, [conversation.id, me?.id]);
+
+  useEffect(() => {
+    void fetchMessages(true);
+  }, [fetchMessages]);
+
+  /* 대화방을 보는 동안 새 메시지를 주기적으로 받습니다(웹은 15초). 실시간 연결이 생기기 전까지의 방법입니다.
+     앱이 다시 앞으로 오면 기다리지 않고 바로 받습니다. 다른 화면으로 가 있는 동안에는 멈춥니다. */
+  useFocusEffect(
+    useCallback(() => {
+      const timer = setInterval(() => {
+        if (AppState.currentState === "active") void fetchMessages(latestAt.current === "");
+      }, THREAD_POLL_MS);
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") void fetchMessages(latestAt.current === "");
+      });
+      return () => {
+        clearInterval(timer);
+        subscription.remove();
+      };
+    }, [fetchMessages]),
   );
+
+  /* 열어 둔 방은 서버가 읽음 처리합니다. 목록이 그 전에 받은 안읽음 수를 들고 있으면 배지에서 뺍니다. */
+  const knownUnread = known?.unread ?? 0;
+  useEffect(() => {
+    if (!loadingMessages && knownUnread > 0) chats.update(conversation.id, { unread: 0 });
+  }, [chats, conversation.id, knownUnread, loadingMessages]);
+
+  const retryMessages = () => {
+    setLoadingMessages(true);
+    void fetchMessages(true);
+  };
 
   // 새 말이 오면 바닥으로. 보내고 나서 위쪽만 보이면 보낸 게 안 보입니다.
   useEffect(() => {
-    if (!messages.data.length) return;
+    if (!messageRows.length) return;
     const timer = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
     return () => clearTimeout(timer);
-  }, [messages.data.length]);
+  }, [messageRows.length]);
 
   const sendPayload = useCallback(async (
     payload: { text: string; type?: "text" | "image" | "voice"; media?: string },
@@ -289,7 +367,8 @@ export function ThreadScreen({
           clientMessageId: pendingMessage.current.id,
         },
       );
-      messages.set((rows) => [...rows, toChatMessage(created.message, me?.id ?? "")]);
+      // 보낸 시각을 latestAt 으로 쓰지 않습니다 — 그 사이 상대가 보낸 말을 다음 갱신에서 건너뛰게 됩니다.
+      setMessageRows((rows) => mergeMessages(rows, [toChatMessage(created.message, me?.id ?? "")]));
       pendingMessage.current = null;
       if (clearDraft) setDraft("");
       return true;
@@ -300,7 +379,7 @@ export function ThreadScreen({
       sendingNow.current = false;
       setSending(false);
     }
-  }, [conversation.id, me?.id, messages]);
+  }, [conversation.id, me?.id]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -454,7 +533,7 @@ export function ThreadScreen({
       const result = await apiPost<ConversationSupport>("/api/conversation-support", {
         partnerId: conversation.partnerId,
         draft: requestedDraft || undefined,
-        stage: messages.data.length > 2 ? "ongoing" : "first-message",
+        stage: messageRows.length > 2 ? "ongoing" : "first-message",
       });
       setSupport(result);
       setSupportDraft(requestedDraft);
@@ -464,7 +543,7 @@ export function ThreadScreen({
       coachRequestNow.current = false;
       setCoachLoading(false);
     }
-  }, [conversation.partnerId, draft, messages.data.length]);
+  }, [conversation.partnerId, draft, messageRows.length]);
 
   const toggleCoach = () => {
     if (!conversation.partnerId) {
@@ -599,7 +678,7 @@ export function ThreadScreen({
       onClose();
     });
 
-  if (messages.loading) return <Loading />;
+  if (loadingMessages) return <Loading />;
 
   const composerBusy = sending || mediaBusy || recorderState.isRecording;
 
@@ -644,12 +723,12 @@ export function ThreadScreen({
 
       <FlatList
         ref={listRef}
-        data={messages.data}
+        data={messageRows}
         keyExtractor={(row) => row.id}
-        contentContainerStyle={messages.data.length ? styles.list : { flexGrow: 1 }}
+        contentContainerStyle={messageRows.length ? styles.list : { flexGrow: 1 }}
         ListEmptyComponent={
-          messages.error ? (
-            <EmptyState title={messages.error} onRetry={messages.refresh} />
+          loadError ? (
+            <EmptyState title={loadError} onRetry={retryMessages} />
           ) : (
             <EmptyState
               title={t("첫 마디를 건네보세요")}
@@ -658,7 +737,7 @@ export function ThreadScreen({
           )
         }
         renderItem={({ item, index }) => {
-          const previous = messages.data[index - 1];
+          const previous = messageRows[index - 1];
           // 서버가 시각을 안 주는 옛 메시지가 섞여 있을 수 있습니다.
           // 없으면 구분선도 시각도 그리지 않습니다 — 지어내지 않습니다.
           const sentAt = item.sentAt ?? "";

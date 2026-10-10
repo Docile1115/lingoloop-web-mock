@@ -13,7 +13,7 @@ import { Alert, View, useColorScheme } from "react-native";
 import type { ApiConversation } from "@shared/live-data";
 import type { FeedPost, Conversation, Partner } from "@shared/demo-data";
 import { post as apiPost } from "./lib/api";
-import { ChatsProvider } from "./lib/chats";
+import { ChatsProvider, useChats } from "./lib/chats";
 import { t } from "./lib/i18n";
 import { useTheme } from "./lib/useTheme";
 import { HeaderButton } from "./ui";
@@ -94,6 +94,7 @@ async function openConversation(partner: Partner): Promise<RootParams["Thread"] 
 
 function Tabs() {
   const c = useTheme();
+  const { unread } = useChats();
   return (
     /* 탭마다 헤더를 답니다. 헤더가 없으면 내용이 상태바 밑으로 들어갑니다 —
        위쪽 안전 영역은 네비게이터가 헤더와 함께 계산해 줍니다. */
@@ -171,6 +172,9 @@ function Tabs() {
         options={{
           title: t("대화"),
           tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles-outline" size={size} color={color} />,
+          // 안 읽은 메시지 수. 목록의 안읽음 표시와 같은 노랑을 씁니다.
+          tabBarBadge: unread > 0 ? (unread > 99 ? "99+" : unread) : undefined,
+          tabBarBadgeStyle: { backgroundColor: c.secondary, color: c.onSecondary, fontWeight: "800" },
         }}
       >
         {({ navigation }) => (

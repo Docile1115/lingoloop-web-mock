@@ -10,6 +10,7 @@
  *  - /api/conversations?box=requests   → 내가 받은 메시지 요청
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { toConversation, type ApiConversation } from "@shared/live-data";
 import type { Conversation } from "@shared/demo-data";
 import { ApiError, get } from "./api";
@@ -34,7 +35,12 @@ type ChatsValue = {
   update: (id: string, patch: Partial<Conversation>) => void;
   /** 나가기·차단·요청 삭제가 끝난 방을 목록에서 뺍니다. */
   remove: (id: string) => void;
+  /** 안 읽은 메시지 수의 합. 대화 탭 배지에 씁니다(웹의 unreadTotal 과 같은 계산). */
+  unread: number;
 };
+
+/** 앱을 켜 둔 동안 목록(탭 배지)을 다시 받는 간격. 대화방 안은 따로 더 자주 받습니다. */
+const LIST_REFRESH_MS = 60_000;
 
 type Edit = { seq: number; apply: (rows: Conversation[]) => Conversation[] };
 
@@ -88,6 +94,23 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     void reload();
   }, [reload]);
 
+  /* 앱이 다시 앞으로 오면 바로, 켜 둔 동안에는 가끔 다시 받습니다. 그래야 다른 탭에 있어도
+     배지가 새 메시지를 따라갑니다. 뒤에 있는 동안에는 받지 않습니다. */
+  useEffect(() => {
+    let current = AppState.currentState;
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active" && current !== "active") void reload();
+      current = next;
+    });
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") void reload();
+    }, LIST_REFRESH_MS);
+    return () => {
+      subscription.remove();
+      clearInterval(timer);
+    };
+  }, [reload]);
+
   const refresh = useCallback(() => {
     setRefreshing(true);
     void reload();
@@ -111,9 +134,14 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     [edit],
   );
 
+  const unread = useMemo(
+    () => [...conversations, ...requests].reduce((sum, row) => sum + (row.unread || 0), 0),
+    [conversations, requests],
+  );
+
   const value = useMemo(
-    () => ({ conversations, requests, pendingIds, loading, refreshing, error, reload, refresh, update, remove }),
-    [conversations, requests, pendingIds, loading, refreshing, error, reload, refresh, update, remove],
+    () => ({ conversations, requests, pendingIds, loading, refreshing, error, reload, refresh, update, remove, unread }),
+    [conversations, requests, pendingIds, loading, refreshing, error, reload, refresh, update, remove, unread],
   );
   return <ChatsContext.Provider value={value}>{children}</ChatsContext.Provider>;
 }
