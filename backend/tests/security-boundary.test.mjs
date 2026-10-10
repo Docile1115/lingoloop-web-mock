@@ -334,6 +334,19 @@ test("message polling can ask only for newer messages and the conversation list 
   assert.match(view, /prefetchedProfiles\s*\?\s*prefetchedProfiles\.get\(partnerId\)/);
 });
 
+test("a single partner profile is served through the public view and hides blocks as not found", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const start = source.indexOf('app.get("/api/partners/:partnerId", requireUser');
+  const route = source.slice(start, source.indexOf("function postAuthorView"));
+
+  assert.ok(start > source.indexOf('app.get("/api/partners", requireUser'), "registered after the partner list");
+  assert.match(route, /docId\(req\.params\.partnerId, "partnerId"\)/);
+  assert.match(route, /isBlockedBetween\(req\.auth\.uid, partnerId\)/);
+  assert.match(route, /!snapshot\.exists \|\| snapshot\.data\(\)\?\.accountStatus !== "active" \|\| blocked/);
+  assert.match(route, /404, "PARTNER_NOT_FOUND"/);
+  assert.match(route, /success\(res, req, profileForOthers\(snapshot\.data\(\)\)\)/);
+});
+
 test("pending message requests never expose the recipient's read receipt", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const route = source.slice(

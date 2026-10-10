@@ -1715,6 +1715,23 @@ app.get("/api/partners/:partnerId/follow-counts", requireUser, async (req, res) 
 });
 
 /**
+ * 한 사람의 프로필. 앱이 한 사람을 보여주려고 명부(/api/partners) 100명을 받아 뒤지지 않게 합니다.
+ * 없는 사람, 활동 중이 아닌 사람, 어느 쪽으로든 차단한 사이는 모두 같은 404 입니다 — 차단 여부를
+ * 드러내지 않습니다. 경로 조각이 하나라서 /api/partners/:partnerId/... 경로와 겹치지 않습니다.
+ */
+app.get("/api/partners/:partnerId", requireUser, async (req, res) => {
+  const partnerId = docId(req.params.partnerId, "partnerId");
+  const [snapshot, blocked] = await Promise.all([
+    db.collection("profiles").doc(partnerId).get(),
+    isBlockedBetween(req.auth.uid, partnerId),
+  ]);
+  if (!snapshot.exists || snapshot.data()?.accountStatus !== "active" || blocked) {
+    throw new ApiError(404, "PARTNER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
+  }
+  return success(res, req, profileForOthers(snapshot.data()));
+});
+
+/**
  * 글에 굳혀 둔 작성자 정보 위에 지금 프로필을 덮습니다 — 이름·국가·언어를 바꾸면
  * 옛 글에도 반영됩니다. 프로필이 없으면 글에 남은 이름을 그대로 씁니다.
  */
