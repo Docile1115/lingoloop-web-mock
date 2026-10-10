@@ -173,6 +173,12 @@ type ActiveDetailRoute = Exclude<DetailRoute, null>;
 type DetailHistorySnapshot = { section: Section; stack: ActiveDetailRoute[] };
 type ReloadedChats = { conversations: Conversation[]; requestIds: Set<string> };
 
+/** 실패 안내에 성공 표시(체크)를 붙이지 않도록 토스트의 성격을 함께 넘깁니다. */
+type ToastTone = "success" | "error";
+
+/** 처음 불러오는 중 / 받음 / 처음부터 받지 못함. */
+type LoadState = "loading" | "ready" | "error";
+
 /**
  * 프로필 편집에서 고칠 수 있는 값.
  *
@@ -181,12 +187,6 @@ type ReloadedChats = { conversations: Conversation[]; requestIds: Set<string> };
  * 프로필 머리줄·새 글의 언어가 옛 값으로 남았습니다.
  * "프로필 공개 범위" 도 있었지만 서버에 보내지도 저장하지도 않아 뺐습니다.
  */
-/** 실패 안내에 성공 표시(체크)를 붙이지 않도록 토스트의 성격을 함께 넘깁니다. */
-type ToastTone = "success" | "error";
-
-/** 처음 불러오는 중 / 받음 / 처음부터 받지 못함. */
-type LoadState = "loading" | "ready" | "error";
-
 type ProfileDraft = {
   name: string;
   bio: string;
