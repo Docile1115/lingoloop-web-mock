@@ -160,7 +160,7 @@ class ApiError extends Error {
 }
 
 /* .doc() 에 들어가는 경로 값·본문 값은 모두 docId 로 확인합니다(validate.mjs). */
-const { docId, optionalDocId } = createValidators(ApiError);
+const { docId, optionalDocId, mediaDataUri } = createValidators(ApiError);
 
 function nowIso() {
   return new Date().toISOString();
@@ -1740,8 +1740,9 @@ app.post("/api/posts", requireUser, async (req, res) => {
     tags,
     visibility,
     requestCorrection: optionalBoolean(req.body?.requestCorrection, "requestCorrection", false),
-    imageUrl: optionalString(req.body?.imageUrl, "imageUrl", 520000) || "",
-    audioUrl: optionalString(req.body?.audioUrl, "audioUrl", 520000) || "",
+    // 기기에서 만든 데이터 URI 만 받습니다 — 외부 주소는 글을 본 사람의 IP 를 그 서버에 남깁니다.
+    imageUrl: mediaDataUri(req.body?.imageUrl, "imageUrl", "image"),
+    audioUrl: mediaDataUri(req.body?.audioUrl, "audioUrl", "audio"),
     likes: 0,
     comments: 0,
     corrections: 0,
@@ -2426,8 +2427,9 @@ async function createMessage(req, res, conversationId) {
    * 파일 저장소(버킷)가 아직 없어서입니다. 화면이 보내기 전에 사진을 줄이고
    * 압축하므로 보통 100~200KB 이고, Firestore 문서 한도(1MB)를 넘지 않게
    * 여기서도 한 번 더 막습니다. 버킷이 생기면 이 자리에 그 주소가 들어오면 됩니다.
+   * 외부 주소는 받지 않습니다 — 받는 사람의 IP 와 읽은 시각이 그 서버에 남습니다.
    */
-  const media = type === "text" ? "" : optionalString(req.body?.media, "media", 520000) || "";
+  const media = type === "text" ? "" : mediaDataUri(req.body?.media, "media", type === "image" ? "image" : "audio");
   if (type !== "text" && !media) {
     throw new ApiError(422, "VALIDATION_ERROR", "보낼 파일이 없습니다.", { field: "media" });
   }

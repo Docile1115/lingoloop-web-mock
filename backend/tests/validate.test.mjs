@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
-import { createValidators, isDocumentId } from "../validate.mjs";
+import { createValidators, isDocumentId, isMediaDataUri, MEDIA_MAX_LENGTH } from "../validate.mjs";
 
 class TestApiError extends Error {
   constructor(status, code, message, details) {
@@ -86,4 +86,84 @@ test("docId throws a 422 VALIDATION_ERROR naming the field", () => {
   assert.equal(optionalDocId("reply-1", "parentId"), "reply-1");
   assert.throws(() => optionalDocId("x/y", "parentId"), { status: 422, code: "VALIDATION_ERROR" });
   assert.throws(() => optionalDocId(42, "parentId"), { status: 422 });
+});
+
+test("media accepts only the image and audio data URIs clients produce", () => {
+  const images = [
+    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==",
+    "data:image/png;base64,iVBORw0KGgo=",
+    "data:image/webp;base64,UklGRiQAAABXRUJQ",
+  ];
+  for (const value of images) assert.equal(isMediaDataUri(value, "image"), true, value);
+
+  const audio = [
+    "data:audio/webm;codecs=opus;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibQ==", // Chrome MediaRecorder
+    "data:audio/ogg; codecs=opus;base64,T2dnUwACAAAAAAAAAAA=", // Firefox MediaRecorder
+    "data:audio/mp4;base64,AAAAHGZ0eXBNNEEg", // Safari, iOS app
+    "data:audio/3gpp;base64,AAAAGGZ0eXAzZ3A0", // Android app
+    "data:audio/webm;base64,GkXfo59C", // expo-audio on web, MediaRecorder fallback type
+    "data:audio/x-m4a;base64,AAAAHGZ0eXBNNEEg",
+    "data:audio/aac;base64,//FQgA==",
+    'data:audio/mp4;codecs="mp4a.40.2";base64,AAAA',
+  ];
+  for (const value of audio) assert.equal(isMediaDataUri(value, "audio"), true, value);
+});
+
+test("media rejects remote URLs, scriptable types and malformed payloads", () => {
+  const rejectedImages = [
+    "https://tracker.example/pixel.gif",
+    "http://tracker.example/pixel.png",
+    "//tracker.example/pixel.png",
+    "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+    "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+    "data:text/html;base64,PHNjcmlwdD4=",
+    "javascript:alert(1)",
+    "data:image/jpeg;base64,",
+    "data:image/jpeg,raw-bytes",
+    "data:image/jpeg;base64,AAAA BBBB",
+    "data:image/jpeg;base64,AAAA\nBBBB",
+    'data:image/jpeg;base64,AAAA"onerror="x',
+    "data:image/jpeg;base64,AAAA#https://tracker.example/",
+    " data:image/jpeg;base64,AAAA",
+    "data:image/png;base64," + "A".repeat(MEDIA_MAX_LENGTH),
+    "data:audio/webm;base64,GkXf",
+  ];
+  for (const value of rejectedImages) assert.equal(isMediaDataUri(value, "image"), false, value.slice(0, 60));
+
+  const rejectedAudio = [
+    "https://cdn.example/voice.mp3",
+    "data:audio/wav;base64,UklGRg==",
+    "data:audio/mpeg;base64,SUQz",
+    "data:audio/webm;codecs=opus",
+    "data:audio/webm;codecs=opus;foo=bar;base64,AAAA",
+    "data:audio/webm;codecs=<script>;base64,AAAA",
+    "data:audio/webm;charset=utf-8;base64,AAAA",
+    "data:image/png;base64,iVBORw0KGgo=",
+    "data:audio/webm;base64,AA%AA",
+  ];
+  for (const value of rejectedAudio) assert.equal(isMediaDataUri(value, "audio"), false, value);
+
+  assert.equal(isMediaDataUri("data:video/mp4;base64,AAAA", "video"), false);
+  assert.equal(isMediaDataUri(null, "image"), false);
+  const prefix = "data:image/png;base64,";
+  assert.equal(isMediaDataUri(prefix + "A".repeat(MEDIA_MAX_LENGTH - prefix.length), "image"), true);
+  assert.equal(isMediaDataUri(prefix + "A".repeat(MEDIA_MAX_LENGTH - prefix.length + 1), "image"), false);
+});
+
+test("mediaDataUri keeps empty attachments optional and reports the field on rejection", () => {
+  const { mediaDataUri } = createValidators(TestApiError);
+  for (const empty of [undefined, null, "", "   "]) assert.equal(mediaDataUri(empty, "imageUrl", "image"), "");
+  assert.equal(mediaDataUri(" data:image/png;base64,iVBORw0KGgo= ", "imageUrl", "image"), "data:image/png;base64,iVBORw0KGgo=");
+  for (const [value, field, kind] of [
+    ["https://tracker.example/a.png", "imageUrl", "image"],
+    ["https://tracker.example/a.mp3", "audioUrl", "audio"],
+    ["data:image/png;base64,iVBORw0KGgo=", "media", "audio"],
+    [42, "media", "image"],
+    ["data:image/png;base64," + "A".repeat(MEDIA_MAX_LENGTH), "imageUrl", "image"],
+  ]) {
+    assert.throws(
+      () => mediaDataUri(value, field, kind),
+      (error) => error.status === 422 && error.code === "VALIDATION_ERROR" && error.details.field === field,
+    );
+  }
 });

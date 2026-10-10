@@ -250,6 +250,17 @@ test("route params and id body fields go through the shared document-id validato
   assert.match(source, /optionalDocId\(req\.body\?\.id, "id", \{ min: 1 \}\)/);
 });
 
+test("post and message attachments accept only device-made data URIs", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const postRoute = source.slice(source.indexOf('app.post("/api/posts"'), source.indexOf('app.delete("/api/posts/:postId"'));
+  const messageRoute = source.slice(source.indexOf("async function createMessage"), source.indexOf('app.post("/api/conversations/:conversationId/messages"'));
+
+  assert.match(postRoute, /imageUrl: mediaDataUri\(req\.body\?\.imageUrl, "imageUrl", "image"\)/);
+  assert.match(postRoute, /audioUrl: mediaDataUri\(req\.body\?\.audioUrl, "audioUrl", "audio"\)/);
+  assert.match(messageRoute, /mediaDataUri\(req\.body\?\.media, "media", type === "image" \? "image" : "audio"\)/);
+  assert.doesNotMatch(source, /optionalString\(req\.body\?\.(?:imageUrl|audioUrl|media)\b/);
+});
+
 test("pending message requests never expose the recipient's read receipt", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const route = source.slice(

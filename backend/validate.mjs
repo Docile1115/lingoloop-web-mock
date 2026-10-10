@@ -28,6 +28,29 @@ export function isDocumentId(value, { min = 4, max = 128 } = {}) {
   );
 }
 
+/**
+ * 글·메시지에 붙는 사진·음성.
+ *
+ * 화면이 <img>·<audio> 로 그대로 그리므로 외부 주소를 받으면 그 글을 본 모든 사람의
+ * IP 와 읽은 시각이 그 서버에 남습니다. 기기에서 만든 데이터 URI 만 받습니다.
+ * 사진은 프로필 사진(avatarUrlFrom)과 같은 규칙입니다.
+ *
+ * 음성은 클라이언트가 실제로 만드는 형식만 받습니다.
+ * - 웹 녹음기(MediaRecorder): audio/webm;codecs=opus(크롬), audio/ogg; codecs=opus(파이어폭스),
+ *   audio/mp4(사파리)
+ * - 앱(expo-audio): audio/mp4(iOS), audio/3gpp(안드로이드), audio/webm(웹)
+ * - aac·x-m4a 는 iOS 녹음 파일에 붙는 같은 형식의 다른 이름입니다.
+ */
+export const MEDIA_MAX_LENGTH = 520000;
+const IMAGE_DATA_URI = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+const AUDIO_DATA_URI =
+  /^data:audio\/(?:webm|ogg|mp4|x-m4a|aac|3gpp)(?:; ?codecs="?[A-Za-z0-9.,+ -]{1,64}"?)?;base64,[A-Za-z0-9+/]+={0,2}$/;
+
+export function isMediaDataUri(value, kind) {
+  const pattern = kind === "image" ? IMAGE_DATA_URI : kind === "audio" ? AUDIO_DATA_URI : null;
+  return Boolean(pattern) && typeof value === "string" && value.length <= MEDIA_MAX_LENGTH && pattern.test(value);
+}
+
 /** server.mjs 의 ApiError 로 422 를 만드는 검증 함수들입니다. */
 export function createValidators(ApiError) {
   const invalid = (field, message) => new ApiError(422, "VALIDATION_ERROR", message || field + " 형식을 확인해 주세요.", { field });
@@ -44,6 +67,24 @@ export function createValidators(ApiError) {
     optionalDocId(value, field, options) {
       if (value === undefined || value === null || value === "") return "";
       return docId(value, field, options);
+    },
+
+    /** 첨부는 비우면 "" 입니다. kind 는 "image" 또는 "audio" 입니다. */
+    mediaDataUri(value, field, kind) {
+      if (value === undefined || value === null) return "";
+      if (typeof value !== "string") throw invalid(field, field + " 필드는 문자열이어야 합니다.");
+      const media = value.trim();
+      if (!media) return "";
+      if (media.length > MEDIA_MAX_LENGTH) {
+        throw new ApiError(422, "VALIDATION_ERROR", field + " 필드는 " + MEDIA_MAX_LENGTH + "자 이하여야 합니다.", {
+          field,
+          max: MEDIA_MAX_LENGTH,
+        });
+      }
+      if (!isMediaDataUri(media, kind)) {
+        throw invalid(field, kind === "image" ? "사진 형식을 확인해 주세요." : "음성 형식을 확인해 주세요.");
+      }
+      return media;
     },
   };
 }
