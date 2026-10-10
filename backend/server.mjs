@@ -21,6 +21,7 @@ import {
 } from "./policy.mjs";
 import { nextWriteQuota, writeQuotaMessage } from "./write-quota.mjs";
 import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-limit.mjs";
+import { createSessionVerificationCache, isSessionRejection } from "./session-cache.mjs";
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import { registerHomeRoutes } from "./homes.mjs";
 import { isDiscoverable, presenceIsStale, presenceOf } from "./discovery.mjs";
@@ -437,21 +438,30 @@ async function issueSession(res, idToken, decoded = undefined) {
   return verifiedToken;
 }
 
+/* 같은 쿠키는 60초 동안 Identity Platform 에 다시 묻지 않습니다(session-cache.mjs). */
+const sessionVerifications = createSessionVerificationCache({ ttlMs: 60_000, maxEntries: 5_000 });
+
 async function sessionUser(req) {
   const cookie = parseCookies(req.headers.cookie || "")[COOKIE_NAME];
   if (!cookie) throw new ApiError(401, "AUTH_REQUIRED", "로그인이 필요합니다.");
   let decoded;
   try {
-    decoded = await auth.verifySessionCookie(cookie, true);
-  } catch {
-    throw new ApiError(401, "INVALID_SESSION", "세션이 만료되었습니다. 다시 로그인해 주세요.");
+    // checkRevoked=true 가 사용자 기록을 읽어 폐기된 세션과 비활성화된 계정을 거절합니다.
+    // 예전에는 그 뒤에 auth.getUser 로 같은 기록을 한 번 더 읽었습니다.
+    decoded = await sessionVerifications.verify(cookie, (value) => auth.verifySessionCookie(value, true));
+  } catch (error) {
+    if (isSessionRejection(error)) {
+      throw new ApiError(401, "INVALID_SESSION", "세션이 만료되었습니다. 다시 로그인해 주세요.");
+    }
+    // 쿠키가 아니라 확인하는 쪽(네트워크·Identity Platform)의 장애입니다. 401 로 답하면 앱이 로그아웃시킵니다.
+    console.error(JSON.stringify({ requestId: req.requestId, code: "AUTH_UNAVAILABLE", cause: error?.code || "unknown", message: error?.message }));
+    throw new ApiError(503, "AUTH_UNAVAILABLE", "로그인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
   }
   assertEnabledSignInProvider(decoded);
-  const userRecord = await auth.getUser(decoded.uid);
-  if (userRecord.disabled) throw new ApiError(403, "ACCOUNT_DISABLED", "비활성화된 계정입니다.");
-  const profile = await ensureProfile(decoded.uid, userRecord.email, userRecord.displayName);
+  // 이메일·이름은 세션 쿠키에 담긴 값(로그인 때의 ID 토큰)을 씁니다.
+  const profile = await ensureProfile(decoded.uid, decoded.email, decoded.name);
   if (profile.accountStatus !== "active") throw new ApiError(403, "ACCOUNT_RESTRICTED", "사용이 제한된 계정입니다.");
-  return { uid: decoded.uid, email: userRecord.email || "", emailVerified: userRecord.emailVerified, profile };
+  return { uid: decoded.uid, email: decoded.email || "", emailVerified: decoded.email_verified === true, profile };
 }
 
 async function requireUser(req, _res, next) {

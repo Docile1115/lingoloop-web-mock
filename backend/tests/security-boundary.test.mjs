@@ -23,6 +23,16 @@ test("login throttling fingerprints raw tokens locally and persists only verifie
   assert.ok(proxyValidation >= 0 && proxyValidation < authRoute, "proxy secret must be validated before auth throttling");
 });
 
+test("session checks verify once (cached), skip the duplicate user lookup and never log users out on outages", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const helper = source.slice(source.indexOf("async function sessionUser"), source.indexOf("async function requireUser"));
+
+  assert.match(helper, /sessionVerifications\.verify\(cookie, \(value\) => auth\.verifySessionCookie\(value, true\)\)/);
+  assert.doesNotMatch(helper, /auth\.getUser\(/);
+  assert.match(helper, /isSessionRejection\(error\)[\s\S]*401, "INVALID_SESSION"[\s\S]*503, "AUTH_UNAVAILABLE"/);
+  assert.match(source, /createSessionVerificationCache\(\{ ttlMs: 60_000, maxEntries: 5_000 \}\)/);
+});
+
 test("message writes and conversation reads keep safety state transactional", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const messages = source.slice(source.indexOf('app.patch("/api/conversations/:conversationId/mute"'), source.indexOf('app.get("/api/dm/privacy"'));
