@@ -24,6 +24,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import {
+  IOSOutputFormat,
   RecordingPresets,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
@@ -31,6 +32,7 @@ import {
   useAudioPlayerStatus,
   useAudioRecorder,
   useAudioRecorderState,
+  type RecordingOptions,
 } from "expo-audio";
 import { File, Paths } from "expo-file-system";
 import { toChatMessage, type ApiCreateMessageResult, type ApiMessage } from "@shared/live-data";
@@ -56,6 +58,41 @@ type ConversationSupport = {
 
 const MAX_MEDIA_DATA_URI = 520_000;
 const voiceCacheUsers = new Map<string, number>();
+
+/**
+ * 음성 메시지 녹음 설정. iOS·안드로이드 모두 AAC(.m4a)로 녹음해 audio/mp4 로 보냅니다.
+ * 안드로이드의 LOW_QUALITY 기본값은 3GP/AMR 이라 브라우저(웹)에서 재생되지 않았습니다.
+ * 한 채널 64kbps 면 30초가 약 240KB 라 서버 한도(데이터 URI 52만 자) 안에 들어갑니다.
+ */
+const VOICE_RECORDING: RecordingOptions = {
+  ...RecordingPresets.LOW_QUALITY,
+  extension: ".m4a",
+  sampleRate: 44100,
+  numberOfChannels: 1,
+  bitRate: 64000,
+  android: { extension: ".m4a", outputFormat: "mpeg4", audioEncoder: "aac" },
+  ios: { ...RecordingPresets.LOW_QUALITY.ios, extension: ".m4a", outputFormat: IOSOutputFormat.MPEG4AAC },
+};
+const VOICE_MIME = "audio/mp4";
+
+/** "data:audio/webm;codecs=opus;base64,..." 처럼 형식 뒤에 매개변수가 붙어도 읽습니다. */
+const VOICE_DATA_URI = /^data:([^;,]+)((?:;[^;,]*)*);base64,(.+)$/s;
+
+/** 캐시 파일 확장자. 재생기는 확장자로 형식을 짐작하므로 실제 형식과 맞춰야 합니다. */
+function voiceExtension(mime: string): string {
+  const kind = mime.trim().toLowerCase();
+  if (kind.includes("3gpp")) return "3gp";
+  if (kind.includes("webm")) return "webm";
+  if (kind.includes("ogg")) return "ogg";
+  if (kind === "audio/aac" || kind === "audio/x-aac") return "aac";
+  if (kind.includes("mpeg") || kind.includes("mp3")) return "mp3";
+  if (kind.includes("wav")) return "wav";
+  // audio/mp4 · audio/m4a · audio/x-m4a
+  return "m4a";
+}
+
+/** iOS 재생기(AVPlayer)는 WebM·Ogg(Opus)를 열지 못합니다. 크롬에서 녹음한 웹 음성이 그렇습니다. */
+const playableHere = (extension: string) => Platform.OS !== "ios" || !["webm", "ogg"].includes(extension);
 
 /** 신고 사유. 웹의 신고 창과 같은 목록입니다. 서버가 모르는 사유(개인정보 요구)는 기타로 접수합니다. */
 const REPORT_REASONS: Array<[string, MessageKey]> = [
@@ -150,30 +187,38 @@ function VoiceMessage({
   muted: string;
 }) {
   const [source, setSource] = useState<string | null>(media.startsWith("data:") ? null : media);
+  const [unsupported, setUnsupported] = useState(false);
   const player = useAudioPlayer(source);
   const status = useAudioPlayerStatus(player);
 
   useEffect(() => {
+    setUnsupported(false);
     if (!media.startsWith("data:")) {
       setSource(media);
       return;
     }
     let cachedFile: File | null = null;
     try {
-      const match = /^data:([^;]+);base64,(.+)$/s.exec(media);
+      const match = VOICE_DATA_URI.exec(media);
       if (!match) return;
-      const extension = match[1].includes("3gpp") ? "3gp" : match[1].includes("webm") ? "webm" : "m4a";
+      const extension = voiceExtension(match[1]);
+      if (!playableHere(extension)) {
+        setUnsupported(true);
+        setSource(null);
+        return;
+      }
+      const payload = match[3];
       const safeConversationId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || "conversation";
       const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || "message";
       // 같은 메시지 id의 media가 교체돼도 이전 파일을 재사용하지 않도록 payload
       // fingerprint를 이름에 넣습니다. 대화 id까지 포함되어 방 사이 충돌도 없습니다.
       const file = new File(
         Paths.cache,
-        `timotalk-${safeConversationId}-${safeId}-${voiceMediaKey(match[2])}.${extension}`,
+        `timotalk-${safeConversationId}-${safeId}-${voiceMediaKey(payload)}.${extension}`,
       );
       if (!file.exists) {
         file.create({ overwrite: true, intermediates: true });
-        file.write(decodeBase64(match[2]));
+        file.write(decodeBase64(payload));
       }
       cachedFile = file;
       retainVoiceCache(file.uri);
@@ -195,6 +240,17 @@ function VoiceMessage({
     if (status.didJustFinish) await player.seekTo(0);
     player.play();
   };
+
+  if (unsupported) {
+    return (
+      <View style={styles.voiceMessage} accessible accessibilityLabel={t("이 기기에서는 재생할 수 없는 음성이에요.")}>
+        <Ionicons name="volume-mute-outline" size={17} color={mine ? "#ffffff" : muted} />
+        <Text style={{ color: mine ? "#ffffff" : muted, fontSize: 12, flexShrink: 1 }}>
+          {t("이 기기에서는 재생할 수 없는 음성이에요.")}
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <Pressable
@@ -257,7 +313,7 @@ export function ThreadScreen({
   const [supportDraft, setSupportDraft] = useState("");
   const [mediaBusy, setMediaBusy] = useState(false);
   const [error, setError] = useState("");
-  const recorder = useAudioRecorder(RecordingPresets.LOW_QUALITY);
+  const recorder = useAudioRecorder(VOICE_RECORDING);
   const recorderState = useAudioRecorderState(recorder, 200);
   const stoppingRecording = useRef(false);
   const sendingNow = useRef(false);
@@ -448,8 +504,8 @@ export function ThreadScreen({
       }
       const file = new File(uri);
       const base64 = await file.base64();
-      const mime = file.extension === ".3gp" ? "audio/3gpp" : file.extension === ".webm" ? "audio/webm" : "audio/mp4";
-      const media = `data:${mime};base64,${base64}`;
+      // 두 플랫폼 모두 AAC(.m4a)로 녹음하므로 형식을 하나로 보냅니다(서버·웹이 audio/mp4 를 받습니다).
+      const media = `data:${VOICE_MIME};base64,${base64}`;
       if (media.length > MAX_MEDIA_DATA_URI) {
         setError(t("녹음이 너무 길어요. 30초 안쪽으로 다시 녹음해 주세요."));
         return;
@@ -472,7 +528,7 @@ export function ThreadScreen({
     try {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
-        setError(t("마이크를 쓸 수 없어요. 브라우저 권한을 확인해 주세요."));
+        setError(t("마이크를 쓸 수 없어요. 설정에서 마이크 권한을 허용해 주세요."));
         return;
       }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
@@ -480,7 +536,7 @@ export function ThreadScreen({
       recorder.record();
     } catch {
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
-      setError(t("마이크를 쓸 수 없어요. 브라우저 권한을 확인해 주세요."));
+      setError(t("마이크를 쓸 수 없어요. 설정에서 마이크 권한을 허용해 주세요."));
     }
   }, [recorder]);
 

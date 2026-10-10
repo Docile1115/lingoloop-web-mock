@@ -935,4 +935,6 @@ export const en: Record<MessageKey, string> = {
   "AI 응답이 완성되지 않았어요. 내용을 줄여 다시 시도해 주세요.": "The AI response was incomplete. Shorten the text and try again.",
   "PC 웹의 3D 방에 화이트보드를 놓으면 방명록을 받을 수 있어요.": "Place a whiteboard in your 3D room on the desktop web to receive guestbook notes.",
   "PC 웹의 3D 방에 액자를 놓으면 사진을 걸 수 있어요.": "Place a frame in your 3D room on the desktop web to hang a photo.",
+  "이 기기에서는 재생할 수 없는 음성이에요.": "This voice message can't be played on this device.",
+  "마이크를 쓸 수 없어요. 설정에서 마이크 권한을 허용해 주세요.": "Can't use the microphone. Allow microphone access in Settings.",
 };
