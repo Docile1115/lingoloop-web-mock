@@ -386,6 +386,15 @@ export function ThreadScreen({
     }, [fetchMessages]),
   );
 
+  /* 방금 연 대화(프로필에서 메시지 보내기)는 목록에 아직 없습니다. 한 번 다시 받아
+     요청 상태(대기 중이면 나가기를 숨김)와 안읽음 수를 맞춥니다. */
+  const checkedList = useRef(false);
+  useEffect(() => {
+    if (chats.loading || checkedList.current) return;
+    checkedList.current = true;
+    if (!known) void chats.reload();
+  }, [chats, known]);
+
   /* 열어 둔 방은 서버가 읽음 처리합니다. 목록이 그 전에 받은 안읽음 수를 들고 있으면 배지에서 뺍니다. */
   const knownUnread = known?.unread ?? 0;
   useEffect(() => {
