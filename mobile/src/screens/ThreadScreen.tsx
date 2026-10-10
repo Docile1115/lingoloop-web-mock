@@ -934,7 +934,7 @@ export function ThreadScreen({
         </>
       ) : null}
 
-      {/* 웹과 같은 배치입니다 — 첨부는 칸 밖 왼쪽, 이모지·코치는 칸 안 왼쪽,
+      {/* 웹과 같은 배치입니다 — 첨부는 칸 밖 왼쪽, 코치는 칸 안 왼쪽,
           보내기는 칸 안 오른쪽에 쓸 것이 있을 때만.
           ＋ 와 칸의 한 줄 높이를 COMPOSER_H 하나로 묶습니다. 높이가 다르면
           바닥만 맞고 중심이 몇 px 어긋납니다.
@@ -962,16 +962,7 @@ export function ThreadScreen({
         </Pressable>
 
         <View style={[styles.field, { backgroundColor: c.sunken, borderColor: c.line }]}>
-          <Pressable
-            onPress={() => setDraft((text) => `${text} 😊`)}
-            disabled={composerBusy}
-            hitSlop={6}
-            accessibilityRole="button"
-            accessibilityLabel={t("이모지")}
-            style={styles.inlineAction}
-          >
-            <Ionicons name="happy-outline" size={20} color={c.muted} />
-          </Pressable>
+          {/* 이모지는 기기 키보드의 이모지 자판을 씁니다. 😊 하나만 붙이던 단추는 뺐습니다. */}
           <Pressable
             onPress={toggleCoach}
             disabled={composerBusy}

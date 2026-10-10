@@ -35,7 +35,8 @@ import { HomeScreen, HomesScreen } from "./screens/HomesScreen";
 export type RootParams = {
   Tabs: undefined;
   PartnerProfile: { partnerId: string };
-  PostDetail: { post: FeedPost };
+  /** compose: 피드의 댓글·교정 단추로 열면 그 입력칸을 바로 엽니다. */
+  PostDetail: { post: FeedPost; compose?: "reply" | "correction" };
   /** request: 내가 받은 메시지 요청. 수락하기 전에는 답장할 수 없습니다. */
   Thread: { conversation: Conversation; request?: boolean };
   Compose: undefined;
@@ -161,7 +162,7 @@ function Tabs() {
       >
         {({ navigation }) => (
           <CommunityScreen
-            onOpenPost={(post) => navigation.navigate("PostDetail", { post })}
+            onOpenPost={(post, compose) => navigation.navigate("PostDetail", { post, compose })}
             onOpenProfile={(partnerId) => navigation.navigate("PartnerProfile", { partnerId })}
           />
         )}
@@ -259,6 +260,7 @@ export function Navigation() {
           {({ route, navigation }) => (
             <PostDetailScreen
               post={route.params.post}
+              compose={route.params.compose}
               onOpenProfile={(partnerId) => navigation.push("PartnerProfile", { partnerId })}
             />
           )}
