@@ -23,6 +23,16 @@ test("login throttling fingerprints raw tokens locally and persists only verifie
   assert.ok(proxyValidation >= 0 && proxyValidation < authRoute, "proxy secret must be validated before auth throttling");
 });
 
+test("session checks verify once (cached), skip the duplicate user lookup and never log users out on outages", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const helper = source.slice(source.indexOf("async function sessionUser"), source.indexOf("async function requireUser"));
+
+  assert.match(helper, /sessionVerifications\.verify\(cookie, \(value\) => auth\.verifySessionCookie\(value, true\)\)/);
+  assert.doesNotMatch(helper, /auth\.getUser\(/);
+  assert.match(helper, /isSessionRejection\(error\)[\s\S]*401, "INVALID_SESSION"[\s\S]*503, "AUTH_UNAVAILABLE"/);
+  assert.match(source, /createSessionVerificationCache\(\{ ttlMs: 60_000, maxEntries: 5_000 \}\)/);
+});
+
 test("message writes and conversation reads keep safety state transactional", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const messages = source.slice(source.indexOf('app.patch("/api/conversations/:conversationId/mute"'), source.indexOf('app.get("/api/dm/privacy"'));
@@ -97,6 +107,52 @@ test("conversation creation decides DM policy and relationships in its create tr
     /db\.runTransaction[\s\S]*transaction\.get\(reference\)[\s\S]*directMessageDecisionInTransaction\(transaction, req\.auth\.uid, partnerId\)[\s\S]*transaction\.create\(reference/,
   );
   assert.doesNotMatch(route, /await directMessageDecisionInTransaction\((?!transaction)/);
+});
+
+test("matches-only DMs use evidence the sender cannot regenerate, and declined senders cool down", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const helper = source.slice(
+    source.indexOf("async function directMessageDecisionInTransaction"),
+    source.indexOf("async function profilesByIds"),
+  );
+  const createRoute = source.slice(source.indexOf('app.post("/api/conversations"'), source.indexOf('app.get("/api/conversations"'));
+  const declineRoute = source.slice(
+    source.indexOf('app.delete("/api/conversations/:conversationId/request"'),
+    source.indexOf('app.delete("/api/conversations/:conversationId",'),
+  );
+
+  assert.match(helper, /collection\("dailyMatches"\)\.doc\(recipientId\)/);
+  assert.doesNotMatch(helper, /collection\("dailyMatches"\)\.doc\(senderId\)/);
+  assert.match(helper, /dmRelationships\(\{/);
+  // 새 요청(pending)을 만들 때만 거절 기록과 하루 한도를 봅니다. 모두 같은 transaction 안입니다.
+  assert.match(
+    createRoute,
+    /if \(!snapshot\.exists && decision\.status === "pending"\) \{[\s\S]*transaction\.getAll\([\s\S]*dmRequestCooldowns[\s\S]*requestCooldownUntil[\s\S]*takeWriteQuota\(transaction, quotaSnapshot, "messageRequests"\)[\s\S]*transaction\.create\(reference/,
+  );
+  assert.match(declineRoute, /transaction\.set\(db\.collection\("dmRequestCooldowns"\)\.doc\(senderId \+ "_" \+ req\.auth\.uid\)/);
+});
+
+test("per-user daily write limits are taken inside each write transaction and never on reads", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end));
+  const routes = [
+    ["posts", section('app.post("/api/posts"', 'app.delete("/api/posts/:postId"')],
+    ["replies", section('app.post("/api/posts/:postId/replies"', 'app.get("/api/corrections/received"')],
+    ["reactions", section('app.post("/api/posts/:postId/like"', 'app.post("/api/conversations"')],
+    ["reactions", section('app.post("/api/partners/:partnerId/like"', 'app.post("/api/partners/:partnerId/follow"')],
+    ["follows", section('app.post("/api/partners/:partnerId/follow"', 'app.get("/api/partners/:partnerId/follow-counts"')],
+    ["reports", section('app.post("/api/reports"', 'app.get("/api/account/verification"')],
+    ["messageRequests", section('app.post("/api/conversations"', 'app.get("/api/conversations"')],
+  ];
+  for (const [action, route] of routes) {
+    assert.match(
+      route,
+      new RegExp('db\\.runTransaction[\\s\\S]*writeQuotaReference\\(req\\.auth\\.uid\\)[\\s\\S]*takeWriteQuota\\(transaction, quotaSnapshot, "' + action + '"\\)'),
+      action,
+    );
+  }
+  // 위 경로 말고는 쓰지 않습니다(읽기에는 한도를 걸지 않습니다).
+  assert.equal(source.match(/takeWriteQuota\(transaction, quotaSnapshot, "/g).length, routes.length);
 });
 
 test("notification reads compare event identity and read-all uses transaction snapshots", async () => {
@@ -227,6 +283,83 @@ test("post author cards overlay the author's current identity everywhere posts a
     source.slice(source.indexOf('app.get("/api/search"'), source.indexOf('app.post("/api/translate"')),
   ];
   for (const route of routes) assert.match(route, /author: postAuthorView\(post, /);
+});
+
+test("route params and id body fields go through the shared document-id validator", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /safeString\(req\.params\./);
+  const paramUses = [...source.matchAll(/(.{0,32})req\.params\.(\w+)/g)];
+  assert.ok(paramUses.length >= 15, "expected the current id routes to be audited");
+  for (const [use, before] of paramUses) {
+    // createMessage 는 받은 값을 docId 로 확인합니다(아래).
+    assert.match(before, /(?:docId\(|createMessage\(req, res, )$/, use);
+  }
+  const messageRoute = source.slice(source.indexOf("async function createMessage"), source.indexOf('app.post("/api/conversations/:conversationId/messages"'));
+  assert.match(messageRoute, /const id = docId\(conversationId, "conversationId"\)/);
+  assert.match(messageRoute, /isDocumentId\(req\.body\?\.clientMessageId, \{ min: 8 \}\)/);
+
+  for (const field of ["partnerId", "targetId"]) {
+    assert.match(source, new RegExp("docId\\(req\\.body\\?\\." + field + ", \"" + field + "\""));
+  }
+  assert.match(source, /optionalDocId\(req\.body\?\.parentId, "parentId"\)/);
+  assert.match(source, /optionalDocId\(req\.body\?\.id, "id", \{ min: 1 \}\)/);
+});
+
+test("post and message attachments accept only device-made data URIs", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const postRoute = source.slice(source.indexOf('app.post("/api/posts"'), source.indexOf('app.delete("/api/posts/:postId"'));
+  const messageRoute = source.slice(source.indexOf("async function createMessage"), source.indexOf('app.post("/api/conversations/:conversationId/messages"'));
+
+  assert.match(postRoute, /imageUrl: mediaDataUri\(req\.body\?\.imageUrl, "imageUrl", "image"\)/);
+  assert.match(postRoute, /audioUrl: mediaDataUri\(req\.body\?\.audioUrl, "audioUrl", "audio"\)/);
+  assert.match(messageRoute, /mediaDataUri\(req\.body\?\.media, "media", type === "image" \? "image" : "audio"\)/);
+  assert.doesNotMatch(source, /optionalString\(req\.body\?\.(?:imageUrl|audioUrl|media)\b/);
+});
+
+test("message polling can ask only for newer messages and the conversation list batches profile reads", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const messagesRoute = source.slice(
+    source.indexOf('app.get("/api/conversations/:conversationId/messages"'),
+    source.indexOf("async function createMessage"),
+  );
+  const listRoute = source.slice(source.indexOf('app.get("/api/conversations"'), source.indexOf('app.post("/api/conversations/:conversationId/accept"'));
+  const view = source.slice(source.indexOf("async function conversationView"), source.indexOf("async function consumeDailyQuota"));
+
+  // 잘못된 커서는 읽기 전에 거절하고, 같은 권한 확인을 거칩니다.
+  assert.match(messagesRoute, /isoTimestamp\(req\.query\.after, "after"\)[\s\S]*conversationReference\.get\(\)[\s\S]*isBlockedBetween/);
+  assert.match(messagesRoute, /where\("sentAt", ">", after\)\.orderBy\("sentAt", "asc"\)\.limit\(200\)/);
+  assert.match(messagesRoute, /orderBy\("sentAt", "desc"\)\.limit\(200\)/);
+  assert.match(listRoute, /profilesByIds\([\s\S]*conversationView\(conversation, req\.auth\.uid, false, partnerProfiles\)/);
+  assert.match(view, /prefetchedProfiles\s*\?\s*prefetchedProfiles\.get\(partnerId\)/);
+});
+
+test("a single partner profile is served through the public view and hides blocks as not found", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const start = source.indexOf('app.get("/api/partners/:partnerId", requireUser');
+  const route = source.slice(start, source.indexOf("function postAuthorView"));
+
+  assert.ok(start > source.indexOf('app.get("/api/partners", requireUser'), "registered after the partner list");
+  assert.match(route, /docId\(req\.params\.partnerId, "partnerId"\)/);
+  assert.match(route, /isBlockedBetween\(req\.auth\.uid, partnerId\)/);
+  assert.match(route, /!snapshot\.exists \|\| snapshot\.data\(\)\?\.accountStatus !== "active" \|\| blocked/);
+  assert.match(route, /404, "PARTNER_NOT_FOUND"/);
+  assert.match(route, /success\(res, req, profileForOthers\(snapshot\.data\(\)\)\)/);
+});
+
+test("follow counts use count() aggregations and keep the block and visibility rules", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const route = source.slice(
+    source.indexOf('app.get("/api/partners/:partnerId/follow-counts"'),
+    source.indexOf('app.get("/api/partners/:partnerId", requireUser'),
+  );
+
+  assert.equal(route.match(/\.count\(\)\.get\(\)/g).length, 3);
+  assert.doesNotMatch(route, /\.limit\(500\)\.get\(\)/);
+  assert.match(route, /blockedBothWays\(req\.auth\.uid\)/);
+  assert.match(route, /acceptedPartnerIds\(req\.auth\.uid\)/);
+  assert.match(route, /follows\.doc\(partnerId \+ "_" \+ id\), follows\.doc\(id \+ "_" \+ partnerId\)/);
+  assert.match(route, /seesEveryPost \? partnerPosts : partnerPosts\.where\("visibility", "==", "public"\)/);
 });
 
 test("pending message requests never expose the recipient's read receipt", async () => {

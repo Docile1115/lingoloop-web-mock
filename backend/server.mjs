@@ -12,10 +12,20 @@ import {
   notificationEventIdentity,
   NOTIFICATION_TYPES,
 } from "./notifications.mjs";
-import { decideDmRoute, spamSignals } from "./policy.mjs";
+import {
+  decideDmRoute,
+  dmRelationships,
+  DM_REQUEST_COOLDOWN_MS,
+  requestCooldownUntil,
+  spamSignals,
+} from "./policy.mjs";
+import { nextWriteQuota, writeQuotaMessage } from "./write-quota.mjs";
 import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-limit.mjs";
+import { createSessionVerificationCache, isSessionRejection } from "./session-cache.mjs";
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import { registerHomeRoutes } from "./homes.mjs";
+import { isDiscoverable, presenceIsStale, presenceOf } from "./discovery.mjs";
+import { createValidators, isDocumentId } from "./validate.mjs";
 import {
   AvatarValidationError,
   avatarFields,
@@ -157,6 +167,9 @@ class ApiError extends Error {
   }
 }
 
+/* .doc() 에 들어가는 경로 값·본문 값은 모두 docId 로 확인합니다(validate.mjs). */
+const { docId, optionalDocId, mediaDataUri, isoTimestamp } = createValidators(ApiError);
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -278,7 +291,7 @@ function parseCookies(header = "") {
 function publicProfile(profile) {
   if (!profile) return null;
   const privateFields = new Set(["email", "accountStatus", "createdAt", "updatedAt"]);
-  const normalized = { ...profile, ...avatarFields(profile), ...roomFields(profile) };
+  const normalized = { ...profile, ...avatarFields(profile), ...roomFields(profile), status: presenceOf(profile) };
   return Object.fromEntries(Object.entries(normalized).filter(([key]) => !privateFields.has(key)));
 }
 
@@ -304,6 +317,7 @@ function profileForOthers(profile) {
   const { hideLocation, ...rest } = shown;
   delete rest.roomConfig; // A house is readable only through its privacy-checked API.
   delete rest.lastActiveAt; // 마지막 접속 시각은 본인만 봅니다.
+  delete rest.onboardedAt;
   // 이 설정이 생기기 전 프로필에는 값이 없습니다. 화면·PATCH처럼 "없음"도 숨김으로 봅니다.
   return hideLocation === false ? rest : { ...rest, city: "" };
 }
@@ -346,6 +360,8 @@ function defaultProfile(uid, email, name) {
     responseRate: 100,
     exchangeScore: 50,
     accountStatus: "active",
+    // 첫 설정을 마치면 시각이 들어갑니다. 그 전에는 다른 사람의 추천·검색에 나오지 않습니다.
+    onboardedAt: null,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastActiveAt: timestamp,
@@ -364,10 +380,14 @@ async function ensureProfile(uid, email, name) {
       !Object.hasOwn(stored, "avatarConfig") ||
       stored.avatarMode !== normalizedAvatar.avatarMode ||
       !sameAvatarConfig(storedConfig, normalizedAvatar.avatarConfig);
+    // 마지막 활동 시각. 몇 분에 한 번만 써서 접속 표시는 살리고 쓰기는 줄입니다.
+    const presencePatch = presenceIsStale(stored) ? { lastActiveAt: nowIso() } : {};
     if (needsAvatarBackfill) {
-      await reference.update({ ...normalizedAvatar, updatedAt: nowIso() });
+      await reference.update({ ...normalizedAvatar, ...presencePatch, updatedAt: nowIso() });
+    } else if (presencePatch.lastActiveAt) {
+      await reference.update(presencePatch).catch((error) => console.warn("presence update failed", error?.message));
     }
-    return { ...stored, ...normalizedAvatar };
+    return { ...stored, ...normalizedAvatar, ...presencePatch };
   }
   const profile = defaultProfile(uid, email || "unknown@example.invalid", name);
   await reference.create(profile);
@@ -418,21 +438,30 @@ async function issueSession(res, idToken, decoded = undefined) {
   return verifiedToken;
 }
 
+/* 같은 쿠키는 60초 동안 Identity Platform 에 다시 묻지 않습니다(session-cache.mjs). */
+const sessionVerifications = createSessionVerificationCache({ ttlMs: 60_000, maxEntries: 5_000 });
+
 async function sessionUser(req) {
   const cookie = parseCookies(req.headers.cookie || "")[COOKIE_NAME];
   if (!cookie) throw new ApiError(401, "AUTH_REQUIRED", "로그인이 필요합니다.");
   let decoded;
   try {
-    decoded = await auth.verifySessionCookie(cookie, true);
-  } catch {
-    throw new ApiError(401, "INVALID_SESSION", "세션이 만료되었습니다. 다시 로그인해 주세요.");
+    // checkRevoked=true 가 사용자 기록을 읽어 폐기된 세션과 비활성화된 계정을 거절합니다.
+    // 예전에는 그 뒤에 auth.getUser 로 같은 기록을 한 번 더 읽었습니다.
+    decoded = await sessionVerifications.verify(cookie, (value) => auth.verifySessionCookie(value, true));
+  } catch (error) {
+    if (isSessionRejection(error)) {
+      throw new ApiError(401, "INVALID_SESSION", "세션이 만료되었습니다. 다시 로그인해 주세요.");
+    }
+    // 쿠키가 아니라 확인하는 쪽(네트워크·Identity Platform)의 장애입니다. 401 로 답하면 앱이 로그아웃시킵니다.
+    console.error(JSON.stringify({ requestId: req.requestId, code: "AUTH_UNAVAILABLE", cause: error?.code || "unknown", message: error?.message }));
+    throw new ApiError(503, "AUTH_UNAVAILABLE", "로그인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
   }
   assertEnabledSignInProvider(decoded);
-  const userRecord = await auth.getUser(decoded.uid);
-  if (userRecord.disabled) throw new ApiError(403, "ACCOUNT_DISABLED", "비활성화된 계정입니다.");
-  const profile = await ensureProfile(decoded.uid, userRecord.email, userRecord.displayName);
+  // 이메일·이름은 세션 쿠키에 담긴 값(로그인 때의 ID 토큰)을 씁니다.
+  const profile = await ensureProfile(decoded.uid, decoded.email, decoded.name);
   if (profile.accountStatus !== "active") throw new ApiError(403, "ACCOUNT_RESTRICTED", "사용이 제한된 계정입니다.");
-  return { uid: decoded.uid, email: userRecord.email || "", emailVerified: userRecord.emailVerified, profile };
+  return { uid: decoded.uid, email: decoded.email || "", emailVerified: decoded.email_verified === true, profile };
 }
 
 async function requireUser(req, _res, next) {
@@ -548,7 +577,7 @@ function matchCandidate(candidate, me, preferences, date) {
     candidate.age >= preferences.ageMin &&
     candidate.age <= preferences.ageMax &&
     (!preferences.verifiedOnly || candidate.verified) &&
-    (!preferences.onlineOnly || candidate.status === "online") &&
+    (!preferences.onlineOnly || presenceOf(candidate) === "online") &&
     (preferences.intents.length === 0 || matchedIntents.length > 0);
   let score = 35;
   // 매칭 이유는 화면에 그대로 나오는 문구입니다. 서버가 한국어 문장으로 만들어 보내면
@@ -600,7 +629,7 @@ function matchCandidate(candidate, me, preferences, date) {
   }
   if (matchedIntents.length) score += 6;
   if (candidate.verified) score += 4;
-  if (candidate.status === "online") score += 4;
+  if (presenceOf(candidate) === "online") score += 4;
   score += stableHash(date + ":" + candidate.id) % 5;
   if (!exact) {
     reasons.unshift("일부 조건을 넓혀 찾은 가까운 파트너예요");
@@ -763,19 +792,21 @@ async function directMessageDecisionInTransaction(transaction, senderId, recipie
     db.collection("likes").doc(recipientId + "_" + senderId),
     db.collection("follows").doc(senderId + "_" + recipientId),
     db.collection("follows").doc(recipientId + "_" + senderId),
-    db.collection("dailyMatches").doc(senderId).collection("days").doc(date),
+    // 받는 사람의 오늘의 추천입니다. 보내는 사람 자신의 추천은 조건을 바꿔 몇 번이고 다시
+    // 뽑을 수 있어 매칭의 근거가 되지 못합니다(policy.mjs dmRelationships).
+    db.collection("dailyMatches").doc(recipientId).collection("days").doc(date),
   ];
-  const [policySnapshot, senderLike, recipientLike, senderFollow, recipientFollow, dailyMatch] =
+  const [policySnapshot, senderLike, recipientLike, senderFollow, recipientFollow, recipientDailyMatch] =
     await transaction.getAll(...references);
   const policy = policySnapshot.exists ? { ...DEFAULT_DM_PRIVACY, ...policySnapshot.data() } : DEFAULT_DM_PRIVACY;
-  const systemMatched = Boolean(
-    dailyMatch.exists && dailyMatch.data()?.recommendations?.some((item) => item.partnerId === recipientId),
-  );
-  const relationships = {
-    matched: (senderLike.exists && recipientLike.exists) || systemMatched,
-    follower: senderFollow.exists,
-    mutualFollow: senderFollow.exists && recipientFollow.exists,
-  };
+  const relationships = dmRelationships({
+    senderId,
+    senderLiked: senderLike.exists,
+    recipientLiked: recipientLike.exists,
+    senderFollows: senderFollow.exists,
+    recipientFollows: recipientFollow.exists,
+    recipientRecommendations: recipientDailyMatch.exists ? recipientDailyMatch.data()?.recommendations : [],
+  });
   const route = decideDmRoute(policy, relationships);
   if (route.status !== "denied") {
     return { status: route.status, policy: route.scope, relationships };
@@ -788,6 +819,30 @@ async function profilesByIds(ids) {
   if (!unique.length) return new Map();
   const snapshots = await db.getAll(...unique.map((id) => db.collection("profiles").doc(id)));
   return new Map(snapshots.filter((snapshot) => snapshot.exists).map((snapshot) => [snapshot.id, snapshot.data()]));
+}
+
+/**
+ * 사용자별 하루 쓰기 한도(write-quota.mjs).
+ *
+ * 행동을 기록하는 transaction 안에서 같은 문서를 읽고 고칩니다 — 실제로 쓴 것만 세고,
+ * 동시에 보낸 요청도 한도를 넘지 못합니다. Firestore transaction 은 읽기를 쓰기보다 먼저
+ * 끝내야 하므로, 읽기 단계에서 writeQuotaReference 를 읽어 두고 쓰기 직전에 takeWriteQuota 를 부릅니다.
+ */
+function writeQuotaReference(uid) {
+  return db.collection("writeQuotas").doc(uid);
+}
+
+function takeWriteQuota(transaction, quotaSnapshot, action) {
+  const day = todayInSeoul();
+  const quota = nextWriteQuota(quotaSnapshot.exists ? quotaSnapshot.data() : null, action, day);
+  if (!quota.allowed) {
+    throw new ApiError(429, "RATE_LIMITED", writeQuotaMessage(action), {
+      action,
+      limit: quota.limit,
+      resetsAt: nextRefreshAt(day),
+    });
+  }
+  transaction.set(quotaSnapshot.ref, { ...quota.next, updatedAt: nowIso() });
 }
 
 function notificationItems(recipientId) {
@@ -820,10 +875,15 @@ async function unreadNotificationCount(uid) {
   return snapshot.docs.filter((document) => !blocked.has(document.data().actorId)).length;
 }
 
-async function conversationView(conversation, uid, includeMessages = false) {
+async function conversationView(conversation, uid, includeMessages = false, prefetchedProfiles = null) {
   const partnerId = conversation.memberIds.find((id) => id !== uid);
-  const partnerSnapshot = partnerId ? await db.collection("profiles").doc(partnerId).get() : null;
-  const partner = partnerSnapshot?.exists ? profileForOthers(partnerSnapshot.data()) : null;
+  // 목록은 상대 프로필을 한 번에 읽어(profilesByIds) 넘깁니다. 대화 하나를 볼 때만 여기서 읽습니다.
+  const partnerProfile = prefetchedProfiles
+    ? prefetchedProfiles.get(partnerId)
+    : partnerId
+      ? (await db.collection("profiles").doc(partnerId).get()).data()
+      : undefined;
+  const partner = partnerProfile ? profileForOthers(partnerProfile) : null;
   let messages;
   if (includeMessages) {
     const snapshot = await db
@@ -840,6 +900,10 @@ async function conversationView(conversation, uid, includeMessages = false) {
     partner,
     preview: conversation.lastMessage || "새 대화를 시작해 보세요.",
     updatedAt: conversation.updatedAt,
+    /** 마지막 메시지를 보낸 사람. 상대가 마지막이면 "내 차례"입니다. */
+    lastSenderId: conversation.lastSenderId || null,
+    /** 상대가 어디까지 읽었는지. 새 메시지만 받아 와도 내 말풍선의 "읽음"을 고칠 수 있습니다. */
+    partnerReadAt: (partnerId && conversation.readAt?.[partnerId]) || null,
     /** 내가 아직 안 읽은 메시지 수. 보낼 때 올리고 읽을 때 0 으로 돌립니다. */
     unreadCount: conversation.unread?.[uid] || 0,
     /* 요청함에서 받는 사람이 먼저 알아보라고 붙이는 표시입니다. 막지는 않습니다. */
@@ -1149,12 +1213,8 @@ app.get("/api/languages", async (req, res) => success(res, req, LANGUAGES));
 app.get("/api/countries", async (req, res) => success(res, req, COUNTRIES));
 
 app.get("/api/bootstrap", requireUser, async (req, res) => {
-  await db.collection("profiles").doc(req.auth.uid).update({
-    status: "online",
-    lastActiveAt: nowIso(),
-    updatedAt: nowIso(),
-  });
-  const profile = { ...req.auth.profile, status: "online", lastActiveAt: nowIso() };
+  await db.collection("profiles").doc(req.auth.uid).update({ lastActiveAt: nowIso() });
+  const profile = { ...req.auth.profile, lastActiveAt: nowIso() };
   const notifications = await unreadNotificationCount(req.auth.uid);
   return success(res, req, {
     currentUser: publicProfile(profile),
@@ -1210,7 +1270,7 @@ app.get("/api/notifications", requireUser, async (req, res) => {
 });
 
 app.patch("/api/notifications/:notificationId/read", requireUser, async (req, res) => {
-  const notificationId = safeString(req.params.notificationId, "notificationId", { min: 40, max: 40 });
+  const notificationId = docId(req.params.notificationId, "notificationId", { min: 40, max: 40 });
   const expectedEventId = safeString(req.body?.eventId, "eventId", { min: 1, max: 128 });
   const reference = notificationItems(req.auth.uid).doc(notificationId);
   const result = await db.runTransaction(async (transaction) => {
@@ -1363,6 +1423,18 @@ app.patch("/api/profile", requireUser, async (req, res) => {
   if (!merged.nativeLanguages?.length || !merged.learningLanguages?.length) {
     throw new ApiError(422, "VALIDATION_ERROR", "모국어와 학습 언어를 한 개 이상 선택해 주세요.");
   }
+  // 첫 설정 완료. 새 계정에는 나이·국가·언어 기본값이 들어 있어서, 사용자가 직접 고른 값이
+  // 이 요청에 함께 와야 마친 것으로 봅니다(기본값 그대로 추천에 나가지 않게).
+  if (body.completeOnboarding !== undefined) {
+    if (body.completeOnboarding !== true) {
+      throw new ApiError(422, "VALIDATION_ERROR", "첫 설정 완료 값을 확인해 주세요.", { field: "completeOnboarding" });
+    }
+    const missing = ["age", "countryCode", "nativeLanguages", "learningLanguages"].filter((field) => body[field] === undefined);
+    if (missing.length) {
+      throw new ApiError(422, "VALIDATION_ERROR", "나이, 국가, 모국어와 배울 언어를 골라 주세요.", { field: missing[0] });
+    }
+    if (current.onboardedAt === null) patch.onboardedAt = nowIso();
+  }
   patch.updatedAt = nowIso();
   await db.collection("profiles").doc(req.auth.uid).update(patch);
   return success(res, req, { ...publicProfile({ ...current, ...patch }), email: req.auth.email, emailVerified: req.auth.emailVerified });
@@ -1376,7 +1448,7 @@ app.get("/api/partners", requireUser, async (req, res) => {
   const query = String(req.query.q || "").trim().toLocaleLowerCase();
   const partners = snapshot.docs
     .map((document) => document.data())
-    .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
+    .filter((profile) => profile.id !== req.auth.uid && isDiscoverable(profile))
     .filter((profile) => !blocked.has(profile.id))
     .filter((profile) => {
       if (!query) return true;
@@ -1425,7 +1497,7 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
       blockedBothWays(req.auth.uid),
     ]);
     const recommendations = (stored.recommendations || [])
-      .filter((item) => profileMap.get(item.partnerId)?.accountStatus === "active")
+      .filter((item) => isDiscoverable(profileMap.get(item.partnerId)))
       .filter((item) => !blockedNow.has(item.partnerId))
       .map((item) => ({ ...item, partner: profileForOthers(profileMap.get(item.partnerId)) }));
     return success(res, req, {
@@ -1443,7 +1515,7 @@ app.get("/api/matching/daily", requireUser, async (req, res) => {
   ]);
   const candidates = snapshot.docs
     .map((document) => document.data())
-    .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
+    .filter((profile) => profile.id !== req.auth.uid && isDiscoverable(profile))
     .filter((profile) => !blocked.has(profile.id))
     .map((profile) => matchCandidate(profile, req.auth.profile, preferences, date))
     .filter((item) => item.partner.nativeLanguages.some((code) => preferences.targetLanguages.includes(code)))
@@ -1477,7 +1549,7 @@ app.get("/api/blocks", requireUser, async (req, res) => {
 });
 
 app.post("/api/partners/:partnerId/block", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.params.partnerId, "partnerId");
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인을 차단할 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists) throw new ApiError(404, "PARTNER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
@@ -1505,7 +1577,7 @@ app.post("/api/partners/:partnerId/block", requireUser, async (req, res) => {
 });
 
 app.delete("/api/partners/:partnerId/block", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.params.partnerId, "partnerId");
   const reference = db.collection("blocks").doc(blockId(req.auth.uid, partnerId));
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
@@ -1519,7 +1591,7 @@ app.delete("/api/partners/:partnerId/block", requireUser, async (req, res) => {
 });
 
 app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.params.partnerId, "partnerId");
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인에게 마음을 보낼 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
@@ -1533,14 +1605,16 @@ app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
   const reference = db.collection("likes").doc(req.auth.uid + "_" + partnerId);
   const reverseReference = db.collection("likes").doc(partnerId + "_" + req.auth.uid);
   const result = await db.runTransaction(async (transaction) => {
-    const [existing, reverse] = await Promise.all([
+    const [existing, reverse, quotaSnapshot] = await Promise.all([
       transaction.get(reference),
       transaction.get(reverseReference),
+      transaction.get(writeQuotaReference(req.auth.uid)),
     ]);
     await assertNotBlockedInTransaction(transaction, req.auth.uid, [partnerId], {
       message: "차단된 상대에게는 마음을 보낼 수 없습니다.",
     });
     if (!existing.exists) {
+      takeWriteQuota(transaction, quotaSnapshot, "reactions");
       transaction.create(reference, {
         fromUserId: req.auth.uid,
         toUserId: partnerId,
@@ -1566,7 +1640,7 @@ app.post("/api/partners/:partnerId/like", requireUser, async (req, res) => {
 });
 
 app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.params.partnerId, "partnerId");
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인을 팔로우할 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
@@ -1582,12 +1656,16 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
     ? null
     : optionalBoolean(req.body.following, "following", false);
   const following = await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(reference);
+    const [snapshot, quotaSnapshot] = await Promise.all([
+      transaction.get(reference),
+      transaction.get(writeQuotaReference(req.auth.uid)),
+    ]);
     await assertNotBlockedInTransaction(transaction, req.auth.uid, [partnerId], {
       message: "차단된 상대를 팔로우할 수 없습니다.",
     });
     const next = requestedFollowing ?? !snapshot.exists;
     if (next === snapshot.exists) return next;
+    takeWriteQuota(transaction, quotaSnapshot, "follows");
     if (next) {
       transaction.create(reference, { fromUserId: req.auth.uid, toUserId: partnerId, createdAt: timestamp });
       putNotification(transaction, {
@@ -1618,22 +1696,53 @@ app.post("/api/partners/:partnerId/follow", requireUser, async (req, res) => {
  * 차단한 사이는 서로 세지 않습니다 — 화면에서 지워진 사람이 숫자로 남으면 어색합니다.
  */
 app.get("/api/partners/:partnerId/follow-counts", requireUser, async (req, res) => {
-  const partnerId = safeString(req.params.partnerId, "partnerId", { min: 4, max: 128 });
-  const [followingSnapshot, followerSnapshot, postSnapshot, blocked, partnerIds] = await Promise.all([
-    db.collection("follows").where("fromUserId", "==", partnerId).limit(500).get(),
-    db.collection("follows").where("toUserId", "==", partnerId).limit(500).get(),
-    db.collection("posts").where("authorId", "==", partnerId).limit(500).get(),
+  const partnerId = docId(req.params.partnerId, "partnerId");
+  const follows = db.collection("follows");
+  const partnerPosts = db.collection("posts").where("authorId", "==", partnerId);
+  /* 문서를 최대 500개씩 읽어 세던 것을 count() 집계로 바꿨습니다. 색인 1,000건당 읽기 1회로
+     과금되고, 500에서 잘리지도 않습니다. */
+  const [followingCount, followerCount, blocked, partnerIds] = await Promise.all([
+    follows.where("fromUserId", "==", partnerId).count().get(),
+    follows.where("toUserId", "==", partnerId).count().get(),
     blockedBothWays(req.auth.uid),
     acceptedPartnerIds(req.auth.uid),
   ]);
-  const following = followingSnapshot.docs.map((d) => d.data().toUserId).filter((id) => !blocked.has(id));
-  const followers = followerSnapshot.docs.map((d) => d.data().fromUserId).filter((id) => !blocked.has(id));
+  // 나와 차단 관계인 사람과의 팔로우는 빼고 셉니다. 팔로우 문서 id 가 "보낸사람_받는사람" 이라
+  // 그 사람들 몫만 직접 읽어 빼면 됩니다(보통 0~몇 건).
+  const blockedIds = [...blocked].filter((id) => id !== partnerId && isDocumentId(id, { min: 1 }));
   // 글 수는 "내가 볼 수 있는 글"만 셉니다. 파트너 공개 글까지 세면 열 수 없는
   // 글이 숫자에만 남아 목록과 어긋납니다.
-  const posts = postSnapshot.docs
-    .map((document) => document.data())
-    .filter((post) => post.visibility === "public" || post.authorId === req.auth.uid || partnerIds.has(post.authorId));
-  return success(res, req, { following: following.length, followers: followers.length, posts: posts.length });
+  const seesEveryPost = partnerId === req.auth.uid || partnerIds.has(partnerId);
+  const [postCount, blockedEdges] = await Promise.all([
+    (seesEveryPost ? partnerPosts : partnerPosts.where("visibility", "==", "public")).count().get(),
+    blockedIds.length
+      ? db.getAll(...blockedIds.flatMap((id) => [follows.doc(partnerId + "_" + id), follows.doc(id + "_" + partnerId)]))
+      : Promise.resolve([]),
+  ]);
+  const hiddenFollowing = blockedEdges.filter((snapshot, index) => index % 2 === 0 && snapshot.exists).length;
+  const hiddenFollowers = blockedEdges.filter((snapshot, index) => index % 2 === 1 && snapshot.exists).length;
+  return success(res, req, {
+    following: Math.max(0, followingCount.data().count - hiddenFollowing),
+    followers: Math.max(0, followerCount.data().count - hiddenFollowers),
+    posts: postCount.data().count,
+  });
+});
+
+/**
+ * 한 사람의 프로필. 앱이 한 사람을 보여주려고 명부(/api/partners) 100명을 받아 뒤지지 않게 합니다.
+ * 없는 사람, 활동 중이 아닌 사람, 어느 쪽으로든 차단한 사이는 모두 같은 404 입니다 — 차단 여부를
+ * 드러내지 않습니다. 경로 조각이 하나라서 /api/partners/:partnerId/... 경로와 겹치지 않습니다.
+ */
+app.get("/api/partners/:partnerId", requireUser, async (req, res) => {
+  const partnerId = docId(req.params.partnerId, "partnerId");
+  const [snapshot, blocked] = await Promise.all([
+    db.collection("profiles").doc(partnerId).get(),
+    isBlockedBetween(req.auth.uid, partnerId),
+  ]);
+  if (!snapshot.exists || snapshot.data()?.accountStatus !== "active" || blocked) {
+    throw new ApiError(404, "PARTNER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
+  }
+  return success(res, req, profileForOthers(snapshot.data()));
 });
 
 /**
@@ -1716,15 +1825,20 @@ app.post("/api/posts", requireUser, async (req, res) => {
     tags,
     visibility,
     requestCorrection: optionalBoolean(req.body?.requestCorrection, "requestCorrection", false),
-    imageUrl: optionalString(req.body?.imageUrl, "imageUrl", 520000) || "",
-    audioUrl: optionalString(req.body?.audioUrl, "audioUrl", 520000) || "",
+    // 기기에서 만든 데이터 URI 만 받습니다 — 외부 주소는 글을 본 사람의 IP 를 그 서버에 남깁니다.
+    imageUrl: mediaDataUri(req.body?.imageUrl, "imageUrl", "image"),
+    audioUrl: mediaDataUri(req.body?.audioUrl, "audioUrl", "audio"),
     likes: 0,
     comments: 0,
     corrections: 0,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
-  await db.collection("posts").doc(post.id).create(post);
+  await db.runTransaction(async (transaction) => {
+    const quotaSnapshot = await transaction.get(writeQuotaReference(req.auth.uid));
+    takeWriteQuota(transaction, quotaSnapshot, "posts");
+    transaction.create(db.collection("posts").doc(post.id), post);
+  });
   return success(res, req, post, 201);
 });
 
@@ -1734,7 +1848,7 @@ app.post("/api/posts", requireUser, async (req, res) => {
  * 좋아요 하위 컬렉션도 함께 지워 고아 문서를 남기지 않습니다.
  */
 app.delete("/api/posts/:postId", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   const postReference = db.collection("posts").doc(postId);
   const snapshot = await postReference.get();
   if (!snapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
@@ -1763,7 +1877,7 @@ async function readablePost(postId, uid) {
 }
 
 app.get("/api/posts/:postId", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   const post = await readablePost(postId, req.auth.uid);
   const [reaction, authorSnapshot] = await Promise.all([
     db.collection("posts").doc(postId).collection("reactions").doc(req.auth.uid).get(),
@@ -1785,7 +1899,7 @@ app.get("/api/posts/:postId", requireUser, async (req, res) => {
  * 정렬하는 일을 매번 해야 합니다.
  */
 app.get("/api/posts/:postId/replies", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   await readablePost(postId, req.auth.uid);
   const [snapshot, blocked] = await Promise.all([
     db.collection("posts").doc(postId).collection("replies").orderBy("createdAt", "asc").limit(200).get(),
@@ -1815,13 +1929,13 @@ app.get("/api/posts/:postId/replies", requireUser, async (req, res) => {
 });
 
 app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   await readablePost(postId, req.auth.uid);
   const text = safeString(req.body?.text, "text", { min: 1, max: 1000 });
   const kind = req.body?.kind === "correction" ? "correction" : "reply";
   // 교정은 어느 문장을 고쳤는지 있어야 의미가 있습니다.
   const original = kind === "correction" ? safeString(req.body?.original, "original", { min: 1, max: 1000 }) : "";
-  const parentId = optionalString(req.body?.parentId, "parentId", 128) || "";
+  const parentId = optionalDocId(req.body?.parentId, "parentId");
   const timestamp = nowIso();
   const postNotificationEventId = crypto.randomUUID();
   const parentNotificationEventId = crypto.randomUUID();
@@ -1839,9 +1953,10 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
   const postReference = db.collection("posts").doc(postId);
   const parentReference = parentId ? postReference.collection("replies").doc(parentId) : null;
   await db.runTransaction(async (transaction) => {
-    const [snapshot, parentSnapshot] = await Promise.all([
+    const [snapshot, parentSnapshot, quotaSnapshot] = await Promise.all([
       transaction.get(postReference),
       parentReference ? transaction.get(parentReference) : Promise.resolve(null),
+      transaction.get(writeQuotaReference(req.auth.uid)),
     ]);
     if (!snapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
     if (parentReference && !parentSnapshot?.exists) {
@@ -1854,6 +1969,7 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
       code: "POST_NOT_FOUND",
       message: "게시물을 찾을 수 없습니다.",
     });
+    takeWriteQuota(transaction, quotaSnapshot, "replies");
     transaction.create(postReference.collection("replies").doc(reply.id), reply);
     transaction.update(postReference, {
       comments: kind === "reply" ? (current.comments || 0) + 1 : current.comments || 0,
@@ -2005,7 +2121,8 @@ app.get("/api/saved-phrases", requireUser, async (req, res) => {
 
 app.post("/api/saved-phrases", requireUser, async (req, res) => {
   const phrase = safeString(req.body?.phrase, "phrase", { min: 1, max: 500 });
-  const id = optionalString(req.body?.id, "id", 128) || "saved-" + crypto.randomUUID();
+  // 예전처럼 짧은 ID 도 받습니다(아래 DELETE 와 같은 규칙).
+  const id = optionalDocId(req.body?.id, "id", { min: 1 }) || "saved-" + crypto.randomUUID();
   const item = {
     id,
     phrase,
@@ -2019,7 +2136,7 @@ app.post("/api/saved-phrases", requireUser, async (req, res) => {
 });
 
 app.delete("/api/saved-phrases/:itemId", requireUser, async (req, res) => {
-  const itemId = safeString(req.params.itemId, "itemId", { min: 1, max: 128 });
+  const itemId = docId(req.params.itemId, "itemId", { min: 1 });
   const reference = db.collection("savedPhrases").doc(req.auth.uid).collection("items").doc(itemId);
   const snapshot = await reference.get();
   if (!snapshot.exists) throw new ApiError(404, "SAVED_PHRASE_NOT_FOUND", "저장한 표현을 찾을 수 없습니다.");
@@ -2028,16 +2145,17 @@ app.delete("/api/saved-phrases/:itemId", requireUser, async (req, res) => {
 });
 
 app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
-  const postId = safeString(req.params.postId, "postId", { min: 4, max: 128 });
+  const postId = docId(req.params.postId, "postId");
   await readablePost(postId, req.auth.uid);
   const postReference = db.collection("posts").doc(postId);
   const reactionReference = postReference.collection("reactions").doc(req.auth.uid);
   const requestedLiked = req.body?.liked === undefined ? null : optionalBoolean(req.body.liked, "liked", false);
   const notificationEventId = crypto.randomUUID();
   const result = await db.runTransaction(async (transaction) => {
-    const [postSnapshot, reactionSnapshot] = await Promise.all([
+    const [postSnapshot, reactionSnapshot, quotaSnapshot] = await Promise.all([
       transaction.get(postReference),
       transaction.get(reactionReference),
+      transaction.get(writeQuotaReference(req.auth.uid)),
     ]);
     if (!postSnapshot.exists) throw new ApiError(404, "POST_NOT_FOUND", "게시물을 찾을 수 없습니다.");
     const post = postSnapshot.data();
@@ -2050,6 +2168,7 @@ app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
     if (liked === reactionSnapshot.exists) {
       return { liked, likes: Math.max(0, Number(post.likes || 0)) };
     }
+    takeWriteQuota(transaction, quotaSnapshot, "reactions");
     const timestamp = nowIso();
     if (liked) {
       transaction.create(reactionReference, { userId: req.auth.uid, createdAt: timestamp });
@@ -2079,7 +2198,7 @@ app.post("/api/posts/:postId/like", requireUser, async (req, res) => {
 });
 
 app.post("/api/conversations", requireUser, async (req, res) => {
-  const partnerId = safeString(req.body?.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.body?.partnerId, "partnerId");
   if (partnerId === req.auth.uid) throw new ApiError(422, "INVALID_PARTNER", "본인과 대화할 수 없습니다.");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
@@ -2115,6 +2234,23 @@ app.post("/api/conversations", requireUser, async (req, res) => {
     // 정책·관계 판정도 이 transaction의 읽기 단계에 둡니다. 아래 create/update보다
     // 먼저 끝나므로 Firestore의 read-before-write 규칙도 지킵니다.
     const decision = await directMessageDecisionInTransaction(transaction, req.auth.uid, partnerId);
+    if (!snapshot.exists && decision.status === "pending") {
+      // 새 요청만 제한합니다: 거절당한 뒤 7일, 하루 20개. 바로 열리는 대화는 세지 않습니다.
+      const [cooldownSnapshot, quotaSnapshot] = await transaction.getAll(
+        db.collection("dmRequestCooldowns").doc(req.auth.uid + "_" + partnerId),
+        writeQuotaReference(req.auth.uid),
+      );
+      const cooldownUntil = requestCooldownUntil(cooldownSnapshot.exists ? cooldownSnapshot.data() : null);
+      if (cooldownUntil) {
+        throw new ApiError(
+          429,
+          "MESSAGE_REQUEST_COOLDOWN",
+          "상대방이 메시지 요청을 거절해 7일 동안 다시 요청할 수 없습니다.",
+          { retryAt: new Date(cooldownUntil).toISOString() },
+        );
+      }
+      takeWriteQuota(transaction, quotaSnapshot, "messageRequests");
+    }
     if (!snapshot.exists) {
       transaction.create(reference, {
         id,
@@ -2167,12 +2303,18 @@ app.get("/api/conversations", requireUser, async (req, res) => {
       return status === "accepted" || (status === "pending" && conversation.requestSenderId === req.auth.uid);
     })
     .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
-  const views = await Promise.all(conversations.map((conversation) => conversationView(conversation, req.auth.uid, false)));
+  // 상대 프로필은 대화마다 따로 읽지 않고 한 번에(db.getAll) 읽습니다.
+  const partnerProfiles = await profilesByIds(
+    conversations.map((conversation) => (conversation.memberIds || []).find((memberId) => memberId !== req.auth.uid)),
+  );
+  const views = await Promise.all(
+    conversations.map((conversation) => conversationView(conversation, req.auth.uid, false, partnerProfiles)),
+  );
   return success(res, req, views, 200, { pagination: { total: views.length, nextCursor: null } });
 });
 
 app.post("/api/conversations/:conversationId/accept", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
   const reference = db.collection("conversations").doc(id);
   const notificationEventId = crypto.randomUUID();
   const conversation = await db.runTransaction(async (transaction) => {
@@ -2216,7 +2358,7 @@ app.post("/api/conversations/:conversationId/accept", requireUser, async (req, r
 });
 
 app.delete("/api/conversations/:conversationId/request", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
   const reference = db.collection("conversations").doc(id);
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
@@ -2254,12 +2396,21 @@ app.delete("/api/conversations/:conversationId/request", requireUser, async (req
       sourceId: id,
     });
     transaction.delete(reference);
+    // 거절한 뒤 같은 사람이 곧바로 새 요청을 보내지 못하게 7일 동안 기억합니다(policy.mjs).
+    const declinedAt = nowIso();
+    transaction.set(db.collection("dmRequestCooldowns").doc(senderId + "_" + req.auth.uid), {
+      senderId,
+      recipientId: req.auth.uid,
+      declinedAt,
+      // Firestore TTL 정책이 지울 수 있는 Timestamp 입니다. 판정은 declinedAt 으로 합니다.
+      expireAt: new Date(Date.parse(declinedAt) + DM_REQUEST_COOLDOWN_MS),
+    });
   });
   return success(res, req, { id, dismissed: true });
 });
 
 app.delete("/api/conversations/:conversationId", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
   const reference = db.collection("conversations").doc(id);
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
@@ -2286,7 +2437,7 @@ app.delete("/api/conversations/:conversationId", requireUser, async (req, res) =
 });
 
 app.patch("/api/conversations/:conversationId/mute", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
   if (typeof req.body?.muted !== "boolean") {
     throw new ApiError(422, "VALIDATION_ERROR", "알림 설정 값을 확인해 주세요.", { field: "muted" });
   }
@@ -2305,7 +2456,10 @@ app.patch("/api/conversations/:conversationId/mute", requireUser, async (req, re
 });
 
 app.get("/api/conversations/:conversationId/messages", requireUser, async (req, res) => {
-  const id = safeString(req.params.conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(req.params.conversationId, "conversationId");
+  /* 폴링은 ?after=<마지막으로 받은 sentAt> 을 붙여 그 뒤의 메시지만 받습니다(오래된 것부터 200개).
+     없으면 예전처럼 최근 200개입니다. 권한 확인과 읽음 처리, 응답 모양은 같습니다. */
+  const after = req.query.after === undefined ? null : isoTimestamp(req.query.after, "after");
   const conversationReference = db.collection("conversations").doc(id);
   /* 큰 media payload를 transaction에 넣지 않습니다. 먼저 권한을 빠르게 확인한 뒤
      메시지와 당시의 알림 event identity를 일반 조회로 고정합니다. */
@@ -2321,7 +2475,10 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
     throw new ApiError(403, "CONVERSATION_BLOCKED", "차단된 상대와는 대화할 수 없습니다.");
   }
 
-  const messagesQuery = conversationReference.collection("messages").orderBy("sentAt", "desc").limit(200);
+  const messagesCollection = conversationReference.collection("messages");
+  const messagesQuery = after
+    ? messagesCollection.where("sentAt", ">", after).orderBy("sentAt", "asc").limit(200)
+    : messagesCollection.orderBy("sentAt", "desc").limit(200);
   const notificationsQuery = notificationItems(req.auth.uid)
     .where("conversationId", "==", id)
     .where("readAt", "==", null)
@@ -2330,7 +2487,8 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
     messagesQuery.get(),
     notificationsQuery.get(),
   ]);
-  const messages = messageSnapshot.docs.map((document) => document.data()).reverse();
+  const rows = messageSnapshot.docs.map((document) => document.data());
+  const messages = after ? rows : rows.reverse();
   const latestMessageAt = messages.length ? String(messages[messages.length - 1].sentAt || "") : "";
   const visibleMessageIds = new Set(messages.map((message) => message.id).filter(Boolean));
   const notificationCandidates = notificationSnapshot.docs
@@ -2390,7 +2548,7 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
 });
 
 async function createMessage(req, res, conversationId) {
-  const id = safeString(conversationId, "conversationId", { min: 4, max: 128 });
+  const id = docId(conversationId, "conversationId");
   const type = req.body?.type ?? "text";
   if (!["text", "voice", "image"].includes(type)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 메시지 형식입니다.", { field: "type" });
@@ -2401,8 +2559,9 @@ async function createMessage(req, res, conversationId) {
    * 파일 저장소(버킷)가 아직 없어서입니다. 화면이 보내기 전에 사진을 줄이고
    * 압축하므로 보통 100~200KB 이고, Firestore 문서 한도(1MB)를 넘지 않게
    * 여기서도 한 번 더 막습니다. 버킷이 생기면 이 자리에 그 주소가 들어오면 됩니다.
+   * 외부 주소는 받지 않습니다 — 받는 사람의 IP 와 읽은 시각이 그 서버에 남습니다.
    */
-  const media = type === "text" ? "" : optionalString(req.body?.media, "media", 520000) || "";
+  const media = type === "text" ? "" : mediaDataUri(req.body?.media, "media", type === "image" ? "image" : "audio");
   if (type !== "text" && !media) {
     throw new ApiError(422, "VALIDATION_ERROR", "보낼 파일이 없습니다.", { field: "media" });
   }
@@ -2411,10 +2570,9 @@ async function createMessage(req, res, conversationId) {
     type === "text"
       ? safeString(req.body?.text, "text", { min: 1, max: 4000 })
       : optionalString(req.body?.text, "text", 200) || (type === "image" ? "사진" : "음성 메시지");
-  const clientMessageId =
-    typeof req.body?.clientMessageId === "string" && /^[a-zA-Z0-9_-]{8,128}$/.test(req.body.clientMessageId)
-      ? req.body.clientMessageId
-      : "message-" + crypto.randomUUID();
+  const clientMessageId = isDocumentId(req.body?.clientMessageId, { min: 8 })
+    ? req.body.clientMessageId
+    : "message-" + crypto.randomUUID();
   const conversationReference = db.collection("conversations").doc(id);
   const messageReference = conversationReference.collection("messages").doc(clientMessageId);
   const result = await db.runTransaction(async (transaction) => {
@@ -2580,7 +2738,10 @@ app.get("/api/admin/reports", requireUser, requireAdmin, async (req, res) => {
     .map((document) => document.data())
     .filter((row) => (status === "all" ? true : status === "open" ? row.status === "received" : row.status !== "received"))
     .sort((left, right) => String(right.submittedAt).localeCompare(String(left.submittedAt)));
-  const profiles = await profilesByIds([...rows.map((r) => r.reporterId), ...rows.map((r) => r.targetId)]);
+  // 예전 신고의 targetId 는 검증 없이 저장됐습니다. "a/b" 하나로 목록 전체가 500 이 되지 않게 거릅니다.
+  const profiles = await profilesByIds(
+    [...rows.map((r) => r.reporterId), ...rows.map((r) => r.targetId)].filter((id) => isDocumentId(id, { min: 1 })),
+  );
   const named = (id) => (profiles.get(id) ? { id, name: profiles.get(id).name, handle: profiles.get(id).handle } : { id, name: null, handle: null });
   return success(
     res,
@@ -2603,7 +2764,7 @@ app.get("/api/admin/reports", requireUser, requireAdmin, async (req, res) => {
 
 /** 신고를 닫습니다. 어떻게 판단했는지 한 줄 남겨야 나중에 이유를 알 수 있습니다. */
 app.patch("/api/admin/reports/:reportId", requireUser, requireAdmin, async (req, res) => {
-  const reportId = safeString(req.params.reportId, "reportId", { min: 4, max: 128 });
+  const reportId = docId(req.params.reportId, "reportId");
   const outcome = safeString(req.body?.outcome, "outcome", { min: 2, max: 24 });
   if (!["actioned", "dismissed", "received"].includes(outcome)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 처리 결과입니다.", { field: "outcome" });
@@ -2631,7 +2792,8 @@ app.post("/api/reports", requireUser, async (req, res) => {
   const targetTypes = ["user", "post", "message"];
   const reasons = ["spam", "scam", "harassment", "dating", "sexual_content", "hate", "impersonation", "other"];
   const targetType = safeString(req.body?.targetType, "targetType", { min: 2, max: 32 });
-  const targetId = safeString(req.body?.targetId, "targetId", { min: 2, max: 128 });
+  // 운영자 목록이 이 값으로 프로필을 읽습니다(profilesByIds → .doc()).
+  const targetId = docId(req.body?.targetId, "targetId", { min: 2 });
   const reason = safeString(req.body?.reason, "reason", { min: 2, max: 64 });
   if (!targetTypes.includes(targetType) || !reasons.includes(reason)) {
     throw new ApiError(422, "VALIDATION_ERROR", "신고 대상 또는 사유를 확인해 주세요.");
@@ -2650,7 +2812,11 @@ app.post("/api/reports", requireUser, async (req, res) => {
     nextUpdateBy: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     reporterAccountStatus: "active",
   };
-  await db.collection("reports").doc(report.id).create(report);
+  await db.runTransaction(async (transaction) => {
+    const quotaSnapshot = await transaction.get(writeQuotaReference(req.auth.uid));
+    takeWriteQuota(transaction, quotaSnapshot, "reports");
+    transaction.create(db.collection("reports").doc(report.id), report);
+  });
   return success(res, req, {
     ...report,
     safetyMessage: "신고가 접수되었습니다. 신고자 계정은 신고만으로 제한되지 않습니다.",
@@ -2681,7 +2847,7 @@ app.get("/api/search", requireUser, async (req, res) => {
   ]);
   const partners = profilesSnapshot.docs
     .map((document) => document.data())
-    .filter((profile) => profile.id !== req.auth.uid && profile.accountStatus === "active")
+    .filter((profile) => profile.id !== req.auth.uid && isDiscoverable(profile))
     .filter((profile) => !blocked.has(profile.id))
     .filter((profile) => [profile.name, profile.handle, profile.bio, ...(profile.interests || [])].join(" ").toLocaleLowerCase().includes(query))
     .map(profileForOthers);
@@ -2737,7 +2903,7 @@ app.post("/api/translate", requireUser, async (req, res) => {
 });
 
 app.post("/api/conversation-support", requireUser, async (req, res) => {
-  const partnerId = safeString(req.body?.partnerId, "partnerId", { min: 4, max: 128 });
+  const partnerId = docId(req.body?.partnerId, "partnerId");
   const partnerSnapshot = await db.collection("profiles").doc(partnerId).get();
   if (!partnerSnapshot.exists || partnerSnapshot.data()?.accountStatus !== "active") {
     throw new ApiError(404, "PARTNER_NOT_FOUND", "대화 상대를 찾을 수 없습니다.");

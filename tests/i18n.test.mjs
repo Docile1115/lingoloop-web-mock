@@ -63,13 +63,12 @@ test("번역 키와 사전에 중복 리터럴이 없다", async () => {
 test("지원 언어와 서버 기본값·브라우저 저장 계약이 유지된다", async () => {
   // 번역 규칙은 core.ts(웹·앱 공용), 브라우저 배선은 index.tsx 로 나뉘어 있습니다.
   // 앱이 같은 사전과 같은 "현재 언어"를 쓰려면 이 경계가 유지되어야 합니다.
-  const [core, web, locales, app, production] = await Promise.all([
+  const [core, web, locales, app] = await Promise.all([
     read(join(I18N, "core.ts")),
     read(join(I18N, "index.tsx")),
     // 서버 컴포넌트(layout.tsx 의 generateMetadata)도 써야 해서 "use client" 밖에 둡니다.
     read(join(I18N, "keys-locale.ts")),
     read(join(ROOT, "app/components/LingoLoopApp.tsx")),
-    read(join(ROOT, "app/components/ProductionLingoLoopApp.tsx")),
   ]);
 
   assert.match(locales, /export const LOCALES = \["ko", "en", "ja"\] as const;/);
@@ -84,7 +83,6 @@ test("지원 언어와 서버 기본값·브라우저 저장 계약이 유지된
   // 예전 화면은 로그인 게이트를 거쳐 안쪽 화면을 그립니다.
   assert.match(app, /<I18nProvider>[\s\S]*<AuthGate \/>[\s\S]*<\/I18nProvider>/);
   assert.match(app, /<LingoLoopScreens key=\{me\.id\}/);
-  assert.match(production, /<I18nProvider>[\s\S]*<ProductionLingoLoopScreens \/>[\s\S]*<\/I18nProvider>/);
 });
 
 test("서버 렌더 메타데이터는 문서 언어와 한 벌로 유지된다", async () => {

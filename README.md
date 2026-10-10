@@ -34,7 +34,7 @@ flowchart LR
 | 영역 | 현재 동작 |
 | --- | --- |
 | 로그인 | PC·Android 웹은 Google, iOS 웹은 Apple만 노출하고 Firebase Admin 세션 쿠키로 서버 세션을 유지. 각 소셜 공급자는 운영 자격정보 설정 후 활성화 |
-| 프로필 | 이름, 소개, 모국어, 학습 언어와 전신 캐릭터를 Firestore에 저장·수정. 얼굴·헤어·상의·하의·양말·신발·모자·가방 등 19개 항목을 웹·Expo 앱에서 편집 |
+| 프로필 | 가입 직후 첫 설정(이름·나이·나라·모국어·배울 언어와 단계·목표)을 마쳐야 추천·검색에 노출. 이름, 소개, 모국어, 학습 언어, 나라, 활동 시간, 관심사와 전신 캐릭터를 Firestore에 저장·수정. 얼굴·헤어·상의·하의·양말·신발·모자·가방 등 19개 항목을 웹·Expo 앱에서 편집 |
 | 마이룸 | 가구·소품 16종, 벽지 5종·바닥 4종. 팔로워·팔로잉 집 방문, 즐겨찾기, 공개 범위, 집주인 상태, 화이트보드 방명록·답글·좋아요·번역, 오늘의 질문, 사진 액자 3개, 무료 인사·선물. 웹·Expo 앱이 같은 API 사용 |
 | 알림 | 커뮤니티·대화·팔로우와 방명록·답글·방명록 좋아요·방문 인사를 영속 저장. 웹 알림함, 앱의 친구 집 화면에서 해당 집으로 이동 |
 | 매칭 | 실제 가입자 프로필과 저장된 선호 조건으로 일일 추천 생성·저장 |
@@ -187,10 +187,11 @@ homeQuotas/{uid}
 | `GET` | `/api/auth/me` | 현재 사용자 조회 |
 | `POST` | `/api/auth/logout` | 세션 종료 |
 | `GET` | `/api/bootstrap` | 로그인 후 초기 데이터와 기능 상태 조회 |
-| `GET/PATCH` | `/api/profile` | 내 프로필 조회·수정 |
+| `GET/PATCH` | `/api/profile` | 내 프로필 조회·수정. 새 계정은 `onboardedAt: null` 로 시작하고, `completeOnboarding: true` 와 나이·국가·모국어·배울 언어를 함께 보내면 첫 설정을 마칩니다(그 전에는 추천·검색에 나오지 않음) |
 | `PATCH` | `/api/profile/avatar` | 허용된 파츠 ID로 내 전신 캐릭터 저장·사진 모드 전환. version 2 계약, 기존 version 1 입력 호환 |
 | `PATCH` | `/api/profile/room` | 내 방의 벽지·바닥·가구 배치를 검증하고 저장 (`{ config: { version: 1, wall, floor, items } }`) |
 | `GET` | `/api/partners` | 실제 가입자 기반 파트너 후보 조회 |
+| `GET` | `/api/partners/:partnerId` | 한 사람의 공개 프로필. 없거나 차단 관계면 404 |
 | `GET/POST` | `/api/matching/preferences` | 매칭 희망 조건 조회·저장 |
 | `GET` | `/api/matching/daily` | 오늘의 매칭 스냅샷 조회·생성 |
 | `POST` | `/api/partners/:partnerId/like` | 파트너 관심 표시 |
@@ -200,7 +201,7 @@ homeQuotas/{uid}
 | `GET/POST` | `/api/conversations` | 내 대화 목록 조회·대화방 생성 |
 | `GET` | `/api/conversations?box=requests` | 내 DM 요청함 조회 |
 | `POST` | `/api/conversations/:id/accept` | DM 요청 수락 |
-| `GET/POST` | `/api/conversations/:id/messages` | 메시지 조회·전송 |
+| `GET/POST` | `/api/conversations/:id/messages` | 메시지 조회·전송. `?after=<ISO sentAt>` 는 그 뒤 메시지만 반환. 목록 항목에는 `lastSenderId`·`partnerReadAt` 포함 |
 | `GET/POST` | `/api/dm/privacy` | DM 수신 정책 조회·저장 |
 | `GET` | `/api/dm/sync` | 서버 저장·복원 상태 확인 |
 | `GET/POST` | `/api/posts/{id}/replies` | 답글·교정 |
@@ -215,8 +216,13 @@ homeQuotas/{uid}
 | `GET/POST` | `/api/reports` | 내 신고 내역 조회·신고 접수 |
 | `GET` | `/api/account/verification` | 이메일·전화·신원 인증 상태 조회 |
 | `GET` | `/api/search?q=...` | 사용자·게시물 검색 |
-| `POST` | `/api/translate` | GPT-5 nano 번역(선택 연동) |
-| `POST` | `/api/conversation-support` | GPT-5 nano 대화 지원(선택 연동) |
+| `POST` | `/api/translate` | Gemini 번역(선택 연동) |
+| `POST` | `/api/conversation-support` | Gemini 대화 지원(선택 연동) |
+
+- 세션 확인이 Identity Platform 장애로 실패하면 `401` 대신 `503 AUTH_UNAVAILABLE` 을 돌려줍니다(클라이언트가 로그아웃하지 않도록).
+- 경로·본문의 문서 ID는 `[A-Za-z0-9_-]{4,128}` 만 받습니다(422). 글·메시지 첨부는 기기에서 만든 이미지·음성 data URI 만 받습니다.
+- 쓰기 한도(서울 날짜 기준, 사용자당): 글 30, 답글·교정 200, 좋아요 500, 팔로우 변경 200, 신고 30, 새 메시지 요청 20. 넘으면 `429 RATE_LIMITED`.
+- "매칭만" DM 설정의 매칭은 서로 마음을 보냈거나, 보내는 사람이 받는 사람의 오늘 추천에 있을 때입니다. 거절된 요청은 7일 동안 다시 보낼 수 없습니다(`429 MESSAGE_REQUEST_COOLDOWN`).
 
 ## 로컬 개발
 

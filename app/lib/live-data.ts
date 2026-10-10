@@ -1,6 +1,6 @@
 // 브라우저 배선이 들어 있는 ./i18n 이 아니라 플랫폼 공용 core 를 봅니다 —
 // 이 파일은 앱(React Native)에서도 그대로 씁니다.
-import { msg, t, tx } from "./i18n/core";
+import { currentLocaleSnapshot, msg, t, tx } from "./i18n/core";
 import { normalizeAvatarConfig, normalizeAvatarMode, type AvatarConfig, type AvatarMode } from "./avatar";
 import { normalizeRoom, type RoomConfig } from "./room";
 import type {
@@ -37,18 +37,75 @@ export class ApiError extends Error {
 
 type Envelope<T> = { data: T; error?: { code?: string; message?: string } };
 
+/** 세션이 끝났을 때(401) 화면 맨 바깥(AuthGate)이 로그인 화면으로 돌아가도록 알립니다. */
+export const SESSION_EXPIRED_EVENT = "timotalk:session-expired";
+
+const AI_UNAVAILABLE = msg("AI가 지금 답하지 못했어요. 잠시 후 다시 시도해 주세요.");
+/**
+ * 오류 코드별 문장. 서버 문장은 늘 한국어라 영어·일본어 화면에 그대로 띄울 수 없었고,
+ * 몇몇은 내부 사정("Gemini API 키…")까지 드러냈습니다.
+ */
+const ERROR_MESSAGES: Record<string, string> = {
+  NETWORK_ERROR: msg("인터넷 연결을 확인해 주세요."),
+  AUTH_REQUIRED: msg("다시 로그인해 주세요."),
+  INVALID_SESSION: msg("다시 로그인해 주세요."),
+  RATE_LIMITED: msg("요청이 너무 많아요. 잠시 후 다시 시도해 주세요."),
+  VALIDATION_ERROR: msg("입력한 내용을 확인해 주세요."),
+  PAYLOAD_TOO_LARGE: msg("파일이 너무 커요."),
+  ACCOUNT_RESTRICTED: msg("사용이 제한된 계정이에요."),
+  PARTNER_NOT_FOUND: msg("상대를 찾을 수 없어요."),
+  PARTNER_BLOCKED: msg("차단된 상대와는 이 기능을 쓸 수 없어요."),
+  CONVERSATION_BLOCKED: msg("차단된 상대와는 이 기능을 쓸 수 없어요."),
+  CONVERSATION_NOT_FOUND: msg("대화를 찾을 수 없어요."),
+  POST_NOT_FOUND: msg("글을 찾을 수 없어요."),
+  DM_NOT_ALLOWED: msg("이 사람은 지금 메시지를 받지 않아요."),
+  MESSAGE_REQUEST_PENDING: msg("상대가 메시지 요청을 수락하면 이어서 보낼 수 있어요."),
+  AI_DAILY_LIMIT_REACHED: msg("오늘의 무료 AI 사용량을 모두 썼어요."),
+  AI_SAFETY_BLOCKED: msg("이 내용은 AI가 처리할 수 없어요."),
+  AI_NOT_CONFIGURED: msg("지금은 AI 기능을 쓸 수 없어요."),
+  AI_PROVIDER_UNAVAILABLE: AI_UNAVAILABLE,
+  AI_PROVIDER_RATE_LIMITED: AI_UNAVAILABLE,
+  AI_PROVIDER_ERROR: AI_UNAVAILABLE,
+  AI_MODEL_UNAVAILABLE: AI_UNAVAILABLE,
+  AI_INVALID_RESPONSE: AI_UNAVAILABLE,
+  AI_EMPTY_RESPONSE: AI_UNAVAILABLE,
+  AI_INCOMPLETE_RESPONSE: msg("AI 응답이 완성되지 않았어요. 내용을 줄여 다시 시도해 주세요."),
+};
+/** 서버 문장에 내부 사정이 담기는 코드. 한국어 화면에서도 서버 문장 대신 위 문장을 씁니다. */
+const INTERNAL_CODES = new Set(["AI_NOT_CONFIGURED", "INTERNAL_ERROR", "INVALID_USAGE_STATE", "INVALID_PROXY", "INVALID_ORIGIN", "AI_PROVIDER_ERROR"]);
+
+/**
+ * 화면에 띄울 오류 문장. 한국어 화면에서는 서버 문장이 더 자세하므로 그대로 씁니다
+ * (내부 사정이 담긴 코드는 빼고). 다른 언어에서는 코드별 문장, 모르는 코드는 일반 문장입니다.
+ */
+export function apiErrorMessage(status: number, code: string, serverMessage?: string): string {
+  if (currentLocaleSnapshot() === "ko" && serverMessage && !INTERNAL_CODES.has(code)) return serverMessage;
+  const mapped = ERROR_MESSAGES[code] ?? (status === 429 ? ERROR_MESSAGES.RATE_LIMITED : undefined);
+  return mapped ? tx(mapped) : t("요청을 처리하지 못했어요.");
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    ...init,
-    headers: {
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      ...(init?.headers || {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      credentials: "same-origin",
+      ...init,
+      headers: {
+        ...(init?.body ? { "content-type": "application/json" } : {}),
+        ...(init?.headers || {}),
+      },
+    });
+  } catch {
+    // fetch 자체가 실패했습니다(오프라인 등). 브라우저 영어 문장("Failed to fetch") 대신 알립니다.
+    throw new ApiError(0, "NETWORK_ERROR", apiErrorMessage(0, "NETWORK_ERROR"));
+  }
   const body = (await response.json().catch(() => ({}))) as Envelope<T>;
   if (!response.ok) {
-    throw new ApiError(response.status, body.error?.code || "REQUEST_FAILED", body.error?.message || msg("요청을 처리하지 못했어요."));
+    const code = body.error?.code || "REQUEST_FAILED";
+    if (response.status === 401 && !path.startsWith("/api/auth/") && typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    }
+    throw new ApiError(response.status, code, apiErrorMessage(response.status, code, body.error?.message));
   }
   return body.data;
 }
@@ -78,6 +135,11 @@ export interface ApiProfile {
   roomConfig?: RoomConfig | null;
   /** 남에게 도시를 감출지. 본인 프로필에만 실려 옵니다. */
   hideLocation?: boolean;
+  /**
+   * 첫 설정을 마친 시각. 본인 프로필에만 실려 옵니다. null 이면 아직 첫 설정 전이라
+   * 다른 사람의 추천·검색에 나오지 않습니다. 이 값이 없는 예전 계정은 마친 것으로 봅니다.
+   */
+  onboardedAt?: string | null;
 }
 
 export interface ApiPost {
@@ -144,6 +206,10 @@ export interface ApiConversation {
   isIncomingRequest?: boolean;
   spamSignals?: string[];
   muted?: boolean;
+  /** 마지막 메시지를 보낸 사람. 상대가 마지막이면 내가 답할 차례입니다. */
+  lastSenderId?: string | null;
+  /** 상대가 마지막으로 읽은 메시지 시각. */
+  partnerReadAt?: string | null;
 }
 
 export interface ApiRecommendation {
@@ -187,9 +253,13 @@ const AVAILABILITY_NAMES: Record<string, string> = {
   "weekend-evening": msg("주말 저녁"),
 };
 
+/* 서버의 다섯 단계(LEARNING_LEVELS)를 CEFR 표기로. 예전에는 세 단계만 있어서
+   elementary·upper 를 고른 사람도 모두 A2 로 보였습니다. */
 const LEVEL_NAMES: Record<string, string> = {
-  beginner: "A2",
+  beginner: "A1",
+  elementary: "A2",
   intermediate: "B1",
+  upper: "B2",
   advanced: "C1",
 };
 
@@ -262,7 +332,12 @@ const COUNTRY_ZONES: Record<string, string> = {
   BR: "America/Sao_Paulo",
 };
 
-/** 상대 지역이 나보다 몇 시간 앞/뒤인지. 모르면 0 이고, 화면은 0 이면 감춥니다. */
+/** 그 나라의 현지 시각을 알 수 있는지. 모르면 "현지 시각"을 감춰야 합니다(0 시차로 그리면 내 시각이 나옵니다). */
+export function knowsLocalTime(countryCode?: string): boolean {
+  return Boolean(COUNTRY_ZONES[(countryCode || "").toLocaleUpperCase()]);
+}
+
+/** 상대 지역이 나보다 몇 시간 앞/뒤인지. 모르면 0 입니다 — knowsLocalTime 으로 먼저 확인합니다. */
 export function offsetHoursFor(countryCode?: string): number {
   const zone = COUNTRY_ZONES[(countryCode || "").toLocaleUpperCase()];
   if (!zone) return 0;
@@ -343,7 +418,7 @@ export function toPartner(profile: ApiProfile, score = 0): Partner {
       .map((code) => tx(languageName(code)))
       .join(" · "),
     learning: tx(languageName(learning?.code || "en")),
-    level: LEVEL_NAMES[learning?.level || "beginner"] || "A2",
+    level: LEVEL_NAMES[learning?.level || "beginner"] || "A1",
     interests: profile.interests || [],
     bio: profile.bio || "",
     online: profile.status === "online",
@@ -438,6 +513,9 @@ export function toConversation(conversation: ApiConversation, messages: ChatMess
     preview: conversation.preview,
     time: relativeTime(conversation.updatedAt),
     unread: conversation.unreadCount || 0,
+    // "내 차례" 탭. 예전에는 이 값을 채우지 않아 탭이 늘 비어 있었습니다.
+    myTurn: Boolean(partner?.id) && conversation.lastSenderId === partner?.id,
+    partnerReadAt: conversation.partnerReadAt || undefined,
     muted: Boolean(conversation.muted),
     online: partner?.status === "online",
     messages,
@@ -546,6 +624,7 @@ export function toPostReply(reply: ApiReply): PostReply {
     likes: reply.likes,
     kind: reply.kind,
     original: reply.original || undefined,
+    parentId: reply.parentId || undefined,
   };
 }
 

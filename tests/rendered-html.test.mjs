@@ -204,12 +204,11 @@ test("운영 API는 Identity Platform 세션과 Firestore 영속 경계를 선�
 });
 
 test("Gemini AI는 운영 API와 실제 대화 UI에 연결된다", async () => {
-  const [backend, productionApp, backendDockerfile] = await Promise.all([
+  // 실제로 그려지는 화면(LingoLoopApp)이 AI 경로에 붙어 있는지 봅니다. 예전에는 아무 데서도
+  // 쓰지 않던 ProductionLingoLoopApp 을 검사해, 실제 화면이 끊겨도 통과했습니다.
+  const [backend, app, backendDockerfile] = await Promise.all([
     readFile(new URL("../backend/server.mjs", import.meta.url), "utf8"),
-    readFile(
-      new URL("../app/components/ProductionLingoLoopApp.tsx", import.meta.url),
-      "utf8",
-    ),
+    readFile(new URL("../app/components/LingoLoopApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../backend/Dockerfile", import.meta.url), "utf8"),
   ]);
 
@@ -223,8 +222,7 @@ test("Gemini AI는 운영 API와 실제 대화 UI에 연결된다", async () => 
   assert.match(backend, /AI_TRANSLATION_DAILY_LIMIT/);
   assert.match(backend, /AI_SUPPORT_DAILY_LIMIT/);
   assert.match(backend, /collection\("aiUsage"\)/);
-  assert.match(productionApp, /"\/api\/translate"/);
-  assert.match(productionApp, /"\/api\/conversation-support"/);
-  assert.match(productionApp, /AI 대화 도움/);
+  assert.match(app, /"\/api\/translate"/);
+  assert.match(app, /"\/api\/conversation-support"/);
   assert.doesNotMatch(backend, /api\.openai\.com|OPENAI_API_KEY|gpt-5-nano|handleMockApi|translationFree|mock translation/i);
 });

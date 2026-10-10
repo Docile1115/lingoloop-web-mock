@@ -139,6 +139,8 @@ export type Conversation = {
   unread: number;
   online: boolean;
   myTurn?: boolean;
+  /** 상대가 마지막으로 읽은 메시지 시각. 내 말풍선의 "읽음"을 정합니다. */
+  partnerReadAt?: string;
   typing?: boolean;
   group?: boolean;
   muted?: boolean;
@@ -826,6 +828,8 @@ export type PostReply = {
   original?: string;
   /** 대댓글. 한 단계만 들여씁니다. */
   replies?: PostReply[];
+  /** 대댓글이면 부모 답글 id. */
+  parentId?: string;
   /** 작성자 프로필 사진. */
   photo?: string;
   avatarMode?: AvatarMode;

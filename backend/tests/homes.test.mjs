@@ -30,11 +30,13 @@ function database() {
       docs=docs.slice(0,this.count);return {docs,size:docs.length,empty:!docs.length};
     }
   }
-  let queue=Promise.resolve();
-  return {rows,collection:name=>new Query(name),runTransaction(task){
-    const execute=async()=>{const writes=[];const read=async ref=>{assert.equal(writes.length,0,'Firestore does not allow transaction reads after writes');return ref instanceof Ref?snapshot(ref):ref.get();};
-      const tx={get:read,getAll:(...refs)=>Promise.all(refs.map(read)),set:(ref,value,options)=>writes.push(()=>rows.set(ref.path,options?.merge?{...rows.get(ref.path),...structuredClone(value)}:structuredClone(value))),create:(ref,value)=>{assert.equal(rows.has(ref.path),false);tx.set(ref,value);},update:(ref,value)=>{assert.equal(rows.has(ref.path),true);tx.set(ref,value,{merge:true});},delete:ref=>writes.push(()=>rows.delete(ref.path))};
-      const result=await task(tx);writes.forEach(write=>write());return result;};
+  let queue=Promise.resolve();const transactions=[];
+  // Like firebase-admin, runTransaction takes options; {readOnly:true} transactions may not write.
+  return {rows,transactions,collection:name=>new Query(name),runTransaction(task,options={}){
+    assert.ok(options&&typeof options==='object');transactions.push(options);
+    const execute=async()=>{const writes=[];const write=apply=>{assert.notEqual(options.readOnly,true,'read-only transactions cannot write');writes.push(apply);};const read=async ref=>{assert.equal(writes.length,0,'Firestore does not allow transaction reads after writes');return ref instanceof Ref?snapshot(ref):ref.get();};
+      const tx={get:read,getAll:(...refs)=>Promise.all(refs.map(read)),set:(ref,value,setOptions)=>write(()=>rows.set(ref.path,setOptions?.merge?{...rows.get(ref.path),...structuredClone(value)}:structuredClone(value))),create:(ref,value)=>{assert.equal(rows.has(ref.path),false);tx.set(ref,value);},update:(ref,value)=>{assert.equal(rows.has(ref.path),true);tx.set(ref,value,{merge:true});},delete:ref=>write(()=>rows.delete(ref.path))};
+      const result=await task(tx);writes.forEach(apply=>apply());return result;};
     const result=queue.then(execute);queue=result.catch(()=>{});return result;
   }};
 }
@@ -161,6 +163,20 @@ test('photo scopes protect image content and report evidence, owner-only changes
   assert.equal((await call('/owner/photos/frame','DELETE',undefined,'owner')).status,200);assert.equal((await call('/owner','GET',undefined,'owner')).data.photos.length,0);
   db.rows.set('homes/owner',{uploadDay:new Date(Date.now()+9*3600000).toISOString().slice(0,10),uploadCount:60});
   assert.equal((await call('/owner/photos/frame','PUT',photo,'owner')).status,429);
+});
+test('home reads use read-only transactions; writes keep read-write ones',async t=>{
+  const {db,call}=await fixture(t);
+  const used=async(path,method='GET',body,user='friend')=>{const start=db.transactions.length;assert.equal((await call(path,method,body,user)).status,200,path);const options=db.transactions.slice(start);assert.ok(options.length>0,path);return options;};
+  for(const path of ['/owner','/owner/entries','/directory'])assert.ok((await used(path)).every(options=>options.readOnly===true),path);
+  assert.ok((await used('/directory?kind=followers','GET',undefined,'owner')).every(options=>options.readOnly===true));
+  assert.ok((await used('/owner/entries','POST',entry())).every(options=>options.readOnly!==true));
+  assert.ok((await used('/owner/favorite','PUT',{favorite:true})).every(options=>options.readOnly!==true));
+});
+test('ids that Firestore cannot address as one document are rejected',async t=>{
+  const {call}=await fixture(t);
+  for(const path of ['/a%2Fb','/__name__','/owner/entries?cursor=..','/directory?cursor=.'])assert.equal((await call(path)).status,422,path);
+  assert.equal((await call('/owner/entries/__x__','PATCH',{hearted:true})).status,422);
+  assert.equal((await call('/owner/reports','POST',{kind:'entry',id:'..',reason:'r'})).status,422);
 });
 test('directory excludes blocked/private houses and favorite writes are reversible',async t=>{
   const {db,call}=await fixture(t);assert.equal((await call('/directory')).data.items[0].owner.id,'owner');
