@@ -24,6 +24,7 @@ import { createFixedWindowLimiter, nextFixedWindowBucket } from "./auth-rate-lim
 import { createSessionVerificationCache, isSessionRejection } from "./session-cache.mjs";
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import { registerHomeRoutes } from "./homes.mjs";
+import { registerAccountRoutes } from "./account-deletion.mjs";
 import { isDiscoverable, presenceIsStale, presenceOf } from "./discovery.mjs";
 import { SUPPORT_SCHEMA, normalizeSupport, supportInstructions, supportLanguages } from "./ai-support.mjs";
 import { createValidators, isDocumentId } from "./validate.mjs";
@@ -390,6 +391,17 @@ async function ensureProfile(uid, email, name) {
     }
     return { ...stored, ...normalizedAvatar, ...presencePatch };
   }
+  // 프로필이 없을 때만 지나는 길입니다(계정마다 처음 한 번). 그 사이 계정을 지웠으면 다시 만들지 않습니다 —
+  // 세션 확인은 60초 동안 캐시되므로(session-cache.mjs) 탈퇴 직후 같은 쿠키로 온 요청이 지운 프로필을
+  // 기본값으로 되살릴 수 있습니다(DELETE /api/account).
+  try {
+    await auth.getUser(uid);
+  } catch (error) {
+    if (error?.code === "auth/user-not-found") {
+      throw new ApiError(401, "INVALID_SESSION", "세션이 만료되었습니다. 다시 로그인해 주세요.");
+    }
+    throw error;
+  }
   const profile = defaultProfile(uid, email || "unknown@example.invalid", name);
   await reference.create(profile);
   await db.collection("matchingPreferences").doc(uid).set({
@@ -437,6 +449,16 @@ async function issueSession(res, idToken, decoded = undefined) {
     path: "/",
   });
   return verifiedToken;
+}
+
+/** 세션 쿠키를 지웁니다. 로그아웃과 계정 삭제가 발급 때와 같은 이름·옵션을 써야 브라우저가 실제로 지웁니다. */
+function clearSessionCookie(res) {
+  res.clearCookie(COOKIE_NAME, {
+    httpOnly: true,
+    secure: COOKIE_SECURE,
+    sameSite: "lax",
+    path: "/",
+  });
 }
 
 /* 같은 쿠키는 60초 동안 Identity Platform 에 다시 묻지 않습니다(session-cache.mjs). */
@@ -1200,12 +1222,7 @@ app.get("/api/auth/me", requireUser, async (req, res) => {
 });
 
 app.post("/api/auth/logout", async (req, res) => {
-  res.clearCookie(COOKIE_NAME, {
-    httpOnly: true,
-    secure: COOKIE_SECURE,
-    sameSite: "lax",
-    path: "/",
-  });
+  clearSessionCookie(res);
   return success(res, req, { signedOut: true });
 });
 
@@ -1321,6 +1338,8 @@ app.post("/api/notifications/read-all", requireUser, async (req, res) => {
 });
 
 registerHomeRoutes(app, { db, requireUser, success, ApiError, assertNotBlockedInTransaction, profileForOthers, putNotification, removeNotification, nowIso, todayInSeoul });
+// DELETE /api/account — 계정 삭제(탈퇴). 순서와 보증은 account-deletion.mjs 에 적어 두었습니다.
+registerAccountRoutes(app, { db, auth, requireUser, success, ApiError, clearSessionCookie, nowIso });
 
 app.patch("/api/profile/room", requireUser, async (req, res) => {
   if (!req.body || Object.keys(req.body).length !== 1 || !Object.hasOwn(req.body, "config")) {

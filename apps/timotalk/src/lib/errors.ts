@@ -37,6 +37,10 @@ const MESSAGES: Record<string, string> = {
   AI_INVALID_RESPONSE: AI_UNAVAILABLE,
   AI_EMPTY_RESPONSE: AI_UNAVAILABLE,
   AI_INCOMPLETE_RESPONSE: msg("AI 응답이 완성되지 않았어요. 내용을 줄여 다시 시도해 주세요."),
+  MESSAGE_REQUEST_COOLDOWN: msg("상대가 요청을 지워서 7일 동안 다시 요청할 수 없어요."),
+  BLOCK_CLEANUP_PENDING: msg("차단 정보를 정리하고 있어요. 잠시 후 다시 시도해 주세요."),
+  ACCOUNT_DELETE_FAILED: msg("계정을 지우지 못했어요. 잠시 후 다시 시도해 주세요."),
+  ACCOUNT_DELETE_IN_PROGRESS: msg("계정을 지우는 중이에요. 잠시 후 다시 확인해 주세요."),
 };
 
 const INTERNAL_CODES = new Set(["AI_NOT_CONFIGURED", "INTERNAL_ERROR", "INVALID_USAGE_STATE", "INVALID_PROXY", "INVALID_ORIGIN", "AI_PROVIDER_ERROR"]);

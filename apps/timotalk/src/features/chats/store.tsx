@@ -1,13 +1,15 @@
 /**
- * 대화 목록. 탭 배지·오늘의 "내 차례"·대화 탭·대화방이 같은 값을 봅니다.
+ * 대화 목록과 받은 메시지 요청. 탭 배지·오늘의 "내 차례"·대화 탭·대화방이 같은 값을 봅니다.
  * 따로 받으면 대화방에서 읽어도 다른 화면의 안 읽음 수가 그대로 남습니다.
  *
  * 앱이 앞에 있는 동안 1분마다 다시 받습니다(대화방 안은 따로 더 자주 받습니다).
  * 늦게 도착한 이전 응답은 버립니다.
+ *  - conversations: 대화함(수락된 대화 + 내가 보낸 요청). GET /api/conversations
+ *  - requests: 나에게 온 요청. GET /api/conversations?box=requests
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api, failureText } from "@/lib/api";
-import { t } from "@/lib/i18n";
+import { msg, t, tx } from "@/lib/i18n";
 import type { Conversation } from "@/lib/types";
 import { useAppActive } from "@/lib/useAppActive";
 
@@ -15,13 +17,18 @@ const LIST_REFRESH_MS = 60_000;
 
 type ConversationsValue = {
   conversations: Conversation[];
+  requests: Conversation[];
   loading: boolean;
   error: string;
   reload: () => Promise<void>;
   /** 대화방을 열어 서버가 읽음 처리한 뒤, 목록의 안 읽음 수를 바로 지웁니다. */
   markRead: (id: string) => void;
-  /** 새로 만든 대화나 바뀐 대화를 목록에 바로 반영합니다. */
+  /** 새로 만든 대화나 바뀐 대화(수락·알림 끄기)를 맞는 목록에 바로 반영합니다. */
   upsert: (conversation: Conversation) => void;
+  /** 나가기·거절·차단한 대화를 두 목록에서 뺍니다. */
+  remove: (id: string) => void;
+  /** 대화함이나 요청함에서 id 로 찾습니다. */
+  find: (id: string) => Conversation | undefined;
   unreadTotal: number;
 };
 
@@ -33,18 +40,23 @@ function sortByRecent(rows: Conversation[]): Conversation[] {
 
 export function ConversationsProvider({ enabled, children }: { enabled: boolean; children: React.ReactNode }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [requests, setRequests] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const ticket = useRef(0);
   const active = useAppActive();
 
-  /** 늦게 도착한 이전 응답은 버립니다(가장 나중에 보낸 요청만 씁니다). */
+  /** 늦게 도착한 이전 응답은 버립니다(가장 나중에 보낸 요청만 씁니다). 요청함만 실패하면 이전 값을 둡니다. */
   const load = useCallback(
     (mine: number) =>
-      api<Conversation[]>("/api/conversations")
-        .then((rows) => {
+      Promise.all([
+        api<Conversation[]>("/api/conversations"),
+        api<Conversation[]>("/api/conversations?box=requests").catch(() => null),
+      ])
+        .then(([rows, incoming]) => {
           if (mine !== ticket.current) return;
           setConversations(sortByRecent(rows ?? []));
+          if (incoming) setRequests(sortByRecent(incoming));
           setError("");
         })
         .catch((caught) => {
@@ -70,18 +82,38 @@ export function ConversationsProvider({ enabled, children }: { enabled: boolean;
   }, [enabled, active, reload]);
 
   const markRead = useCallback((id: string) => {
-    setConversations((rows) => rows.map((row) => (row.id === id && row.unreadCount ? { ...row, unreadCount: 0 } : row)));
+    const clear = (rows: Conversation[]) => rows.map((row) => (row.id === id && row.unreadCount ? { ...row, unreadCount: 0 } : row));
+    setConversations(clear);
+    setRequests(clear);
   }, []);
 
   const upsert = useCallback((conversation: Conversation) => {
-    setConversations((rows) => sortByRecent([conversation, ...rows.filter((row) => row.id !== conversation.id)]));
+    const without = (rows: Conversation[]) => rows.filter((row) => row.id !== conversation.id);
+    if (conversation.isIncomingRequest) {
+      setRequests((rows) => sortByRecent([conversation, ...without(rows)]));
+      setConversations(without);
+    } else {
+      setConversations((rows) => sortByRecent([conversation, ...without(rows)]));
+      setRequests(without);
+    }
   }, []);
+
+  const remove = useCallback((id: string) => {
+    const without = (rows: Conversation[]) => rows.filter((row) => row.id !== id);
+    setConversations(without);
+    setRequests(without);
+  }, []);
+
+  const find = useCallback(
+    (id: string) => conversations.find((row) => row.id === id) ?? requests.find((row) => row.id === id),
+    [conversations, requests],
+  );
 
   const unreadTotal = useMemo(() => conversations.reduce((sum, row) => sum + (row.unreadCount || 0), 0), [conversations]);
 
   const value = useMemo(
-    () => ({ conversations, loading, error, reload, markRead, upsert, unreadTotal }),
-    [conversations, loading, error, reload, markRead, upsert, unreadTotal],
+    () => ({ conversations, requests, loading, error, reload, markRead, upsert, remove, find, unreadTotal }),
+    [conversations, requests, loading, error, reload, markRead, upsert, remove, find, unreadTotal],
   );
   return <ConversationsContext.Provider value={value}>{children}</ConversationsContext.Provider>;
 }
@@ -95,4 +127,11 @@ export function useConversations(): ConversationsValue {
 /** 상대가 마지막으로 말한 대화 — 내가 답할 차례 */
 export function isMyTurn(conversation: Conversation): boolean {
   return Boolean(conversation.partner && conversation.lastSenderId === conversation.partner.id && conversation.requestStatus !== "pending");
+}
+
+/** 메시지가 아직 없는 대화에 서버가 넣는 미리보기(한국어 고정 문구). 화면 언어로 바꿔 보여 줍니다. */
+const EMPTY_PREVIEW = msg("새 대화를 시작해 보세요.");
+
+export function previewText(conversation: Conversation): string {
+  return conversation.preview === EMPTY_PREVIEW ? tx(EMPTY_PREVIEW) : conversation.preview;
 }

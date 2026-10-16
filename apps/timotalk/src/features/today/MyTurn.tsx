@@ -3,7 +3,7 @@
  */
 import { Pressable, View } from "react-native";
 import { useRouter } from "expo-router";
-import { isMyTurn, useConversations } from "@/features/chats/store";
+import { isMyTurn, previewText, useConversations } from "@/features/chats/store";
 import { t } from "@/lib/i18n";
 import { relativeTime } from "@/lib/time";
 import { useTheme } from "@/theme/theme";
@@ -68,7 +68,7 @@ export function MyTurn() {
                     </Text>
                   </View>
                   <Text variant="callout" tone="muted" numberOfLines={1}>
-                    {conversation.preview}
+                    {previewText(conversation)}
                   </Text>
                 </View>
                 <CountBadge count={conversation.unreadCount} />

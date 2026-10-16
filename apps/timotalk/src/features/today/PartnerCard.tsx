@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { View } from "react-native";
 import { useRouter } from "expo-router";
-import { useConversations } from "@/features/chats/store";
+import { previewText, useConversations } from "@/features/chats/store";
 import { api, failureText } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { useMe } from "@/lib/session";
@@ -24,10 +24,11 @@ export function PartnerCard({ recommendation }: { recommendation: Recommendation
   const { c } = useTheme();
   const router = useRouter();
   const me = useMe();
-  const { conversations, upsert } = useConversations();
+  const { conversations, requests, upsert } = useConversations();
   const partner = recommendation.partner;
-  // 이미 대화 중(또는 내 요청이 수락 대기 중)이면 첫 인사가 필요 없습니다 — AI 하루 사용량도 아낍니다.
-  const existing = conversations.find((row) => row.partner?.id === partner.id);
+  // 이미 대화 중(또는 내 요청이 수락 대기 중, 상대가 먼저 요청)이면 첫 인사가 필요 없습니다 — AI 하루 사용량도 아낍니다.
+  const existing =
+    conversations.find((row) => row.partner?.id === partner.id) ?? requests.find((row) => row.partner?.id === partner.id);
   const openers = useOpeners(existing ? null : partner, recommendation.icebreaker);
   const [sending, setSending] = useState(false);
   const online = partner.status === "online";
@@ -109,10 +110,14 @@ export function PartnerCard({ recommendation }: { recommendation: Recommendation
       {existing ? (
         <View style={{ backgroundColor: c.surfaceSoft, borderRadius: radius.md - 2, paddingVertical: space.md, paddingHorizontal: space.md + 2, gap: space.xs, minHeight: 92 }}>
           <Text variant="label" tone="primaryStrong">
-            {existing.requestStatus === "pending" ? t("수락을 기다리고 있어요") : t("이미 대화하고 있어요")}
+            {existing.isIncomingRequest
+              ? t("{name}님이 먼저 인사했어요", { name: partner.name })
+              : existing.requestStatus === "pending"
+                ? t("수락을 기다리고 있어요")
+                : t("이미 대화하고 있어요")}
           </Text>
           <Text variant="callout" tone="inkSoft" numberOfLines={2}>
-            {existing.preview}
+            {previewText(existing)}
           </Text>
         </View>
       ) : (
@@ -148,7 +153,11 @@ export function PartnerCard({ recommendation }: { recommendation: Recommendation
 
       {/* 좁은 카드에서는 주 버튼이 다음 줄로 내려갑니다(글자가 두 줄로 꺾이지 않게). */}
       {existing ? (
-        <Button label={t("대화 이어가기")} icon="chat" onPress={() => router.push({ pathname: "/chat/[id]", params: { id: existing.id } })} />
+        <Button
+          label={existing.isIncomingRequest ? t("답하기") : t("대화 이어가기")}
+          icon="chat"
+          onPress={() => router.push({ pathname: "/chat/[id]", params: { id: existing.id } })}
+        />
       ) : (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
           {openers.hasAlternatives ? <Button label={t("다른 문장")} variant="secondary" onPress={openers.next} disabled={sending} /> : null}

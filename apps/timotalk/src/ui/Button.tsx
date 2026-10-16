@@ -4,7 +4,7 @@ import { radius, tapSize } from "@/theme/tokens";
 import { Icon, type IconName } from "./Icon";
 import { Text } from "./Text";
 
-type Variant = "primary" | "secondary" | "dark" | "ghost";
+type Variant = "primary" | "secondary" | "dark" | "ghost" | "danger";
 
 /**
  * 버튼. 높이는 손가락으로 누르기 좋은 44px 이상입니다.
@@ -36,6 +36,8 @@ export function Button({
     secondary: { bg: c.surface, fg: c.ink, border: c.line },
     dark: { bg: c.inverse, fg: c.onInverse, border: c.inverse },
     ghost: { bg: "transparent", fg: c.primaryStrong, border: "transparent" },
+    // 되돌릴 수 없는 일(계정 삭제)에만 씁니다.
+    danger: { bg: c.danger, fg: c.onDanger, border: c.danger },
   }[variant];
   const inactive = Boolean(disabled || busy);
   return (
@@ -64,7 +66,7 @@ export function Button({
       ]}
     >
       {busy ? <ActivityIndicator size="small" color={look.fg} /> : icon ? <Icon name={icon} size={17} color={look.fg} strokeWidth={2} /> : null}
-      <Text variant="bodyStrong" style={{ color: look.fg, fontWeight: variant === "primary" ? "700" : "600" }}>
+      <Text variant="bodyStrong" style={{ color: look.fg, fontWeight: variant === "primary" || variant === "danger" ? "700" : "600" }}>
         {label}
       </Text>
     </Pressable>
