@@ -131,7 +131,8 @@ export function ThreadMenu({
 
       {partner ? (
         <ReportDialog
-          partner={partner}
+          target={{ type: "user", id: partner.id }}
+          person={partner}
           visible={shown === "report"}
           onClose={() => setMode("menu")}
           onReported={(blocked) => {

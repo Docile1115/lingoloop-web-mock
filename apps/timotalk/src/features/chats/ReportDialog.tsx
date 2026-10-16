@@ -1,27 +1,30 @@
 /**
- * 신고 창: 사유(웹·옛 앱과 같은 목록) · 자세한 내용(선택) · 함께 차단. 대화방 메뉴와 프로필 메뉴가 같이 씁니다.
+ * 신고 창: 사유(웹·옛 앱과 같은 목록) · 자세한 내용(선택) · 함께 차단. 대화방·프로필·커뮤니티 글 메뉴가 같이 씁니다.
+ * 신고 대상(target)은 사람이나 글이고, "함께 차단"은 그 사람(글이면 글쓴이)을 차단합니다.
  * 접수되면 접수번호를 알리고, 함께 차단했으면 서버 차단까지 끝난 뒤에 "차단했어요"라고 알립니다.
  */
 import { useState } from "react";
 import { View } from "react-native";
 import { failureText } from "@/lib/api";
 import { t, tx } from "@/lib/i18n";
-import type { Profile } from "@/lib/types";
 import { space } from "@/theme/tokens";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { ChoiceChip, TextField } from "@/ui/Field";
 import { ListGroup, RadioRow } from "@/ui/List";
 import { showToast } from "@/ui/Toast";
-import { REPORT_REASONS, blockUser, reportUser, shortReportId } from "./actions";
+import { REPORT_REASONS, blockUser, reportTarget, shortReportId, type ReportTarget } from "./actions";
 
 export function ReportDialog({
-  partner,
+  target,
+  person,
   visible,
   onClose,
   onReported,
 }: {
-  partner: Profile;
+  target: ReportTarget;
+  /** 차단할 사람(사람 신고면 그 사람, 글 신고면 글쓴이) */
+  person: { id: string; name: string };
   visible: boolean;
   onClose: () => void;
   /** 접수가 끝났을 때. blocked 면 함께 차단까지 끝났습니다. */
@@ -42,7 +45,7 @@ export function ReportDialog({
     if (!reason || busy) return;
     setBusy(true);
     try {
-      const id = shortReportId((await reportUser(partner.id, reason, details)).id);
+      const id = shortReportId((await reportTarget(target, reason, details)).id);
       if (!alsoBlock) {
         showToast(t("신고가 접수되었어요 · 접수번호 {id}", { id }));
         reset();
@@ -50,7 +53,7 @@ export function ReportDialog({
         return;
       }
       try {
-        await blockUser(partner.id);
+        await blockUser(person.id);
         showToast(t("신고를 접수하고 차단했어요 · 접수번호 {id}", { id }));
         reset();
         onReported(true);
@@ -69,7 +72,7 @@ export function ReportDialog({
   return (
     <Dialog
       visible={visible}
-      title={t("{name}님 신고하기", { name: partner.name })}
+      title={target.type === "post" ? t("글 신고하기") : t("{name}님 신고하기", { name: person.name })}
       body={t("운영팀이 확인하고 조치해요. 신고한 사실은 상대에게 알리지 않아요.")}
       onClose={() => (busy ? undefined : onClose())}
       actions={
@@ -97,7 +100,7 @@ export function ReportDialog({
       />
       <View style={{ flexDirection: "row", paddingTop: space.xs }}>
         <ChoiceChip
-          label={t("{name}님 차단도 하기", { name: partner.name })}
+          label={t("{name}님 차단도 하기", { name: person.name })}
           selected={alsoBlock}
           multiple
           disabled={busy}
