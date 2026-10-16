@@ -1,0 +1,4 @@
+{
+  "NSPhotoLibraryUsageDescription": "チャットで送る写真を選べるよう、写真へのアクセスを許可してください。",
+  "NSMicrophoneUsageDescription": "ボイスメッセージを録音できるよう、マイクへのアクセスを許可してください。"
+}

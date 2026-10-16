@@ -5,7 +5,7 @@
  *  - 교환 세션: 20분 동안 앞 절반은 이 상대와 연습하는 말, 뒤 절반은 상대가 연습하는 말(내 모국어)로.
  */
 import { useCallback, useMemo, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { currentLocaleSnapshot } from "@shared/i18n/core";
@@ -13,25 +13,26 @@ import { acceptRequest, declineRequest, spamSignalNames } from "@/features/chats
 import { useConversations } from "@/features/chats/store";
 import { ThreadMenu } from "@/features/chats/ThreadMenu";
 import { Coach } from "@/features/chat/Coach";
+import { Composer } from "@/features/chat/Composer";
 import { ExchangeStrip } from "@/features/chat/ExchangeStrip";
 import { exchangeLanguages, translationTarget } from "@/features/chat/language";
 import { MessageBubble, type Translation as BubbleTranslation } from "@/features/chat/MessageBubble";
 import { useExchangeSession } from "@/features/chat/useExchangeSession";
 import { useMessages, type ChatMessage } from "@/features/chat/useMessages";
 import { api, failureText } from "@/lib/api";
-import { t, useLocale } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { useMe } from "@/lib/session";
 import type { Conversation, Translation } from "@/lib/types";
 import { useAppActive } from "@/lib/useAppActive";
 import { clock, localTimeIn, longDate, sameDay } from "@/lib/time";
 import { languageName, placeName } from "@/lib/words";
 import { useTheme } from "@/theme/theme";
-import { radius, space, tapSize } from "@/theme/tokens";
+import { radius, space } from "@/theme/tokens";
 import { Avatar } from "@/ui/Avatar";
 import { Button, IconButton } from "@/ui/Button";
 import { Icon } from "@/ui/Icon";
 import { ErrorState, LoadingState } from "@/ui/States";
-import { Text, textFont } from "@/ui/Text";
+import { Text } from "@/ui/Text";
 import { showToast } from "@/ui/Toast";
 
 const POLL_MS = 12_000;
@@ -74,7 +75,6 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const me = useMe();
-  const { locale } = useLocale();
   const active = useAppActive();
   const { markRead, upsert, remove } = useConversations();
   const partner = conversation.partner;
@@ -214,17 +214,26 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
       <View style={{ paddingTop: insets.top, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.line }}>
         <View style={[column, { height: 60, flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.sm }]}>
           <IconButton icon="back" label={t("뒤로")} plain onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))} />
-          <Avatar name={partnerName} photo={partner?.avatarUrl} avatarMode={partner?.avatarMode} avatarConfig={partner?.avatarConfig} size={36} />
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text variant="headline" numberOfLines={1} accessibilityRole="header">
-              {partnerName}
-            </Text>
-            {subtitle ? (
-              <Text variant="caption" tone="muted" numberOfLines={1}>
-                {subtitle}
+          {/* 상대 얼굴·이름을 누르면 프로필을 봅니다. */}
+          <Pressable
+            onPress={partner ? () => router.push({ pathname: "/people/[id]", params: { id: partner.id } }) : undefined}
+            disabled={!partner}
+            accessibilityRole={partner ? "link" : undefined}
+            accessibilityLabel={partner ? t("{name} 프로필", { name: partnerName }) : undefined}
+            style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: space.sm }}
+          >
+            <Avatar name={partnerName} photo={partner?.avatarUrl} avatarMode={partner?.avatarMode} avatarConfig={partner?.avatarConfig} size={36} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text variant="headline" numberOfLines={1} accessibilityRole="header">
+                {partnerName}
               </Text>
-            ) : null}
-          </View>
+              {subtitle ? (
+                <Text variant="caption" tone="muted" numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              ) : null}
+            </View>
+          </Pressable>
           {!session.active && !incoming && practiceName && teachName ? (
             <IconButton icon="timer" label={t("교환 세션 시작")} plain onPress={session.start} />
           ) : null}
@@ -332,55 +341,29 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
         </View>
       ) : null}
 
-      <View style={[column, { flexDirection: "row", alignItems: "flex-end", gap: space.sm, paddingHorizontal: space.md, paddingTop: space.sm + 2, paddingBottom: Math.max(insets.bottom, space.md) }]}>
-        {partner && !composerLocked ? (
-          <IconButton icon="spark" label={coach ? t("AI 코치 닫기") : t("AI 코치")} onPress={() => setCoach((current) => (current ? null : { draft, key: Date.now() }))} />
-        ) : null}
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          onKeyPress={onKeyPress}
-          editable={!composerLocked}
-          multiline
-          maxLength={4000}
-          placeholder={incoming ? t("요청을 수락하면 답할 수 있어요") : composerLocked ? t("수락을 기다리고 있어요") : practiceName ? t("{language}로 답해 보세요", { language: practiceName }) : t("메시지")}
-          placeholderTextColor={c.muted}
-          accessibilityLabel={t("메시지")}
-          style={{
-            flex: 1,
-            minHeight: tapSize,
-            maxHeight: 140,
-            paddingHorizontal: space.lg,
-            paddingTop: 11,
-            paddingBottom: 11,
-            borderRadius: 22,
-            borderWidth: 1,
-            borderColor: c.line,
-            backgroundColor: c.surface,
-            color: c.ink,
-            fontFamily: textFont(draft, locale),
-            fontSize: 15,
-            lineHeight: 21,
-          }}
-        />
-        <Pressable
-          onPress={() => void submit()}
-          disabled={!draft.trim() || sending || composerLocked}
-          accessibilityRole="button"
-          accessibilityLabel={t("보내기")}
-          style={({ pressed }) => ({
-            width: tapSize,
-            height: tapSize,
-            borderRadius: tapSize / 2,
-            backgroundColor: draft.trim() && !composerLocked ? c.primary : c.sunken,
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: pressed ? 0.85 : 1,
-          })}
-        >
-          <Icon name="send" size={19} color={draft.trim() && !composerLocked ? c.onPrimary : c.muted} strokeWidth={2} />
-        </Pressable>
-      </View>
+      <Composer
+        value={draft}
+        onChangeText={setDraft}
+        onKeyPress={onKeyPress}
+        onSubmit={() => void submit()}
+        onSendMedia={(payload) => {
+          setCoach(null);
+          return send(payload);
+        }}
+        placeholder={
+          incoming
+            ? t("요청을 수락하면 답할 수 있어요")
+            : composerLocked
+              ? t("수락을 기다리고 있어요")
+              : practiceName
+                ? t("{language}로 답해 보세요", { language: practiceName })
+                : t("메시지")
+        }
+        locked={composerLocked}
+        sending={sending}
+        coach={partner ? { open: Boolean(coach), onToggle: () => setCoach((current) => (current ? null : { draft, key: Date.now() })) } : null}
+        maxWidth={CHAT_MAX_WIDTH}
+      />
       <ThreadMenu conversation={conversation} open={menuOpen} onClose={() => setMenuOpen(false)} onGone={leaveRoom} />
     </KeyboardAvoidingView>
   );

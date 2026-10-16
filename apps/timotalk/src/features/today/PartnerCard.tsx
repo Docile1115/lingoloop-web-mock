@@ -2,7 +2,7 @@
  * 오늘의 파트너 카드: 누구인지, 왜 맞는지, AI 가 고른 첫 문장, 인사 보내기.
  */
 import { useState } from "react";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import { useRouter } from "expo-router";
 import { previewText, useConversations } from "@/features/chats/store";
 import { api, failureText } from "@/lib/api";
@@ -71,7 +71,13 @@ export function PartnerCard({ recommendation }: { recommendation: Recommendation
 
   return (
     <Card style={{ flex: 1 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
+      {/* 얼굴·이름을 누르면 프로필을 봅니다. */}
+      <Pressable
+        onPress={() => router.push({ pathname: "/people/[id]", params: { id: partner.id } })}
+        accessibilityRole="link"
+        accessibilityLabel={t("{name} 프로필", { name: partner.name })}
+        style={{ flexDirection: "row", alignItems: "center", gap: space.md }}
+      >
         <Avatar name={partner.name} photo={partner.avatarUrl} avatarMode={partner.avatarMode} avatarConfig={partner.avatarConfig} size={52} />
         <View style={{ flex: 1, minWidth: 0, gap: space.xxs }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs + 2 }}>
@@ -97,7 +103,7 @@ export function PartnerCard({ recommendation }: { recommendation: Recommendation
             </View>
           ) : null}
         </View>
-      </View>
+      </Pressable>
 
       {reasons.length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.xs + 2 }}>

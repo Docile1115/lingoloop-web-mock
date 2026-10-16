@@ -7,8 +7,8 @@ import { AppNav } from "@/ui/AppNav";
 
 /**
  * 다섯 탭: 오늘 · 대화 · 커뮤니티 · 노트 · 나.
- * 대화방(chat/[id])도 이 묶음 안에 숨은 경로로 둡니다. 넓은 화면에서는 왼쪽 메뉴가 그대로 남고,
- * 휴대폰에서는 아래 탭을 감춰 대화방이 화면을 다 씁니다(AppNav).
+ * 대화방(chat/[id])·프로필(people/[id])·더 찾아보기(discover)도 이 묶음 안에 숨은 경로로 둡니다.
+ * 넓은 화면에서는 왼쪽 메뉴가 그대로 남고, 휴대폰에서는 대화방에서만 아래 탭을 감춥니다(AppNav).
  */
 export default function TabsLayout() {
   const { c } = useTheme();
@@ -25,6 +25,10 @@ export default function TabsLayout() {
       <Tabs.Screen name="notes" options={{ title: t("노트") }} />
       <Tabs.Screen name="me" options={{ title: t("나") }} />
       <Tabs.Screen name="chat/[id]" options={{ title: t("대화"), href: null }} />
+      <Tabs.Screen name="people/[id]" options={{ title: t("프로필"), href: null }} />
+      <Tabs.Screen name="discover/index" options={{ title: t("더 찾아보기"), href: null }} />
+      <Tabs.Screen name="discover/filters" options={{ title: t("조건"), href: null }} />
+      <Tabs.Screen name="notifications" options={{ title: t("알림"), href: null }} />
     </Tabs>
   );
 }

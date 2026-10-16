@@ -12,8 +12,24 @@ export const TODAY_COUNT = 3;
 
 export type Load<T> = { status: "loading" } | { status: "error"; error: string } | { status: "ready"; data: T };
 
+/* 매칭 조건이 바뀌면(조건 화면·프로필의 배우는 말) 열려 있는 오늘·더 찾아보기가 다시 받습니다.
+   서버는 조건이 바뀌면 그날 추천을 바로 다시 고릅니다(GET /api/matching/daily 의 preferenceVersion). */
+const matchingListeners = new Set<() => void>();
+
+export function notifyMatchingChanged() {
+  matchingListeners.forEach((listener) => listener());
+}
+
+export type DailyData = {
+  /** 오늘 화면에 크게 보여 줄 사람(위의 TODAY_COUNT 명) */
+  recommendations: Recommendation[];
+  /** 서버가 고른 오늘의 추천 전부(최대 12명) — 더 찾아보기 */
+  all: Recommendation[];
+  targetLanguages: string[];
+};
+
 export function useDailyMatches() {
-  const [state, setState] = useState<Load<{ recommendations: Recommendation[]; targetLanguages: string[] }>>({ status: "loading" });
+  const [state, setState] = useState<Load<DailyData>>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -21,9 +37,10 @@ export function useDailyMatches() {
     api<DailyMatches>("/api/matching/daily")
       .then((data) => {
         if (!alive) return;
+        const all = data?.recommendations ?? [];
         setState({
           status: "ready",
-          data: { recommendations: (data?.recommendations ?? []).slice(0, TODAY_COUNT), targetLanguages: data?.preferencesApplied?.targetLanguages ?? [] },
+          data: { recommendations: all.slice(0, TODAY_COUNT), all, targetLanguages: data?.preferencesApplied?.targetLanguages ?? [] },
         });
       })
       .catch((caught) => {
@@ -38,6 +55,13 @@ export function useDailyMatches() {
     setState({ status: "loading" });
     setAttempt((n) => n + 1);
   }, []);
+
+  useEffect(() => {
+    matchingListeners.add(reload);
+    return () => {
+      matchingListeners.delete(reload);
+    };
+  }, [reload]);
   return { state, reload };
 }
 

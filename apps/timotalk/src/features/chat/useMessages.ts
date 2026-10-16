@@ -13,6 +13,9 @@ import { newMessageId } from "@/features/today/data";
 
 export type ChatMessage = Message & { state?: "sending" | "failed" };
 
+/** 보낼 말. 사진·음성은 media(데이터 URI)를 담고, text 는 비워 두면 서버가 목록에 보일 한 줄("사진"·"음성 메시지")을 채웁니다. */
+export type Outgoing = { type: "text" | "image" | "voice"; text: string; media?: string };
+
 function merge(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   if (!incoming.length) return current;
   const byId = new Map(current.map((row) => [row.id, row]));
@@ -54,13 +57,25 @@ export function useMessages(conversationId: string, myId: string, onFetched?: (n
   }, [conversationId, myId, onFetched]);
 
   const send = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (payload: Outgoing | string): Promise<boolean> => {
+      const outgoing: Outgoing = typeof payload === "string" ? { type: "text", text: payload } : payload;
       const id = newMessageId();
-      const optimistic: ChatMessage = { id, conversationId, senderId: myId, type: "text", text, sentAt: new Date().toISOString(), state: "sending" };
+      const optimistic: ChatMessage = {
+        id,
+        conversationId,
+        senderId: myId,
+        type: outgoing.type,
+        text: outgoing.text,
+        media: outgoing.media,
+        sentAt: new Date().toISOString(),
+        state: "sending",
+      };
       setMessages((current) => merge(current, [optimistic]));
       try {
         const result = await api<{ message: Message }>(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
-          body: { type: "text", text, clientMessageId: id },
+          body: { type: outgoing.type, text: outgoing.text, ...(outgoing.media ? { media: outgoing.media } : {}), clientMessageId: id },
+          // 사진·음성은 수백 KB 라 느린 망에서 올리는 데 오래 걸릴 수 있습니다.
+          slow: outgoing.type !== "text",
         });
         // 서버는 보낸 id(clientMessageId)를 그대로 씁니다 — 같은 id 라 화면의 임시 말풍선을 바꿉니다.
         setMessages((current) => merge(current, [result.message]));
@@ -78,7 +93,7 @@ export function useMessages(conversationId: string, myId: string, onFetched?: (n
   const resend = useCallback(
     async (message: ChatMessage) => {
       setMessages((current) => current.filter((row) => row.id !== message.id));
-      return send(message.text);
+      return send({ type: message.type, text: message.type === "text" ? message.text : "", media: message.media });
     },
     [send],
   );
