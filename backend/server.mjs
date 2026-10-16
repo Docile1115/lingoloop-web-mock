@@ -25,6 +25,7 @@ import { createSessionVerificationCache, isSessionRejection } from "./session-ca
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import { registerHomeRoutes } from "./homes.mjs";
 import { isDiscoverable, presenceIsStale, presenceOf } from "./discovery.mjs";
+import { SUPPORT_SCHEMA, normalizeSupport, supportInstructions, supportLanguages } from "./ai-support.mjs";
 import { createValidators, isDocumentId } from "./validate.mjs";
 import {
   AvatarValidationError,
@@ -2915,24 +2916,19 @@ app.post("/api/conversation-support", requireUser, async (req, res) => {
   const stage = optionalString(req.body?.stage, "stage", 32) || "first-message";
   const draft = optionalString(req.body?.draft, "draft", 1000) || "";
   const partner = profileForOthers(partnerSnapshot.data());
-  const schema = {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      topics: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 3 },
-      suggestedOpeners: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 3 },
-      followUpQuestions: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 3 },
-      improvedDraft: { type: "string" },
-      tip: { type: "string" },
-    },
-    required: ["topics", "suggestedOpeners", "followUpQuestions", "improvedDraft", "tip"],
-  };
+  // 첫 인사·이어 묻기는 내가 연습하는 말로, 번역·주제·팁은 화면 언어로 씁니다(ai-support.mjs).
+  const { practice, helper } = supportLanguages(req.auth.profile, partner, req.body?.locale);
+  const languageLabel = (code) => LANGUAGES.find((item) => item.code === code)?.name || code;
   const { body: aiBody, quota } = await geminiResponse(
     {
-      instructions: "You support a safe language exchange conversation. Keep suggestions friendly, non-romantic, concise, and appropriate for the learner's level.",
+      instructions: supportInstructions(languageLabel(practice), languageLabel(helper)),
       input: JSON.stringify({
         stage,
         draft,
+        learner: {
+          nativeLanguages: req.auth.profile?.nativeLanguages || [],
+          learningLanguages: req.auth.profile?.learningLanguages || [],
+        },
         partner: {
           nativeLanguages: partner.nativeLanguages,
           learningLanguages: partner.learningLanguages,
@@ -2940,35 +2936,30 @@ app.post("/api/conversation-support", requireUser, async (req, res) => {
         },
       }),
       generationConfig: {
-        maxOutputTokens: 1200,
+        maxOutputTokens: 1600,
         temperature: 0.4,
         responseMimeType: "application/json",
-        responseJsonSchema: schema,
+        responseJsonSchema: SUPPORT_SCHEMA,
       },
     },
     req.auth.uid,
     { feature: "conversationSupport", dailyLimit: AI_SUPPORT_DAILY_LIMIT },
   );
-  const supportText = geminiText(aiBody);
-  let support;
+  let parsed;
   try {
-    support = JSON.parse(supportText);
+    parsed = JSON.parse(geminiText(aiBody));
   } catch {
     throw new ApiError(502, "AI_INVALID_RESPONSE", "AI 응답 형식을 확인하지 못했습니다.");
   }
-  const listFields = [support.topics, support.suggestedOpeners, support.followUpQuestions];
-  if (
-    !listFields.every(
-      (items) => Array.isArray(items) && items.length === 3 && items.every((item) => typeof item === "string" && item.trim().length > 0),
-    ) ||
-    typeof support.improvedDraft !== "string" ||
-    typeof support.tip !== "string"
-  ) {
+  const support = normalizeSupport(parsed);
+  if (!support) {
     throw new ApiError(502, "AI_INVALID_RESPONSE", "AI 응답 형식을 확인하지 못했습니다.");
   }
   return success(res, req, {
     partner,
     stage,
+    practiceLanguage: practice,
+    helperLanguage: helper,
     ...support,
     provider: GEMINI_PROVIDER,
     model: activeGeminiModel,

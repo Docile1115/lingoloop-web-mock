@@ -175,9 +175,14 @@ test("화면 코드에 한국어가 그대로 남아 있지 않다", async () =>
     // 코드·React Native 공유용 숫자/색 토큰. 한국어는 렌더 문구가 아닌 측정 근거 주석입니다.
     "app/lib/tokens.ts",
   ];
-  // 앱(mobile/src) 화면도 같은 사전을 씁니다. 웹만 보면 앱에 남은 한국어 문구를 못 잡습니다.
-  // (mobile/app.json 의 권한 안내 문구는 네이티브 설정이라 이 검사 밖입니다.)
-  const files = [...(await walk(join(ROOT, "app"))), ...(await walk(join(ROOT, "mobile/src")))]
+  // 앱(mobile/src)과 새 공용 앱(apps/timotalk)도 같은 사전을 씁니다. 웹만 보면 앱에 남은 한국어 문구를 못 잡습니다.
+  // (app.json 의 권한 안내 문구는 네이티브 설정이라 이 검사 밖입니다.)
+  const files = [
+    ...(await walk(join(ROOT, "app"))),
+    ...(await walk(join(ROOT, "mobile/src"))),
+    ...(await walk(join(ROOT, "apps/timotalk/app"))),
+    ...(await walk(join(ROOT, "apps/timotalk/src"))),
+  ]
     .filter((f) => !f.startsWith(I18N))
     .filter((f) => !EXCLUDED.includes(relativePath(f)));
   const offenders = [];

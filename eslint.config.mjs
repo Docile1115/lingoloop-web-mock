@@ -16,6 +16,11 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // 앱은 자기 규칙(React Native)으로 따로 검사합니다 — mobile/ 안에서 돌립니다.
     "mobile/**",
+    // 새 공용 앱(apps/timotalk)은 웹과 같은 React 규칙으로 검사합니다. 설치·빌드 결과만 뺍니다.
+    "apps/**/node_modules/**",
+    "apps/**/dist/**",
+    "apps/**/.expo/**",
+    "apps/**/expo-env.d.ts",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
