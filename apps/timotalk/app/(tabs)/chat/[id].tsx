@@ -9,7 +9,9 @@ import { FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View, t
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { currentLocaleSnapshot } from "@shared/i18n/core";
+import { acceptRequest, declineRequest, spamSignalNames } from "@/features/chats/actions";
 import { useConversations } from "@/features/chats/store";
+import { ThreadMenu } from "@/features/chats/ThreadMenu";
 import { Coach } from "@/features/chat/Coach";
 import { ExchangeStrip } from "@/features/chat/ExchangeStrip";
 import { exchangeLanguages, translationTarget } from "@/features/chat/language";
@@ -43,8 +45,8 @@ export default function ChatRoute() {
   const { c } = useTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { conversations, loading, error, reload } = useConversations();
-  const conversation = conversations.find((row) => row.id === id);
+  const { find, loading, error, reload } = useConversations();
+  const conversation = id ? find(id) : undefined;
 
   if (!conversation) {
     return (
@@ -74,7 +76,7 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
   const me = useMe();
   const { locale } = useLocale();
   const active = useAppActive();
-  const { markRead } = useConversations();
+  const { markRead, upsert, remove } = useConversations();
   const partner = conversation.partner;
   const partnerName = partner?.name ?? t("알 수 없는 사용자");
   // 이 상대와 연습하는 말(상대의 모국어)과 상대가 연습하는 말(내 모국어). 내가 처음 배우는 말이 아닙니다.
@@ -92,6 +94,8 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
   const [translations, setTranslations] = useState<Record<string, BubbleTranslation>>({});
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const [coach, setCoach] = useState<{ draft: string; key: number } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [answering, setAnswering] = useState<"accept" | "decline" | null>(null);
 
   // 화면이 보이는 동안만 받습니다. 처음 들어오거나 돌아오면 바로 한 번 받습니다.
   useFocusEffect(
@@ -104,8 +108,38 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
   );
 
   const pendingMine = conversation.requestStatus === "pending" && !conversation.isIncomingRequest;
+  const incoming = Boolean(conversation.isIncomingRequest);
   const sentAlready = messages.some((message) => message.senderId === me.id && message.state !== "failed");
-  const composerLocked = pendingMine && sentAlready;
+  // 내 요청은 한 통만 보낼 수 있고(서버 규칙), 받은 요청은 수락해야 답할 수 있습니다.
+  const composerLocked = (pendingMine && sentAlready) || incoming;
+  const leaveRoom = () => router.replace(incoming ? "/chats?box=requests" : "/chats");
+
+  const accept = async () => {
+    if (answering) return;
+    setAnswering("accept");
+    try {
+      upsert(await acceptRequest(conversation.id));
+      showToast(t("{name}님의 요청을 수락했어요", { name: partnerName }));
+    } catch (caught) {
+      showToast(failureText(caught, t("수락하지 못했어요.")), "error");
+    } finally {
+      setAnswering(null);
+    }
+  };
+
+  const decline = async () => {
+    if (answering) return;
+    setAnswering("decline");
+    try {
+      await declineRequest(conversation.id);
+      remove(conversation.id);
+      showToast(t("요청을 지웠어요. {name}님은 7일 동안 다시 요청할 수 없어요.", { name: partnerName }));
+      leaveRoom();
+    } catch (caught) {
+      showToast(failureText(caught, t("지우지 못했어요.")), "error");
+      setAnswering(null);
+    }
+  };
 
   const rows = useMemo<Row[]>(() => {
     const lastMine = [...messages].reverse().find((message) => message.senderId === me.id && !message.state);
@@ -191,9 +225,10 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
               </Text>
             ) : null}
           </View>
-          {!session.active && practiceName && teachName ? (
+          {!session.active && !incoming && practiceName && teachName ? (
             <IconButton icon="timer" label={t("교환 세션 시작")} plain onPress={session.start} />
           ) : null}
+          <IconButton icon="more" label={t("대화 메뉴")} plain onPress={() => setMenuOpen(true)} />
         </View>
       </View>
 
@@ -262,6 +297,26 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
         </View>
       ) : null}
 
+      {incoming ? (
+        <View style={[column, { marginBottom: space.sm, padding: space.md, borderRadius: radius.md, backgroundColor: c.surfaceSoft, gap: space.md }]}>
+          <Text variant="callout" tone="inkSoft">
+            {t("{name}님이 대화를 요청했어요. 수락하면 답할 수 있어요.", { name: partnerName })}
+          </Text>
+          {spamSignalNames(conversation.spamSignals).length ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs + 2 }}>
+              <Icon name="shield" size={15} color={c.onAttentionSoft} />
+              <Text variant="meta" style={{ color: c.onAttentionSoft, flex: 1 }}>
+                {t("스팸일 수 있어요: {signals}", { signals: spamSignalNames(conversation.spamSignals).join(", ") })}
+              </Text>
+            </View>
+          ) : null}
+          <View style={{ flexDirection: "row", gap: space.sm }}>
+            <Button label={t("삭제")} variant="secondary" busy={answering === "decline"} disabled={Boolean(answering)} onPress={() => void decline()} />
+            <Button label={t("수락")} icon="check" grow busy={answering === "accept"} disabled={Boolean(answering)} onPress={() => void accept()} />
+          </View>
+        </View>
+      ) : null}
+
       {coach && partner ? (
         <View style={column}>
         <Coach
@@ -288,7 +343,7 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
           editable={!composerLocked}
           multiline
           maxLength={4000}
-          placeholder={composerLocked ? t("수락을 기다리고 있어요") : practiceName ? t("{language}로 답해 보세요", { language: practiceName }) : t("메시지")}
+          placeholder={incoming ? t("요청을 수락하면 답할 수 있어요") : composerLocked ? t("수락을 기다리고 있어요") : practiceName ? t("{language}로 답해 보세요", { language: practiceName }) : t("메시지")}
           placeholderTextColor={c.muted}
           accessibilityLabel={t("메시지")}
           style={{
@@ -326,6 +381,7 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
           <Icon name="send" size={19} color={draft.trim() && !composerLocked ? c.onPrimary : c.muted} strokeWidth={2} />
         </Pressable>
       </View>
+      <ThreadMenu conversation={conversation} open={menuOpen} onClose={() => setMenuOpen(false)} onGone={leaveRoom} />
     </KeyboardAvoidingView>
   );
 }

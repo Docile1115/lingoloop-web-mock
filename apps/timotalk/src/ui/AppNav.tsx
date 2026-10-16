@@ -23,7 +23,7 @@ const HIDDEN_ROUTES: Record<string, string> = { "chat/[id]": "chats" };
 export function AppNav({ state, descriptors, navigation, variant }: BottomTabBarProps & { variant: "bottom" | "side" }) {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
-  const { unreadTotal } = useConversations();
+  const { unreadTotal, requests } = useConversations();
   const me = useMe();
 
   const current = state.routes[state.index]?.name ?? "";
@@ -34,7 +34,8 @@ export function AppNav({ state, descriptors, navigation, variant }: BottomTabBar
   const items = state.routes.filter((route) => !HIDDEN_ROUTES[route.name]).map((route) => {
     const focused = route.name === selectedName;
     const label = descriptors[route.key]?.options.title ?? route.name;
-    const badge = route.name === "chats" ? unreadTotal : 0;
+    // 대화 배지: 안 읽은 메시지 + 받은 요청
+    const badge = route.name === "chats" ? unreadTotal + requests.length : 0;
     const onPress = () => {
       const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
       if (route.name !== current && !event.defaultPrevented) navigation.navigate(route.name, route.params);
@@ -58,7 +59,7 @@ export function AppNav({ state, descriptors, navigation, variant }: BottomTabBar
               onPress={item.onPress}
               accessibilityRole="tab"
               aria-selected={item.focused}
-              accessibilityLabel={item.badge ? t("{label}, 안 읽은 메시지 {n}개", { label: item.label, n: item.badge }) : item.label}
+              accessibilityLabel={item.badge ? t("{label}, 새 소식 {n}개", { label: item.label, n: item.badge }) : item.label}
               style={({ pressed }) => ({
                 flexDirection: "row",
                 alignItems: "center",
@@ -111,7 +112,7 @@ export function AppNav({ state, descriptors, navigation, variant }: BottomTabBar
           onPress={item.onPress}
           accessibilityRole="tab"
           aria-selected={item.focused}
-          accessibilityLabel={item.badge ? t("{label}, 안 읽은 메시지 {n}개", { label: item.label, n: item.badge }) : item.label}
+          accessibilityLabel={item.badge ? t("{label}, 새 소식 {n}개", { label: item.label, n: item.badge }) : item.label}
           style={{ flex: 1, minHeight: 52, alignItems: "center", justifyContent: "center", gap: 3 }}
         >
           <Icon name={ICON_FOR[item.name] ?? "today"} size={22} color={item.focused ? c.primaryStrong : c.muted} strokeWidth={item.focused ? 2 : 1.8} />

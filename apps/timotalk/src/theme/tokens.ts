@@ -38,6 +38,12 @@ export type Palette = {
   attentionSoft: string;
   onAttentionSoft: string;
   danger: string;
+  /** 위험 버튼(계정 삭제 등) 위 글자 */
+  onDanger: string;
+  /** 위험 안내 상자 바탕 */
+  dangerSoft: string;
+  /** 대화 상자 뒤를 가리는 막 */
+  scrim: string;
   /** 반전 카드(복습 등) */
   inverse: string;
   onInverse: string;
@@ -65,6 +71,9 @@ export const light: Palette = {
   attentionSoft: "#FFF4CC",
   onAttentionSoft: "#7A5D00",
   danger: "#C62828",
+  onDanger: "#FFFFFF",
+  dangerSoft: "#FDECEA",
+  scrim: "rgba(15, 26, 20, 0.45)",
   inverse: "#0F1A14",
   onInverse: "#FFFFFF",
   onInverseMuted: "#C5D0C8",
@@ -91,6 +100,9 @@ export const dark: Palette = {
   attentionSoft: "#33280F",
   onAttentionSoft: "#F3D27A",
   danger: "#FF8A80",
+  onDanger: "#2A0B08",
+  dangerSoft: "#3A1A17",
+  scrim: "rgba(0, 0, 0, 0.6)",
   inverse: "#E9F0EB",
   onInverse: "#0D1210",
   onInverseMuted: "#3A4740",

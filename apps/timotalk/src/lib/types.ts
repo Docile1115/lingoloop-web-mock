@@ -68,6 +68,8 @@ export type Conversation = {
   requestStatus?: "pending" | "accepted" | string;
   isIncomingRequest?: boolean;
   muted?: boolean;
+  /** 요청함 첫 메시지의 스팸 신호(off-platform·money·link·contact) */
+  spamSignals?: string[];
 };
 
 export type MessageType = "text" | "voice" | "image";

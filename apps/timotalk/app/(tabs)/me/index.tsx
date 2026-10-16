@@ -1,8 +1,9 @@
 /**
- * 나: 내 프로필 요약, 화면 언어, 로그아웃. 프로필 편집·설정은 2단계에서 붙입니다.
+ * 나: 내 프로필 요약과 설정 목록(화면 언어 · 받는 메시지 · 차단한 사람 · 계정).
  */
 import { useState } from "react";
 import { Pressable, View } from "react-native";
+import { useRouter } from "expo-router";
 import { changeLocale, LOCALE_LABEL, LOCALES, t, useLocale } from "@/lib/i18n";
 import { useSession, useMe } from "@/lib/session";
 import { languageName, learningSummary, placeName } from "@/lib/words";
@@ -11,14 +12,20 @@ import { radius, space } from "@/theme/tokens";
 import { Avatar } from "@/ui/Avatar";
 import { Card } from "@/ui/Bits";
 import { Button } from "@/ui/Button";
+import { ConfirmDialog } from "@/ui/Dialog";
+import { ListGroup, ListRow } from "@/ui/List";
 import { Page } from "@/ui/Page";
 import { Text } from "@/ui/Text";
 
+const COLUMN = 560;
+
 export default function Me() {
   const { c } = useTheme();
+  const router = useRouter();
   const me = useMe();
   const { signOut } = useSession();
   const { locale } = useLocale();
+  const [askSignOut, setAskSignOut] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const natives = me.nativeLanguages.map(languageName).join(" · ");
 
@@ -28,7 +35,7 @@ export default function Me() {
         {t("나")}
       </Text>
 
-      <Card style={{ maxWidth: 560 }}>
+      <Card style={{ maxWidth: COLUMN }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
           <Avatar name={me.name} photo={me.avatarUrl} avatarMode={me.avatarMode} avatarConfig={me.avatarConfig} size={64} />
           <View style={{ flex: 1, minWidth: 0, gap: space.xxs }}>
@@ -45,9 +52,17 @@ export default function Me() {
             ) : null}
           </View>
         </View>
+        {me.bio ? (
+          <Text variant="callout" tone="inkSoft" numberOfLines={4}>
+            {me.bio}
+          </Text>
+        ) : null}
+        <View style={{ flexDirection: "row" }}>
+          <Button label={t("프로필 편집")} icon="pencil" variant="secondary" onPress={() => router.push("/me/edit")} />
+        </View>
       </Card>
 
-      <View style={{ gap: space.md, maxWidth: 560 }}>
+      <View style={{ gap: space.md, maxWidth: COLUMN }}>
         <Text variant="title">{t("화면 언어")}</Text>
         <View accessibilityRole="radiogroup" style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap" }}>
           {LOCALES.map((code) => {
@@ -77,18 +92,30 @@ export default function Me() {
         </View>
       </View>
 
-      <View style={{ flexDirection: "row" }}>
-        <Button
-          label={t("로그아웃")}
-          icon="logout"
-          variant="secondary"
-          busy={leaving}
-          onPress={() => {
-            setLeaving(true);
-            void signOut().finally(() => setLeaving(false));
-          }}
-        />
+      <View style={{ gap: space.xl, maxWidth: COLUMN }}>
+        <ListGroup title={t("대화와 안전")}>
+          <ListRow icon="chat" title={t("받는 메시지")} detail={t("누가 나에게 대화를 걸 수 있는지 정해요.")} onPress={() => router.push("/me/messages")} />
+          <ListRow icon="shield" title={t("차단한 사람")} detail={t("차단을 풀거나 확인해요.")} onPress={() => router.push("/me/blocked")} />
+        </ListGroup>
+
+        <ListGroup title={t("계정")}>
+          <ListRow icon="logout" title={t("로그아웃")} onPress={() => setAskSignOut(true)} trailing={null} />
+          <ListRow icon="trash" title={t("계정 삭제")} danger onPress={() => router.push("/me/delete-account")} />
+        </ListGroup>
       </View>
+
+      <ConfirmDialog
+        visible={askSignOut}
+        title={t("로그아웃할까요?")}
+        body={t("다시 로그인하면 대화와 기록이 그대로 있어요.")}
+        confirmLabel={t("로그아웃")}
+        busy={leaving}
+        onClose={() => setAskSignOut(false)}
+        onConfirm={() => {
+          setLeaving(true);
+          void signOut().finally(() => setLeaving(false));
+        }}
+      />
     </Page>
   );
 }

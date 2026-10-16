@@ -37,6 +37,12 @@ const ICONS = {
   globe: [{ circle: [12, 12, 9] }, { d: "M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z" }],
   logout: [{ d: "M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" }, { d: "M10 8l-4 4 4 4M6 12h10" }],
   refresh: [{ d: "M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" }],
+  shield: [{ d: "M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z" }],
+  trash: [{ d: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" }, { d: "M10 11v6M14 11v6" }],
+  flag: [{ d: "M5 21V4M5 4h11l-2 4 2 4H5" }],
+  bellOff: [{ d: "M6 16v-5a6 6 0 0 1 9.5-4.9M18 11v5l1.5 2h-15" }, { d: "M10 20a2 2 0 0 0 4 0M3 3l18 18" }],
+  block: [{ circle: [12, 12, 9] }, { d: "M5.6 5.6l12.8 12.8" }],
+  inbox: [{ d: "M4 13l2.5-7h11L20 13v6H4z" }, { d: "M4 13h5l1 2h4l1-2h5" }],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof ICONS;
