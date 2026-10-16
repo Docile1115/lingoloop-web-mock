@@ -28,3 +28,16 @@ export function translationTarget(text: string, screenLanguage: string, practice
   if (source && source === screenLanguage) return practiceLanguage || (screenLanguage === "en" ? "ko" : "en");
   return screenLanguage;
 }
+
+const LATIN_SCRIPT = new Set(["en", "es", "fr", "de"]);
+
+/**
+ * 소리 내어 읽을 말. 글자 모양으로 알 수 있으면 그 말(가나·한글·한자)이고, 로마자면 상대가 쓰는 로마자 말
+ * (모국어 먼저, 그다음 배우는 말) 중 첫 번째입니다. 스페인어 문장을 영어 목소리로 읽지 않게 합니다.
+ */
+export function speechLanguage(text: string, partner: Speaker | null): string {
+  const script = guessLanguage(text);
+  if (script && script !== "en") return script;
+  const candidates = [...(partner?.nativeLanguages ?? []), ...(partner?.learningLanguages ?? []).map((item) => item.code)];
+  return candidates.find((code) => LATIN_SCRIPT.has(code)) ?? script;
+}

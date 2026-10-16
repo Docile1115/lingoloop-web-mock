@@ -72,17 +72,42 @@ export type Conversation = {
   spamSignals?: string[];
 };
 
-export type MessageType = "text" | "voice" | "image";
+export type MessageType = "text" | "voice" | "image" | "correction";
 
 export type Message = {
   id: string;
   conversationId: string;
   senderId: string;
   type: MessageType;
+  /** 교정 메시지에서는 고친 문장입니다. */
   text: string;
   media?: string;
   sentAt: string;
   status?: string;
+  /** 교정 메시지만: 고치기 전 문장(서버가 대상 메시지에서 복사), 대상 메시지 id, 한 줄 설명 */
+  original?: string;
+  targetMessageId?: string;
+  note?: string;
+};
+
+/** 받은 교정 한 건(GET /api/corrections/received). 대화에서 받은 것(chat)과 커뮤니티 글에서 받은 것(community)이 섞여 옵니다. */
+export type ReceivedCorrection = {
+  id: string;
+  source?: "chat" | "community";
+  conversationId?: string;
+  messageId?: string;
+  postId?: string;
+  postText?: string;
+  original: string;
+  fixed: string;
+  note?: string;
+  createdAt: string;
+  fromUserId?: string;
+  from: string | null;
+  fromAvatarUrl?: string;
+  fromAvatarMode?: Profile["avatarMode"];
+  fromAvatarConfig?: Profile["avatarConfig"];
+  fromCountryCode?: string;
 };
 
 /** AI 가 고른 문장 한 줄. text 는 연습하는 말, translation 은 내 말입니다. */

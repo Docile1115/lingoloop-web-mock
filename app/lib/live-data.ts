@@ -182,7 +182,8 @@ export interface ApiMessage {
   id: string;
   conversationId: string;
   senderId: string;
-  type: "text" | "voice" | "image";
+  /** correction 은 새 앱이 보내는 교정 메시지입니다. text 가 고친 문장이라 이 화면은 글로 그립니다. */
+  type: "text" | "voice" | "image" | "correction";
   text: string;
   media?: string;
   sentAt: string;
@@ -493,7 +494,8 @@ export function toChatMessage(message: ApiMessage, myId: string): ChatMessage {
     sentAt: message.sentAt,
     readByPartner: message.readByPartner,
     media: message.media || "",
-    kind: message.type === "text" ? undefined : message.type,
+    // 첨부 말풍선은 사진·음성뿐입니다. 그 밖의 형식(교정 등)은 빈 첨부 말풍선이 되지 않게 글로 그립니다.
+    kind: message.type === "image" || message.type === "voice" ? message.type : undefined,
   };
 }
 

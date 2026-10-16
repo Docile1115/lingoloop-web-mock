@@ -33,6 +33,8 @@ const OWNED_DOCUMENTS = [
   "matchingPreferences",
   "dailyMatches",
   "savedPhrases",
+  // 대화에서 받은 교정(corrections/{uid}/items). 부모 문서 없이 items 만 있어도 recursiveDelete 가 지웁니다.
+  "corrections",
   "dmPolicies",
   "aiUsage",
   "writeQuotas",
@@ -66,7 +68,7 @@ export class AccountDeletionError extends Error {
 /**
  * uid 의 Firestore 데이터를 지웁니다. 몇 번을 다시 돌려도 결과가 같습니다.
  *
- * 다른 사람에게 보이는 것부터 지웁니다(대화 → 글 → 남의 글의 댓글·좋아요 → 관계 → 남의 알림함·집).
+ * 다른 사람에게 보이는 것부터 지웁니다(대화 → 글 → 남의 글의 댓글·좋아요 → 관계 → 남의 알림함·교정함·집).
  * 그래서 중간에 멈춰도 남는 것은 대부분 나만 보는 데이터이고, 프로필은 "deleting" 으로 남아 계속 숨겨집니다.
  *
  * 세 번째 인자는 조회 크기와 동시 처리 수입니다. 테스트가 작은 값으로 페이지 넘김을 확인합니다.
@@ -236,17 +238,19 @@ async function deleteRelationships(db, uid, { pageSize }) {
 }
 
 /**
- * 다른 사람의 공간에 남은 흔적: 알림함에 남긴 알림, 집 방명록에 쓴 글, 누른 하트, 남긴 방문 도장,
- * 내 집을 즐겨찾기한 기록.
+ * 다른 사람의 공간에 남은 흔적: 알림함에 남긴 알림, 받은 교정함에 남긴 대화 교정, 집 방명록에 쓴 글,
+ * 누른 하트, 남긴 방문 도장, 내 집을 즐겨찾기한 기록.
  *
  * 알림 문서 id 는 결정적이지만(notificationDocumentId) 방문 알림은 그날 날짜가 sourceId 라 지난 날의
  * 알림을 다시 계산할 수 없고, 알림에는 내가 쓴 글의 미리보기(excerpt)도 들어 있습니다. 그래서 알림함마다
  * actorId 로 찾아 모두 지웁니다(차단 정리 cleanupBlockedPair 와 같은 조회). 내 집에서 다른 사람끼리 생긴
  * 알림(homeOwnerId 가 나)도 지웁니다 — 집이 사라지면 눌러도 갈 곳이 없습니다.
+ * 대화 교정(corrections/{owner}/items)에는 내가 고쳐 쓴 문장(fixed)이 들어 있어 fromUserId 로 찾아 지웁니다.
+ * 대화는 이미 지웠으므로 교정도 남기지 않습니다.
  *
- * homes/{owner}·notifications/{uid}·homeFavorites/{uid} 는 부모 문서 없이 하위 컬렉션만 있는 경우가
- * 많아 컬렉션을 조회해서는 찾을 수 없습니다. 모두 사람 uid 가 id 이므로 프로필을 훑어 사람마다 봅니다.
- * 이것도 collection group 색인이 없어서 고른 방법입니다 — 서비스가 커지면 items.actorId·
+ * homes/{owner}·notifications/{uid}·corrections/{uid}·homeFavorites/{uid} 는 부모 문서 없이 하위 컬렉션만
+ * 있는 경우가 많아 컬렉션을 조회해서는 찾을 수 없습니다. 모두 사람 uid 가 id 이므로 프로필을 훑어 사람마다 봅니다.
+ * 이것도 collection group 색인이 없어서 고른 방법입니다 — 서비스가 커지면 items.actorId·items.fromUserId·
  * entries.authorId collection group 색인을 만들고 그 조회로 바꿉니다.
  */
 async function deleteTracesInOtherUsers(db, uid, { pageSize, concurrency }) {
@@ -261,6 +265,10 @@ async function deleteTracesInOtherUsers(db, uid, { pageSize, concurrency }) {
           deleteDocuments(db, documents.map((document) => document.ref)),
         );
       }
+      const corrections = db.collection("corrections").doc(ownerId).collection("items");
+      await drain(corrections.where("fromUserId", "==", uid).limit(pageSize), (documents) =>
+        deleteDocuments(db, documents.map((document) => document.ref)),
+      );
       await removeHomeEntriesAndHearts(db, db.collection("homes").doc(ownerId), uid, pageSize);
     });
     await removeStampsAndFavorites(db, others, uid);

@@ -247,6 +247,31 @@ function seedWorld(db) {
   notify({ type: "message_request", recipientId: UID, actorId: "ben", sourceId: "conv-b", conversationId: "conv-b", excerpt: "hi?" });
   notify({ type: "message", recipientId: "ben", actorId: "amy", sourceId: "conv-d", conversationId: "conv-d", excerpt: "hello ben" });
 
+  // 대화 교정. 고친 메시지는 대화 안에 있고, 고침을 받은 사람의 교정함(부모 문서 없이 items 만)에도 쌓입니다.
+  put("conversations/conv-a/messages/m3", { id: "m3", senderId: "amy", type: "correction", text: "See you!", original: "see you", targetMessageId: "m1", note: "" });
+  const correction = (ownerId, id, fromUserId, conversationId) =>
+    put(`corrections/${ownerId}/items/${id}`, {
+      id,
+      source: "chat",
+      conversationId,
+      messageId: id,
+      targetMessageId: "target-" + id,
+      original: "i has",
+      fixed: "i have",
+      note: "",
+      fromUserId,
+      createdAt: AT,
+    });
+  // 내가 받은 교정(내 교정함)은 통째로 사라집니다.
+  correction(UID, "fix-from-amy", "amy", "conv-a");
+  correction(UID, "fix-from-cat", "cat", "conv-c");
+  // 내가 고쳐 준 교정은 상대의 교정함에서 사라집니다. 한 사람에게 여러 개면 여러 쪽에 걸쳐 지웁니다.
+  for (const n of [1, 2, 3]) correction("amy", `fix-by-${UID}-${n}`, UID, "conv-a");
+  correction("cat", `fix-by-${UID}`, UID, "conv-c");
+  // 다른 사람끼리의 교정은 남습니다.
+  correction("amy", "fix-by-ben", "ben", "conv-d");
+  correction("ben", "fix-by-amy", "amy", "conv-d");
+
   // 내가 쓴 글 세 개와 거기 달린 남의 댓글·좋아요.
   put(`posts/post-${UID}-1`, { id: `post-${UID}-1`, authorId: UID, author: { id: UID, name: UID }, text: "my post", likes: 1, comments: 1, corrections: 0 });
   put(`posts/post-${UID}-1/reactions/amy`, { userId: "amy", createdAt: AT });
@@ -341,8 +366,12 @@ function assertCleanWorld(db, { reports, othersDailyMatch }) {
     .map(([path]) => path);
   assert.deepEqual(leftovers, []);
 
-  for (const collection of ["profiles", "matchingPreferences", "dailyMatches", "savedPhrases", "dmPolicies", "aiUsage", "writeQuotas", "notifications", "homes", "homeFavorites", "homeQuotas"]) {
+  for (const collection of ["profiles", "matchingPreferences", "dailyMatches", "savedPhrases", "corrections", "dmPolicies", "aiUsage", "writeQuotas", "notifications", "homes", "homeFavorites", "homeQuotas"]) {
     assert.equal(hasTree(db, `${collection}/${UID}`), false, collection);
+  }
+  // 남의 교정함에 내가 남긴 교정(fromUserId 가 나)도 사라집니다.
+  for (const path of [1, 2, 3].map((n) => `corrections/amy/items/fix-by-${UID}-${n}`).concat(`corrections/cat/items/fix-by-${UID}`)) {
+    assert.equal(db.rows.has(path), false, path);
   }
   for (const path of [`likes/${UID}_amy`, `likes/ben_${UID}`, `follows/${UID}_ben`, `follows/amy_${UID}`, `blocks/${UID}_cat`, `blocks/cat_${UID}`, `dmRequestCooldowns/${UID}_amy`, `dmRequestCooldowns/ben_${UID}`]) {
     assert.equal(db.rows.has(path), false, path);
@@ -368,6 +397,7 @@ function assertCleanWorld(db, { reports, othersDailyMatch }) {
     "posts/post-ben", "posts/post-cat-1", "posts/post-cat-2",
     "homes/amy", "homes/amy/entries/e1-ben", "homes/amy/entries/e1-ben/hearts/amy", "homes/amy/entries/e3-cat",
     "homes/amy/stamps/ben", "homes/amy/photos/frame", "homes/cat/entries/e2-cat", "homeFavorites/amy/items/ben",
+    "corrections/amy/items/fix-by-ben", "corrections/ben/items/fix-by-amy",
     ...keptNotifications,
   ]) {
     assert.ok(db.rows.has(path), "kept: " + path);
@@ -495,6 +525,15 @@ test("다시 돌려도 결과가 같고(숫자를 두 번 빼지 않음), 한 �
     await deleteAccountData(paged, UID, options);
     assert.deepEqual(paged.dump(), cleaned, JSON.stringify(options));
   }
+});
+
+test("대화 교정: 내 교정함은 통째로, 남의 교정함에서는 내가 고쳐 준 것만 지운다", async () => {
+  const db = memoryFirestore();
+  seedWorld(db);
+  // 한 쪽에 하나씩 읽어도(에이미에게 남긴 교정 셋) 모두 지웁니다.
+  await deleteAccountData(db, UID, { pageSize: 1, concurrency: 1 });
+  const left = Object.keys(db.dump()).filter((path) => path.startsWith("corrections/")).sort();
+  assert.deepEqual(left, ["corrections/amy/items/fix-by-ben", "corrections/ben/items/fix-by-amy"]);
 });
 
 test("로그인 수단을 지우지 못하면 데이터는 그대로이고 계정은 active 로 돌아와 다시 시도할 수 있다", async (t) => {

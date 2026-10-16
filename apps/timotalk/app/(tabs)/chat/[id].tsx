@@ -4,7 +4,7 @@
  *  - 상대 말을 누르면 번역·저장. AI 코치는 이어 물어볼 말과 다듬은 문장을 줍니다.
  *  - 교환 세션: 20분 동안 앞 절반은 이 상대와 연습하는 말, 뒤 절반은 상대가 연습하는 말(내 모국어)로.
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,8 +14,10 @@ import { useConversations } from "@/features/chats/store";
 import { ThreadMenu } from "@/features/chats/ThreadMenu";
 import { Coach } from "@/features/chat/Coach";
 import { Composer } from "@/features/chat/Composer";
+import { CorrectionDialog } from "@/features/chat/CorrectionDialog";
 import { ExchangeStrip } from "@/features/chat/ExchangeStrip";
-import { exchangeLanguages, translationTarget } from "@/features/chat/language";
+import { exchangeLanguages, speechLanguage, translationTarget } from "@/features/chat/language";
+import { canSpeak, speak, stopSpeaking } from "@/features/chat/speak";
 import { MessageBubble, type Translation as BubbleTranslation } from "@/features/chat/MessageBubble";
 import { useExchangeSession } from "@/features/chat/useExchangeSession";
 import { useMessages, type ChatMessage } from "@/features/chat/useMessages";
@@ -95,6 +97,11 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const [coach, setCoach] = useState<{ draft: string; key: number } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // 고쳐 주려고 연 상대 메시지
+  const [correcting, setCorrecting] = useState<ChatMessage | null>(null);
+
+  // 대화방을 떠나면 읽던 소리를 멈춥니다.
+  useEffect(() => stopSpeaking, []);
   const [answering, setAnswering] = useState<"accept" | "decline" | null>(null);
 
   // 화면이 보이는 동안만 받습니다. 처음 들어오거나 돌아오면 바로 한 번 받습니다.
@@ -284,6 +291,9 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
                   onToggle={() => setOpenId((current) => (current === item.message.id ? null : item.message.id))}
                   onTranslate={() => void translate(item.message)}
                   onSave={() => void save(item.message)}
+                  // 교정은 수락된 대화에서만 보낼 수 있습니다(서버 규칙).
+                  onCorrect={conversation.requestStatus === "pending" ? undefined : () => setCorrecting(item.message)}
+                  onSpeak={canSpeak ? () => speak(item.message.text, speechLanguage(item.message.text, partner)) : undefined}
                   onResend={() => void resend(item.message)}
                 />
                 {item.showTime && !item.message.state ? (
@@ -364,6 +374,21 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
         coach={partner ? { open: Boolean(coach), onToggle: () => setCoach((current) => (current ? null : { draft, key: Date.now() })) } : null}
         maxWidth={CHAT_MAX_WIDTH}
       />
+      {correcting ? (
+        <CorrectionDialog
+          key={correcting.id}
+          original={correcting.text}
+          visible
+          onClose={() => setCorrecting(null)}
+          onSend={async (fixed, note) => {
+            setOpenId(null);
+            const ok = await send({ type: "correction", text: fixed, targetMessageId: correcting.id, original: correcting.text, note });
+            if (ok) showToast(t("고친 문장을 보냈어요. {name}님의 노트에 모여요.", { name: partnerName }));
+            else showToast(t("보내지 못했어요."), "error");
+            return ok;
+          }}
+        />
+      ) : null}
       <ThreadMenu conversation={conversation} open={menuOpen} onClose={() => setMenuOpen(false)} onGone={leaveRoom} />
     </KeyboardAvoidingView>
   );

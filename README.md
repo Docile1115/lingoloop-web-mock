@@ -201,11 +201,11 @@ homeQuotas/{uid}
 | `GET/POST` | `/api/conversations` | 내 대화 목록 조회·대화방 생성 |
 | `GET` | `/api/conversations?box=requests` | 내 DM 요청함 조회 |
 | `POST` | `/api/conversations/:id/accept` | DM 요청 수락 |
-| `GET/POST` | `/api/conversations/:id/messages` | 메시지 조회·전송. `?after=<ISO sentAt>` 는 그 뒤 메시지만 반환. 목록 항목에는 `lastSenderId`·`partnerReadAt` 포함 |
+| `GET/POST` | `/api/conversations/:id/messages` | 메시지 조회·전송. `?after=<ISO sentAt>` 는 그 뒤 메시지만 반환. 목록 항목에는 `lastSenderId`·`partnerReadAt` 포함. `type: "correction"`(상대 글 메시지 고쳐 주기, `targetMessageId`·`note`)은 수락된 대화에서만 받고, 고침을 받은 사람의 받은 교정함에도 남김 |
 | `GET/POST` | `/api/dm/privacy` | DM 수신 정책 조회·저장 |
 | `GET` | `/api/dm/sync` | 서버 저장·복원 상태 확인 |
 | `GET/POST` | `/api/posts/{id}/replies` | 답글·교정 |
-| `GET` | `/api/corrections/received` | 내 글에 달린 교정 |
+| `GET` | `/api/corrections/received` | 받은 교정: 내 글에 달린 교정(`source: "community"`)과 대화에서 받은 교정(`source: "chat"`)을 합쳐 최신순 |
 | `GET` | `/api/likes/received` | 나에게 온 마음 |
 | `GET` | `/api/follows` | 내가 팔로우하는 사람 |
 | `GET/POST/DELETE` | `/api/saved-phrases` | 저장한 표현 |

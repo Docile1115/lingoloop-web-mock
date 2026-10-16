@@ -25,6 +25,13 @@ import { createSessionVerificationCache, isSessionRejection } from "./session-ca
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import { registerHomeRoutes } from "./homes.mjs";
 import { registerAccountRoutes } from "./account-deletion.mjs";
+import {
+  CHAT_CORRECTIONS_LIMIT,
+  correctionInboxEntry,
+  createCorrectionRules,
+  receivedCorrections,
+  sameCorrection,
+} from "./corrections.mjs";
 import { isDiscoverable, presenceIsStale, presenceOf } from "./discovery.mjs";
 import { SUPPORT_SCHEMA, normalizeSupport, supportInstructions, supportLanguages } from "./ai-support.mjs";
 import { createValidators, isDocumentId } from "./validate.mjs";
@@ -171,6 +178,8 @@ class ApiError extends Error {
 
 /* .doc() 에 들어가는 경로 값·본문 값은 모두 docId 로 확인합니다(validate.mjs). */
 const { docId, optionalDocId, mediaDataUri, isoTimestamp } = createValidators(ApiError);
+/* 대화 교정(type: "correction")의 본문 확인과 transaction 안의 대상 확인(corrections.mjs). */
+const { correctionInput, readCorrection } = createCorrectionRules(ApiError);
 
 function nowIso() {
   return new Date().toISOString();
@@ -870,6 +879,11 @@ function takeWriteQuota(transaction, quotaSnapshot, action) {
 
 function notificationItems(recipientId) {
   return db.collection("notifications").doc(recipientId).collection("items");
+}
+
+/** 대화에서 고침을 받은 사람의 받은 교정함. 문서 id 는 교정 메시지 id 입니다(corrections.mjs). */
+function correctionItems(uid) {
+  return db.collection("corrections").doc(uid).collection("items");
 }
 
 function notificationRef({ type, recipientId, actorId, sourceId }) {
@@ -2038,39 +2052,49 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
   );
 });
 
-/** 내 글에 달린 교정. 학습 화면이 "받은 교정" 으로 보여줍니다. */
+/**
+ * 받은 교정. 학습 화면이 "받은 교정" 으로 보여줍니다.
+ * 내 글에 달린 교정(source: "community")과 대화에서 상대가 고쳐 준 내 메시지(source: "chat",
+ * 받은 교정함 최신 200개)를 합쳐 최신순으로 돌려줍니다. 어느 쪽이든 차단 관계인 사람의 교정은 뺍니다.
+ * 새 앱은 ?include=chat 을 붙여 보내지만 따로 거르지 않습니다 — 옛 웹도 대화 교정을 같은 모양
+ * (고치기 전 → 고친 뒤, 보낸 사람)으로 그리고, 비어 있는 postText 는 쓰지 않습니다.
+ */
 app.get("/api/corrections/received", requireUser, async (req, res) => {
-  const postsSnapshot = await db.collection("posts").where("authorId", "==", req.auth.uid).limit(100).get();
+  const [postsSnapshot, chatSnapshot, blocked] = await Promise.all([
+    db.collection("posts").where("authorId", "==", req.auth.uid).limit(100).get(),
+    correctionItems(req.auth.uid).orderBy("createdAt", "desc").limit(CHAT_CORRECTIONS_LIMIT).get(),
+    blockedBothWays(req.auth.uid),
+  ]);
   const myPosts = postsSnapshot.docs.map((document) => document.data());
-  const blocked = await blockedBothWays(req.auth.uid);
   const groups = await Promise.all(
     myPosts.map(async (post) => {
       const snapshot = await db.collection("posts").doc(post.id).collection("replies").where("kind", "==", "correction").limit(50).get();
       return snapshot.docs.map((document) => ({ ...document.data(), postText: post.text }));
     }),
   );
-  const rows = groups.flat().filter((row) => !blocked.has(row.authorId));
-  const profiles = await profilesByIds(rows.map((row) => row.authorId));
-  const corrections = rows
-    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
-    .map((row) => {
-      const author = profiles.get(row.authorId);
-      const avatar = avatarPresentation(author);
-      return {
-        id: row.id,
-        postId: row.postId,
-        postText: row.postText,
-        original: row.original,
-        fixed: row.text,
-        createdAt: row.createdAt,
-        from: author?.name ?? null,
-        fromFlag: author?.country?.flag ?? "🌐",
-        fromAvatarUrl: avatar.avatarUrl,
-        fromAvatarMode: avatar.avatarMode,
-        fromAvatarConfig: avatar.avatarConfig,
-        fromCountryCode: author?.country?.code ?? "",
-      };
-    });
+  const replies = groups.flat();
+  const chatEntries = chatSnapshot.docs.map((document) => document.data());
+  const profiles = await profilesByIds(
+    [...replies.map((row) => row.authorId), ...chatEntries.map((row) => row.fromUserId)].filter((id) => !blocked.has(id)),
+  );
+  // 두 목록이 같은 작성자 카드를 씁니다.
+  const authorCard = (author) => {
+    const avatar = avatarPresentation(author);
+    return {
+      from: author?.name ?? null,
+      fromFlag: author?.country?.flag ?? "🌐",
+      fromAvatarUrl: avatar.avatarUrl,
+      fromAvatarMode: avatar.avatarMode,
+      fromAvatarConfig: avatar.avatarConfig,
+      fromCountryCode: author?.country?.code ?? "",
+    };
+  };
+  const corrections = receivedCorrections({
+    replies,
+    chatEntries,
+    blocked,
+    authorOf: (uid) => authorCard(profiles.get(uid)),
+  });
   return success(res, req, corrections, 200, { pagination: { total: corrections.length, nextCursor: null } });
 });
 
@@ -2570,7 +2594,7 @@ app.get("/api/conversations/:conversationId/messages", requireUser, async (req, 
 async function createMessage(req, res, conversationId) {
   const id = docId(conversationId, "conversationId");
   const type = req.body?.type ?? "text";
-  if (!["text", "voice", "image"].includes(type)) {
+  if (!["text", "voice", "image", "correction"].includes(type)) {
     throw new ApiError(422, "VALIDATION_ERROR", "지원하지 않는 메시지 형식입니다.", { field: "type" });
   }
   /**
@@ -2580,14 +2604,19 @@ async function createMessage(req, res, conversationId) {
    * 압축하므로 보통 100~200KB 이고, Firestore 문서 한도(1MB)를 넘지 않게
    * 여기서도 한 번 더 막습니다. 버킷이 생기면 이 자리에 그 주소가 들어오면 됩니다.
    * 외부 주소는 받지 않습니다 — 받는 사람의 IP 와 읽은 시각이 그 서버에 남습니다.
+   * 글과 교정에는 첨부가 없습니다.
    */
-  const media = type === "text" ? "" : mediaDataUri(req.body?.media, "media", type === "image" ? "image" : "audio");
-  if (type !== "text" && !media) {
+  const attached = type === "image" || type === "voice";
+  const media = attached ? mediaDataUri(req.body?.media, "media", type === "image" ? "image" : "audio") : "";
+  if (attached && !media) {
     throw new ApiError(422, "VALIDATION_ERROR", "보낼 파일이 없습니다.", { field: "media" });
   }
+  // 교정은 고친 문장(text)과 고칠 메시지(targetMessageId)·한 줄 설명(note)을 받습니다(corrections.mjs).
+  const correction = type === "correction" ? correctionInput(req.body) : null;
   // 사진·음성 메시지의 text 는 목록에 보일 한 줄입니다(빈 값이면 화면이 형식으로 채웁니다).
-  const text =
-    type === "text"
+  const text = correction
+    ? correction.text
+    : type === "text"
       ? safeString(req.body?.text, "text", { min: 1, max: 4000 })
       : optionalString(req.body?.text, "text", 200) || (type === "image" ? "사진" : "음성 메시지");
   const clientMessageId = isDocumentId(req.body?.clientMessageId, { min: 8 })
@@ -2606,7 +2635,14 @@ async function createMessage(req, res, conversationId) {
     const messageSnapshot = await transaction.get(messageReference);
     if (messageSnapshot.exists) {
       const existing = messageSnapshot.data();
-      if (existing.senderId !== req.auth.uid || existing.text !== text || existing.type !== type || (existing.media || "") !== media) {
+      // 교정은 고친 메시지와 설명까지 같아야 같은 요청의 재시도입니다.
+      if (
+        existing.senderId !== req.auth.uid ||
+        existing.text !== text ||
+        existing.type !== type ||
+        (existing.media || "") !== media ||
+        (correction && !sameCorrection(existing, correction))
+      ) {
         throw new ApiError(409, "MESSAGE_ID_CONFLICT", "이미 사용된 메시지 ID입니다.");
       }
       return { message: existing, created: false };
@@ -2618,6 +2654,18 @@ async function createMessage(req, res, conversationId) {
       code: "CONVERSATION_BLOCKED",
       message: "차단된 상대에게는 메시지를 보낼 수 없습니다.",
     });
+
+    /* 교정은 수락된 대화에서 상대가 보낸 글 메시지에만 보냅니다. 고칠 메시지는 이 대화 안에서 찾고,
+       받는 사람의 교정함 칸과 함께 아래 쓰기보다 먼저 읽습니다(corrections.mjs). */
+    const correctionFields = correction
+      ? await readCorrection(transaction, {
+          status: conversationStatus(conversation),
+          targetReference: conversationReference.collection("messages").doc(correction.targetMessageId),
+          inboxReference: correctionItems(recipientId).doc(clientMessageId),
+          recipientId,
+          input: correction,
+        })
+      : null;
 
     if (conversationStatus(conversation) === "pending") {
       if (conversation.requestSenderId !== req.auth.uid) {
@@ -2645,8 +2693,14 @@ async function createMessage(req, res, conversationId) {
       media,
       sentAt: timestamp,
       status: "sent",
+      // 교정: 원문(대상 메시지에서 복사)·고친 메시지 id·설명
+      ...correctionFields,
     };
     transaction.create(messageReference, message);
+    if (correctionFields) {
+      // 고침을 받은 사람의 받은 교정함(GET /api/corrections/received)에도 같은 transaction 으로 남깁니다.
+      transaction.create(correctionItems(recipientId).doc(clientMessageId), correctionInboxEntry(message));
+    }
     /* 받는 사람의 안읽음을 올립니다.
        예전에는 목록이 늘 unreadCount: 0 을 내려 보내 안읽음 표시가 아예 뜨지
        않았습니다. 목록마다 메시지를 세면 대화 수만큼 질의가 늘어나므로
