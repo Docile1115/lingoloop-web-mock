@@ -4,6 +4,8 @@
  * 예전에는 상대의 언어만 AI 에 보내서, 첫 인사가 어떤 언어로 나올지 그때그때 달랐습니다.
  * 이제 연습하는 말(practice)과 설명하는 말(helper)을 정해서 보냅니다.
  *  - practice: 내가 배우는 말 중 상대의 모국어(상대가 가르쳐 줄 말). 첫 인사·이어 묻기는 이 말로 씁니다.
+ *    겹치는 말이 없으면 상대의 모국어입니다 — 상대가 반드시 읽을 수 있고, 오늘의 파트너도 이 말로 골랐습니다.
+ *    (새 앱 대화방의 apps/timotalk/src/features/chat/language.ts exchangeLanguages 와 같은 순서입니다.)
  *  - helper: 화면 언어(없으면 내 모국어). 번역·주제·팁은 이 말로 씁니다.
  *
  * 응답에는 문장+번역 묶음(openers·followUps)과 함께, 예전 화면이 읽는 문자열 목록
@@ -16,7 +18,7 @@ const SCREEN_LOCALES = new Set(["ko", "en", "ja"]);
 export function supportLanguages(learner, partner, locale) {
   const learning = (learner?.learningLanguages || []).map((item) => item?.code).filter(Boolean);
   const partnerNative = partner?.nativeLanguages || [];
-  const practice = learning.find((code) => partnerNative.includes(code)) || learning[0] || partnerNative[0] || "en";
+  const practice = learning.find((code) => partnerNative.includes(code)) || partnerNative[0] || learning[0] || "en";
   const helper = SCREEN_LOCALES.has(locale) ? locale : learner?.nativeLanguages?.[0] || "ko";
   return { practice, helper };
 }

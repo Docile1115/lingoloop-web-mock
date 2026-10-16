@@ -8,8 +8,10 @@ test("연습하는 말은 내가 배우는 말 중 상대의 모국어다", () =
   assert.deepEqual(supportLanguages(learner, { nativeLanguages: ["ja"] }, "ko"), { practice: "ja", helper: "ko" });
   // 상대가 영어 원어민이면 두 번째로 배우는 영어로 씁니다.
   assert.deepEqual(supportLanguages(learner, { nativeLanguages: ["en"] }, "ko"), { practice: "en", helper: "ko" });
-  // 겹치는 말이 없으면 내가 처음 배우는 말입니다.
-  assert.deepEqual(supportLanguages(learner, { nativeLanguages: ["fr"] }, "ko"), { practice: "ja", helper: "ko" });
+  // 겹치는 말이 없으면 상대의 모국어입니다(상대가 반드시 읽을 수 있는 말).
+  assert.deepEqual(supportLanguages(learner, { nativeLanguages: ["fr"] }, "ko"), { practice: "fr", helper: "ko" });
+  // 상대의 모국어를 모르면 내가 처음 배우는 말입니다.
+  assert.deepEqual(supportLanguages(learner, { nativeLanguages: [] }, "ko"), { practice: "ja", helper: "ko" });
 });
 
 test("설명하는 말은 화면 언어이고, 모르는 값이면 내 모국어다", () => {
