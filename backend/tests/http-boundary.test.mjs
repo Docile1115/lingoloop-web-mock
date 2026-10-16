@@ -200,4 +200,18 @@ test("HTTP boundary rejects bypasses and serves only non-mock metadata", async (
   });
   assert.equal(anonymousRoomWrite.status, 401);
   assert.equal((await anonymousRoomWrite.json()).error.code, "AUTH_REQUIRED");
+
+  // 계정 삭제도 다른 쓰기처럼 출처를 먼저 보고, 확인 문구보다 로그인 확인이 앞섭니다.
+  const accountDelete = (origin) =>
+    fetch(baseUrl + "/api/account", {
+      method: "DELETE",
+      headers: { "content-type": "application/json", origin, "x-lingoloop-proxy": "test-proxy-secret" },
+      body: JSON.stringify({ confirm: "DELETE" }),
+    });
+  const foreignAccountDelete = await accountDelete("https://attacker.example");
+  assert.equal(foreignAccountDelete.status, 403);
+  assert.equal((await foreignAccountDelete.json()).error.code, "INVALID_ORIGIN");
+  const anonymousAccountDelete = await accountDelete("http://localhost:5174");
+  assert.equal(anonymousAccountDelete.status, 401);
+  assert.equal((await anonymousAccountDelete.json()).error.code, "AUTH_REQUIRED");
 });
