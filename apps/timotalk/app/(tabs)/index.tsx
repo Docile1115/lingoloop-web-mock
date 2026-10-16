@@ -2,11 +2,13 @@
  * 오늘: 하루에 할 일을 한 화면에.
  *  - 오늘의 파트너(위의 3명) — 휴대폰은 한 명을 크게, 넓은 화면은 셋을 나란히
  *  - 내 차례 — 내 답을 기다리는 대화
+ *  - 복습 — 다시 볼 문장이 있을 때만
  */
 import { useState } from "react";
 import { Pressable, useWindowDimensions, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useNotifications } from "@/features/notifications/store";
+import { ReviewNudge } from "@/features/notes/ReviewNudge";
 import { MyTurn } from "@/features/today/MyTurn";
 import { PartnerCard } from "@/features/today/PartnerCard";
 import { useDailyMatches } from "@/features/today/data";
@@ -128,8 +130,9 @@ export default function Today() {
           />
           {partners}
         </View>
-        <View style={{ width: aside ? 300 : "100%" }}>
+        <View style={{ width: aside ? 300 : "100%", gap: space.xl }}>
           <MyTurn />
+          <ReviewNudge />
         </View>
       </View>
     </Page>

@@ -1,6 +1,7 @@
 /**
- * 말풍선. 상대 말을 누르면 도구(번역·저장)가 열립니다. 번역은 말풍선 안에 이어서 보여줍니다.
+ * 말풍선. 상대 말을 누르면 도구(번역·저장·교정)가 열립니다. 번역은 말풍선 안에 이어서 보여줍니다.
  * 사진은 눌러서 크게 보고, 음성은 말풍선 안에서 바로 틉니다.
+ * 교정 메시지는 누가 보냈든 같은 흰 카드로 그립니다 — 초록 말풍선 위에서는 지운 곳·고친 곳 색이 잘 안 보입니다.
  */
 import { Pressable, View } from "react-native";
 import { t } from "@/lib/i18n";
@@ -8,6 +9,7 @@ import { useTheme } from "@/theme/theme";
 import { radius, space } from "@/theme/tokens";
 import { Icon, type IconName } from "@/ui/Icon";
 import { Text } from "@/ui/Text";
+import { CorrectionView } from "@/features/notes/CorrectionView";
 import { PhotoMessage } from "./PhotoMessage";
 import type { ChatMessage } from "./useMessages";
 import { VoiceMessage } from "./VoiceMessage";
@@ -23,6 +25,8 @@ export function MessageBubble({
   onToggle,
   onTranslate,
   onSave,
+  onCorrect,
+  onSpeak,
   onResend,
 }: {
   message: ChatMessage;
@@ -33,10 +37,15 @@ export function MessageBubble({
   onToggle: () => void;
   onTranslate: () => void;
   onSave: () => void;
+  /** 상대 문장 고쳐 주기(교정할 수 없는 대화면 없음) */
+  onCorrect?: () => void;
+  /** 소리 내어 듣기(이 기기가 못 하면 없음) */
+  onSpeak?: () => void;
   onResend: () => void;
 }) {
   const { c } = useTheme();
   const tools = !mine && message.type === "text";
+  const correction = message.type === "correction";
 
   const photo = message.type === "image" && Boolean(message.media);
   const body =
@@ -44,6 +53,16 @@ export function MessageBubble({
       <PhotoMessage media={message.media!} />
     ) : message.type === "voice" && message.media ? (
       <VoiceMessage conversationId={message.conversationId} messageId={message.id} media={message.media} mine={mine} />
+    ) : correction ? (
+      <View style={{ gap: space.sm, minWidth: 180 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+          <Icon name="pencil" size={14} color={c.primaryStrong} />
+          <Text variant="label" tone="primaryStrong">
+            {mine ? t("고쳐 준 문장") : t("내 문장을 고쳐 줬어요")}
+          </Text>
+        </View>
+        <CorrectionView original={message.original ?? ""} fixed={message.text} note={message.note} />
+      </View>
     ) : (
       <Text variant="body" style={{ color: mine ? c.onPrimary : c.ink }} selectable>
         {message.text}
@@ -56,12 +75,12 @@ export function MessageBubble({
         onPress={tools ? onToggle : message.state === "failed" ? onResend : undefined}
         disabled={!tools && message.state !== "failed"}
         accessibilityRole={tools || message.state === "failed" ? "button" : undefined}
-        accessibilityHint={tools ? t("번역·저장 도구를 열어요") : message.state === "failed" ? t("다시 보내요") : undefined}
+        accessibilityHint={tools ? t("번역·저장·교정 도구를 열어요") : message.state === "failed" ? t("다시 보내요") : undefined}
         aria-expanded={tools ? open : undefined}
         style={{
-          backgroundColor: mine ? c.primary : c.surface,
-          borderWidth: mine ? 0 : open ? 2 : 1,
-          borderColor: open ? c.primaryStrong : c.line,
+          backgroundColor: mine && !correction ? c.primary : c.surface,
+          borderWidth: correction ? 1 : mine ? 0 : open ? 2 : 1,
+          borderColor: correction ? c.primaryStrong : open ? c.primaryStrong : c.line,
           borderRadius: radius.lg,
           borderTopLeftRadius: mine ? radius.lg : 6,
           borderTopRightRadius: mine ? 6 : radius.lg,
@@ -90,9 +109,11 @@ export function MessageBubble({
       ) : null}
 
       {open && tools ? (
-        <View accessibilityRole="toolbar" accessibilityLabel={t("메시지 도구")} style={{ flexDirection: "row", gap: space.xs + 2 }}>
+        <View accessibilityRole="toolbar" accessibilityLabel={t("메시지 도구")} style={{ flexDirection: "row", flexWrap: "wrap", gap: space.xs + 2 }}>
           <Tool icon="translate" label={translation?.status === "ready" ? t("번역 다시") : t("번역")} onPress={onTranslate} />
           <Tool icon={saved ? "bookmarkFilled" : "bookmark"} label={saved ? t("저장했어요") : t("저장")} onPress={onSave} disabled={saved} />
+          {onSpeak ? <Tool icon="speaker" label={t("듣기")} onPress={onSpeak} /> : null}
+          {onCorrect ? <Tool icon="pencil" label={t("고쳐 주기")} onPress={onCorrect} /> : null}
         </View>
       ) : null}
     </View>
