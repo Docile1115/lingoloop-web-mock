@@ -1,0 +1,53 @@
+name: Verify TimoTalk app
+
+# 새 공용 앱(apps/timotalk)만 검사합니다. 운영 배포(deploy-cloud-run.yml)와는 따로 돌아서
+# 배포를 막거나 늦추지 않습니다. 공용 코드(app/lib)가 바뀌어도 새 앱이 깨지지 않는지 함께 봅니다.
+on:
+  pull_request:
+    paths:
+      - "apps/timotalk/**"
+      - "app/lib/**"
+      - ".github/workflows/verify-timotalk.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/timotalk/**"
+      - "app/lib/**"
+      - ".github/workflows/verify-timotalk.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: verify-timotalk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Type-check and build web, iOS and Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/timotalk/package-lock.json
+
+      - name: Install app dependencies
+        run: npm --prefix apps/timotalk ci
+
+      - name: Type-check
+        run: npm --prefix apps/timotalk run typecheck
+
+      - name: Build web
+        run: npm --prefix apps/timotalk run export:web
+
+      - name: Bundle iOS and Android
+        run: npm --prefix apps/timotalk run bundle
