@@ -18,7 +18,15 @@ import { Text } from "./Text";
 
 const ICON_FOR: Record<string, IconName> = { index: "today", chats: "chat", community: "community", notes: "notes", me: "me" };
 /** 메뉴에 없는 숨은 경로와, 그 경로에 있을 때 켜 둘 메뉴 */
-const HIDDEN_ROUTES: Record<string, string> = { "chat/[id]": "chats" };
+const HIDDEN_ROUTES: Record<string, string> = {
+  "chat/[id]": "chats",
+  "people/[id]": "index",
+  "discover/index": "index",
+  "discover/filters": "index",
+  notifications: "index",
+};
+/** 휴대폰에서 아래 탭을 감추는 화면 — 입력칸이 화면 아래를 써야 하는 대화방 */
+const FULLSCREEN_ROUTES = new Set(["chat/[id]"]);
 
 export function AppNav({ state, descriptors, navigation, variant }: BottomTabBarProps & { variant: "bottom" | "side" }) {
   const { c } = useTheme();
@@ -29,7 +37,7 @@ export function AppNav({ state, descriptors, navigation, variant }: BottomTabBar
   const current = state.routes[state.index]?.name ?? "";
   const selectedName = HIDDEN_ROUTES[current] ?? current;
   // 휴대폰에서 대화방에 들어가면 아래 탭을 감춥니다 — 입력칸이 화면 아래를 써야 합니다.
-  if (variant === "bottom" && HIDDEN_ROUTES[current]) return null;
+  if (variant === "bottom" && FULLSCREEN_ROUTES.has(current)) return null;
 
   const items = state.routes.filter((route) => !HIDDEN_ROUTES[route.name]).map((route) => {
     const focused = route.name === selectedName;

@@ -1,13 +1,16 @@
 /**
  * 말풍선. 상대 말을 누르면 도구(번역·저장)가 열립니다. 번역은 말풍선 안에 이어서 보여줍니다.
+ * 사진은 눌러서 크게 보고, 음성은 말풍선 안에서 바로 틉니다.
  */
-import { Image, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { t } from "@/lib/i18n";
 import { useTheme } from "@/theme/theme";
 import { radius, space } from "@/theme/tokens";
 import { Icon, type IconName } from "@/ui/Icon";
 import { Text } from "@/ui/Text";
+import { PhotoMessage } from "./PhotoMessage";
 import type { ChatMessage } from "./useMessages";
+import { VoiceMessage } from "./VoiceMessage";
 
 export type Translation = { status: "loading" } | { status: "ready"; text: string } | { status: "error"; text: string };
 
@@ -35,17 +38,12 @@ export function MessageBubble({
   const { c } = useTheme();
   const tools = !mine && message.type === "text";
 
+  const photo = message.type === "image" && Boolean(message.media);
   const body =
-    message.type === "image" && message.media ? (
-      <Image source={{ uri: message.media }} style={{ width: 220, height: 220, borderRadius: radius.sm }} resizeMode="cover" accessibilityLabel={t("사진")} />
-    ) : message.type === "voice" ? (
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
-        <Icon name="mic" size={16} color={mine ? c.onPrimary : c.muted} />
-        {/* 음성 재생은 2단계에서 붙입니다(녹음·재생을 함께 만듭니다). */}
-        <Text variant="callout" style={{ color: mine ? c.onPrimary : c.muted }}>
-          {t("음성 메시지")}
-        </Text>
-      </View>
+    photo ? (
+      <PhotoMessage media={message.media!} />
+    ) : message.type === "voice" && message.media ? (
+      <VoiceMessage conversationId={message.conversationId} messageId={message.id} media={message.media} mine={mine} />
     ) : (
       <Text variant="body" style={{ color: mine ? c.onPrimary : c.ink }} selectable>
         {message.text}
@@ -67,8 +65,9 @@ export function MessageBubble({
           borderRadius: radius.lg,
           borderTopLeftRadius: mine ? radius.lg : 6,
           borderTopRightRadius: mine ? 6 : radius.lg,
-          paddingVertical: open ? space.sm + 1 : space.sm + 2,
-          paddingHorizontal: open ? space.md + 1 : space.md + 2,
+          // 사진은 말풍선 테두리만 남기고 거의 꽉 채웁니다.
+          paddingVertical: photo ? 4 : open ? space.sm + 1 : space.sm + 2,
+          paddingHorizontal: photo ? 4 : open ? space.md + 1 : space.md + 2,
           opacity: message.state === "sending" ? 0.7 : 1,
           gap: space.xs + 2,
         }}

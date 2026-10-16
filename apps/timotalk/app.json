@@ -41,8 +41,27 @@
       "expo-router",
       "expo-localization",
       "expo-apple-authentication",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow photo access so you can choose photos to send in chats.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow microphone access so you can record voice messages."
+        }
+      ],
       "expo-system-ui"
     ],
+    "locales": {
+      "ko": "./locales/ko.json",
+      "en": "./locales/en.json",
+      "ja": "./locales/ja.json"
+    },
     "experiments": {
       "typedRoutes": true
     }

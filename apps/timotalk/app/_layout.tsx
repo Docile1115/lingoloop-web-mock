@@ -10,6 +10,7 @@ import { StatusBar } from "expo-status-bar";
 import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConversationsProvider } from "@/features/chats/store";
+import { NotificationsProvider } from "@/features/notifications/store";
 import { I18nProvider, t, useLocale } from "@/lib/i18n";
 import { SessionProvider, useSession } from "@/lib/session";
 import { ThemeProvider, useTheme } from "@/theme/theme";
@@ -65,6 +66,7 @@ function Root() {
   const needsSetup = signedIn && me?.onboardedAt === null;
   return (
     <ConversationsProvider key={signedIn ? "in" : "out"} enabled={signedIn && !needsSetup}>
+      <NotificationsProvider key={signedIn ? "in" : "out"} enabled={signedIn && !needsSetup}>
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
       {/* 언어를 바꾸면 화면을 새로 그립니다. 화면들은 그릴 때 t() 를 부르기 때문입니다. */}
       <Stack key={locale} screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.bg } }}>
@@ -78,6 +80,7 @@ function Root() {
           <Stack.Screen name="sign-in" />
         </Stack.Protected>
       </Stack>
+      </NotificationsProvider>
     </ConversationsProvider>
   );
 }

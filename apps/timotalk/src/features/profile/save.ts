@@ -6,6 +6,7 @@
  * 조건 저장(POST /api/matching/preferences)은 빠진 칸을 기본값으로 덮으므로, 지금 조건을 읽어 언어만 바꿉니다.
  * 조건 저장이 실패해도 프로필 저장은 끝난 것으로 둡니다 — 조건은 나중에 다시 고를 수 있습니다.
  */
+import { notifyMatchingChanged } from "@/features/today/data";
 import { api } from "@/lib/api";
 import type { Profile } from "@/lib/types";
 import { profilePatch, type ProfileDraft } from "./draft";
@@ -32,7 +33,9 @@ export async function saveProfile(draft: ProfileDraft, me: Profile, firstRun: bo
   const before = me.learningLanguages.map((item) => item.code).join(",");
   const after = saved.learningLanguages.map((item) => item.code);
   if (firstRun || before !== after.join(",")) {
-    await pointMatchingAt(after.slice(0, 3), draft.availability, firstRun).catch(() => undefined);
+    await pointMatchingAt(after.slice(0, 3), draft.availability, firstRun)
+      .then(notifyMatchingChanged)
+      .catch(() => undefined);
   }
   // 저장은 됐는데 응답에 완료 시각이 빠졌더라도 이번 실행에서는 첫 설정을 다시 묻지 않습니다.
   // 서버 값이 기준이라 다음 실행 때 /api/auth/me 가 다시 판단합니다.

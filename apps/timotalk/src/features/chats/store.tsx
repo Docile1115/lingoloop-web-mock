@@ -129,9 +129,12 @@ export function isMyTurn(conversation: Conversation): boolean {
   return Boolean(conversation.partner && conversation.lastSenderId === conversation.partner.id && conversation.requestStatus !== "pending");
 }
 
-/** 메시지가 아직 없는 대화에 서버가 넣는 미리보기(한국어 고정 문구). 화면 언어로 바꿔 보여 줍니다. */
-const EMPTY_PREVIEW = msg("새 대화를 시작해 보세요.");
+/**
+ * 서버가 미리보기에 넣는 한국어 고정 문구: 메시지가 아직 없는 대화, 글 없이 보낸 사진·음성.
+ * 화면 언어로 바꿔 보여 줍니다.
+ */
+const SERVER_PREVIEWS = new Set<string>([msg("새 대화를 시작해 보세요."), msg("사진"), msg("음성 메시지")]);
 
 export function previewText(conversation: Conversation): string {
-  return conversation.preview === EMPTY_PREVIEW ? tx(EMPTY_PREVIEW) : conversation.preview;
+  return SERVER_PREVIEWS.has(conversation.preview) ? tx(conversation.preview) : conversation.preview;
 }
