@@ -2,7 +2,7 @@
  * 대화방.
  *  - 12초마다 새 메시지만 받습니다(화면이 보이고 앱이 앞에 있을 때만).
  *  - 상대 말을 누르면 번역·저장. AI 코치는 이어 물어볼 말과 다듬은 문장을 줍니다.
- *  - 교환 세션: 20분 동안 앞 절반은 내가 배우는 말, 뒤 절반은 내 모국어로.
+ *  - 교환 세션: 20분 동안 앞 절반은 이 상대와 연습하는 말, 뒤 절반은 상대가 연습하는 말(내 모국어)로.
  */
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
@@ -12,12 +12,12 @@ import { currentLocaleSnapshot } from "@shared/i18n/core";
 import { useConversations } from "@/features/chats/store";
 import { Coach } from "@/features/chat/Coach";
 import { ExchangeStrip } from "@/features/chat/ExchangeStrip";
-import { translationTarget } from "@/features/chat/language";
+import { exchangeLanguages, translationTarget } from "@/features/chat/language";
 import { MessageBubble, type Translation as BubbleTranslation } from "@/features/chat/MessageBubble";
 import { useExchangeSession } from "@/features/chat/useExchangeSession";
 import { useMessages, type ChatMessage } from "@/features/chat/useMessages";
 import { api, failureText } from "@/lib/api";
-import { t } from "@/lib/i18n";
+import { t, useLocale } from "@/lib/i18n";
 import { useMe } from "@/lib/session";
 import type { Conversation, Translation } from "@/lib/types";
 import { useAppActive } from "@/lib/useAppActive";
@@ -29,7 +29,7 @@ import { Avatar } from "@/ui/Avatar";
 import { Button, IconButton } from "@/ui/Button";
 import { Icon } from "@/ui/Icon";
 import { ErrorState, LoadingState } from "@/ui/States";
-import { Text } from "@/ui/Text";
+import { Text, textFont } from "@/ui/Text";
 import { showToast } from "@/ui/Toast";
 
 const POLL_MS = 12_000;
@@ -72,17 +72,19 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const me = useMe();
+  const { locale } = useLocale();
   const active = useAppActive();
   const { markRead } = useConversations();
   const partner = conversation.partner;
   const partnerName = partner?.name ?? t("알 수 없는 사용자");
-  const learningCode = me.learningLanguages[0]?.code;
-  const learningName = learningCode ? languageName(learningCode) : "";
-  const nativeName = me.nativeLanguages[0] ? languageName(me.nativeLanguages[0]) : "";
+  // 이 상대와 연습하는 말(상대의 모국어)과 상대가 연습하는 말(내 모국어). 내가 처음 배우는 말이 아닙니다.
+  const { practice: practiceCode, teach: teachCode } = exchangeLanguages(me, partner);
+  const practiceName = practiceCode ? languageName(practiceCode) : "";
+  const teachName = teachCode ? languageName(teachCode) : "";
 
   const onFetched = useCallback(() => markRead(conversation.id), [conversation.id, markRead]);
   const { messages, status, error, fetchMessages, send, resend } = useMessages(conversation.id, me.id, onFetched);
-  const session = useExchangeSession(conversation.id, learningName, nativeName);
+  const session = useExchangeSession(conversation.id, practiceName, teachName);
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -148,7 +150,7 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
     setTranslations((current) => ({ ...current, [message.id]: { status: "loading" } }));
     try {
       const result = await api<Translation>("/api/translate", {
-        body: { text: message.text, targetLanguage: translationTarget(message.text, currentLocaleSnapshot(), learningCode) },
+        body: { text: message.text, targetLanguage: translationTarget(message.text, currentLocaleSnapshot(), practiceCode) },
         slow: true,
       });
       setTranslations((current) => ({ ...current, [message.id]: { status: "ready", text: result.translatedText } }));
@@ -189,7 +191,7 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
               </Text>
             ) : null}
           </View>
-          {!session.active && learningName && nativeName ? (
+          {!session.active && practiceName && teachName ? (
             <IconButton icon="timer" label={t("교환 세션 시작")} plain onPress={session.start} />
           ) : null}
         </View>
@@ -286,7 +288,7 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
           editable={!composerLocked}
           multiline
           maxLength={4000}
-          placeholder={composerLocked ? t("수락을 기다리고 있어요") : learningName ? t("{language}로 답해 보세요", { language: learningName }) : t("메시지")}
+          placeholder={composerLocked ? t("수락을 기다리고 있어요") : practiceName ? t("{language}로 답해 보세요", { language: practiceName }) : t("메시지")}
           placeholderTextColor={c.muted}
           accessibilityLabel={t("메시지")}
           style={{
@@ -301,6 +303,7 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
             borderColor: c.line,
             backgroundColor: c.surface,
             color: c.ink,
+            fontFamily: textFont(draft, locale),
             fontSize: 15,
             lineHeight: 21,
           }}

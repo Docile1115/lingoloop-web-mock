@@ -105,7 +105,7 @@ export const radius = { sm: 12, md: 16, lg: 20, pill: 999 } as const;
 export const tapSize = 44;
 
 /**
- * 글꼴. 웹은 IBM Plex Sans KR(+html.tsx 에서 불러옴), 앱은 기기 기본 글꼴입니다.
+ * 글꼴. 웹은 IBM Plex Sans KR(webShell.ts 에서 불러옴), 앱은 기기 기본 글꼴입니다.
  * 한글 글꼴 파일은 굵기마다 수 MB 라 앱에 넣지 않습니다 — 기기 기본(애플 SD 산돌고딕·
  * 노토 산스)이 한국 앱에서 가장 흔하고 잘 읽힙니다.
  */
@@ -113,6 +113,16 @@ export const fontFamily = Platform.select({
   web: "'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif",
   default: undefined,
 });
+
+/**
+ * 웹에서 중국어·일본어 문장에 쓰는 글꼴(ui/Text.tsx 가 글자 모양을 보고 고릅니다).
+ * IBM Plex Sans KR 에는 간체자와 일본식 한자가 없어서, 그대로 두면 없는 글자만 브라우저가
+ * 다른 글꼴(윈도에서는 명조 계열)로 채워 한 문장 안에서 글꼴이 섞입니다. 기기에 있는 고딕 글꼴을 고릅니다.
+ */
+export const cjkFontFamily = {
+  zh: "'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', 'Noto Sans CJK SC', 'Source Han Sans SC', sans-serif",
+  ja: "'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Yu Gothic', Meiryo, 'Noto Sans JP', 'Noto Sans CJK JP', sans-serif",
+} as const;
 
 /** 글자 단계. 화면에서 새 크기를 지어내지 않고 여기서 고릅니다. */
 export const type = {
