@@ -30,13 +30,16 @@ export const REPORT_REASONS: Array<{ code: string; label: MessageKey }> = [
 ];
 const SERVER_REASONS = new Set(["spam", "scam", "harassment", "dating", "other"]);
 
-export async function reportUser(partnerId: string, reason: string, details: string): Promise<{ id: string }> {
+/** 신고 대상: 사람(user) 또는 커뮤니티 글(post) */
+export type ReportTarget = { type: "user" | "post"; id: string };
+
+export async function reportTarget(target: ReportTarget, reason: string, details: string): Promise<{ id: string }> {
   const known = SERVER_REASONS.has(reason);
   const label = REPORT_REASONS.find((item) => item.code === reason)?.label;
   return api<{ id: string }>("/api/reports", {
     body: {
-      targetType: "user",
-      targetId: partnerId,
+      targetType: target.type,
+      targetId: target.id,
       reason: known ? reason : "other",
       details: [known || !label ? "" : `[${tx(label)}]`, details.trim()].filter(Boolean).join(" "),
     },

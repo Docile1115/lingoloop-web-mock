@@ -190,6 +190,16 @@ test("single-post permalinks reuse server visibility and block checks", async ()
   assert.match(route, /liked: reaction\.exists/);
 });
 
+test("deleting a post checks the author and removes its comments, corrections and likes", async () => {
+  const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const route = source.slice(source.indexOf('app.delete("/api/posts/:postId"'), source.indexOf("async function readablePost"));
+
+  assert.match(route, /authorId !== req\.auth\.uid[\s\S]*POST_FORBIDDEN/);
+  // 하위 컬렉션(replies·reactions)까지 함께 지웁니다. 문서만 지우면 댓글이 주인 없이 남습니다.
+  assert.match(route, /POST_FORBIDDEN[\s\S]*await db\.recursiveDelete\(postReference\)/);
+  assert.doesNotMatch(route, /postReference\.delete\(\)/);
+});
+
 test("every relationship and content producer rechecks bidirectional blocks transactionally", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const helper = source.slice(source.indexOf("async function assertNotBlockedInTransaction"), source.indexOf("async function blockedBothWays"));

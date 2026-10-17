@@ -67,7 +67,8 @@ export function PartnerMenu({ partner, open, onClose, onBlocked }: { partner: Pr
         onConfirm={() => void block()}
       />
       <ReportDialog
-        partner={partner}
+        target={{ type: "user", id: partner.id }}
+        person={partner}
         visible={shown === "report"}
         onClose={() => setMode("menu")}
         onReported={(wasBlocked) => {

@@ -137,3 +137,51 @@ export type SavedPhrase = {
   source: string;
   createdAt: string;
 };
+
+/** 커뮤니티 글의 작성자 카드(서버 postAuthorView). 글에 굳히지 않고 지금 프로필로 채워 옵니다. */
+export type PostAuthor = {
+  id: string;
+  name: string | null;
+  handle?: string | null;
+  avatarUrl?: string;
+  avatarMode?: Profile["avatarMode"];
+  avatarConfig?: Profile["avatarConfig"];
+  countryCode?: string;
+  /** 가르칠 수 있는 말 */
+  native?: string;
+  /** 배우는 말과 단계 */
+  learning?: { code: string; level: string } | null;
+};
+
+/** 커뮤니티 글(GET /api/posts · /api/posts/:id) */
+export type Post = {
+  id: string;
+  authorId: string;
+  author: PostAuthor;
+  text: string;
+  /** 글을 쓴 말 */
+  language: string;
+  tags: string[];
+  visibility: "public" | "partners" | string;
+  requestCorrection: boolean;
+  imageUrl?: string;
+  audioUrl?: string;
+  likes: number;
+  comments: number;
+  corrections: number;
+  liked?: boolean;
+  createdAt: string;
+};
+
+/** 댓글·교정(GET /api/posts/:id/replies). 교정은 고친 문장(text)과 고치기 전 문장(original)을 함께 듭니다. */
+export type PostReply = {
+  id: string;
+  postId: string;
+  authorId: string;
+  text: string;
+  kind: "reply" | "correction";
+  original: string;
+  parentId: string;
+  createdAt: string;
+  author: PostAuthor;
+};

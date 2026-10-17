@@ -75,7 +75,8 @@ export default function Notifications() {
       case "post_reply":
       case "post_correction":
       case "comment_reply":
-        router.push("/community");
+        if (notification.postId) router.push({ pathname: "/community/[postId]", params: { postId: notification.postId } });
+        else router.push("/community");
         return;
       default:
         // 마이룸 알림은 마이룸을 열 때 이어 붙입니다. 지금은 읽음으로만 바꿉니다.

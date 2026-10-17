@@ -1879,7 +1879,8 @@ app.post("/api/posts", requireUser, async (req, res) => {
 /**
  * 내 글 삭제. 남의 글은 지울 수 없으므로 작성자를 서버에서 확인합니다
  * (화면이 메뉴를 숨기는 것만으로는 권한이 되지 않습니다).
- * 좋아요 하위 컬렉션도 함께 지워 고아 문서를 남기지 않습니다.
+ * 좋아요(reactions)와 댓글·교정(replies) 하위 컬렉션도 함께 지워 고아 문서를 남기지 않습니다.
+ * 예전에는 좋아요만 지워서, 지운 글의 댓글이 주인 없이 남았습니다.
  */
 app.delete("/api/posts/:postId", requireUser, async (req, res) => {
   const postId = docId(req.params.postId, "postId");
@@ -1889,11 +1890,7 @@ app.delete("/api/posts/:postId", requireUser, async (req, res) => {
   if (snapshot.data().authorId !== req.auth.uid) {
     throw new ApiError(403, "POST_FORBIDDEN", "내가 쓴 글만 삭제할 수 있습니다.");
   }
-  const reactions = await postReference.collection("reactions").get();
-  const batch = db.batch();
-  reactions.docs.forEach((document) => batch.delete(document.ref));
-  batch.delete(postReference);
-  await batch.commit();
+  await db.recursiveDelete(postReference);
   return success(res, req, { id: postId, deleted: true });
 });
 

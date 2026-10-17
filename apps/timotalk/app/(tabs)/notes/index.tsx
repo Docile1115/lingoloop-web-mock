@@ -169,13 +169,14 @@ function CorrectionRow({ correction, first }: { correction: ReceivedCorrection; 
   const fromChat = correction.source === "chat";
   const open = () => {
     if (fromChat && correction.conversationId) router.push({ pathname: "/chat/[id]", params: { id: correction.conversationId } });
+    else if (correction.postId) router.push({ pathname: "/community/[postId]", params: { postId: correction.postId } });
     else router.push("/community");
   };
   return (
     <Pressable
       onPress={open}
       accessibilityRole="link"
-      accessibilityHint={fromChat ? t("이 교정을 받은 대화를 열어요") : t("커뮤니티를 열어요")}
+      accessibilityHint={fromChat ? t("이 교정을 받은 대화를 열어요") : t("이 교정이 달린 글을 열어요")}
       style={({ pressed }) => ({
         paddingVertical: space.md,
         paddingHorizontal: space.lg,
