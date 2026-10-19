@@ -80,6 +80,8 @@ export async function deleteAccountData(db, uid, { pageSize = PAGE_SIZE, concurr
     throw new Error("deleteAccountData: invalid uid");
   }
   const options = { pageSize, concurrency };
+  // 폰 알림 기기를 맨 먼저 지웁니다. 지우는 동안 남이 보낸 메시지가 지운 계정의 폰을 울리지 않게 합니다.
+  await step("pushTokens", () => deletePushTokens(db, uid, options));
   await step("conversations", () => deleteConversations(db, uid, options));
   await step("posts", () => deleteOwnPosts(db, uid, options));
   await step("postActivity", () => deletePostActivity(db, uid, options));
@@ -165,6 +167,12 @@ async function step(stage, run) {
   } catch (error) {
     throw new AccountDeletionError(stage, error);
   }
+}
+
+/** 이 사람이 폰 알림을 받던 기기(pushTokens, push.mjs). */
+async function deletePushTokens(db, uid, { pageSize }) {
+  const query = db.collection("pushTokens").where("uid", "==", uid).limit(pageSize);
+  await drain(query, (documents) => deleteDocuments(db, documents.map((document) => document.ref)));
 }
 
 /**

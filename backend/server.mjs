@@ -25,6 +25,7 @@ import { createSessionVerificationCache, isSessionRejection } from "./session-ca
 import { RoomValidationError, roomFields, validateRoomConfig } from "./room.mjs";
 import { registerHomeRoutes } from "./homes.mjs";
 import { registerAccountRoutes } from "./account-deletion.mjs";
+import { EXPO_PUSH_URL, createPushDelivery, registerPushRoutes } from "./push.mjs";
 import {
   CHAT_CORRECTIONS_LIMIT,
   correctionInboxEntry,
@@ -67,6 +68,10 @@ const GEMINI_PROVIDER = "google-vertex-ai";
 const AI_TRANSLATION_DAILY_LIMIT = Number(process.env.AI_TRANSLATION_DAILY_LIMIT || 100);
 const AI_SUPPORT_DAILY_LIMIT = Number(process.env.AI_SUPPORT_DAILY_LIMIT || 30);
 const PORT = Number(process.env.PORT || 8080);
+/* 폰 알림(push.mjs). 로컬에서는 EXPO_PUSH_URL 을 가짜 서버로 돌릴 수 있습니다.
+   EXPO_ACCESS_TOKEN 은 Expo 프로젝트에서 "보내기에 토큰 필요"를 켰을 때만 둡니다. */
+const EXPO_PUSH_ENDPOINT = process.env.EXPO_PUSH_URL || EXPO_PUSH_URL;
+const EXPO_ACCESS_TOKEN = process.env.EXPO_ACCESS_TOKEN || "";
 /**
  * 신고를 볼 수 있는 사람. 쉼표로 구분한 uid 목록입니다.
  * 역할 데이터를 따로 두지 않은 것은, 운영자가 몇 명뿐이고 배포 설정에 드러나 있는
@@ -1222,6 +1227,7 @@ app.post("/api/auth/session", authRateLimit, async (req, res) => {
       email: userRecord.email || "",
       emailVerified: userRecord.emailVerified,
     },
+    isAdmin: ADMIN_UIDS.has(decoded.uid),
   });
 });
 
@@ -1232,6 +1238,8 @@ app.get("/api/auth/me", requireUser, async (req, res) => {
       email: req.auth.email,
       emailVerified: req.auth.emailVerified,
     },
+    // 새 앱이 "나" 화면에 신고 검토를 보일지 정합니다(옛 웹·앱은 /api/bootstrap 의 같은 값을 씁니다).
+    isAdmin: ADMIN_UIDS.has(req.auth.uid),
   });
 });
 
@@ -1354,6 +1362,9 @@ app.post("/api/notifications/read-all", requireUser, async (req, res) => {
 registerHomeRoutes(app, { db, requireUser, success, ApiError, assertNotBlockedInTransaction, profileForOthers, putNotification, removeNotification, nowIso, todayInSeoul });
 // DELETE /api/account — 계정 삭제(탈퇴). 순서와 보증은 account-deletion.mjs 에 적어 두었습니다.
 registerAccountRoutes(app, { db, auth, requireUser, success, ApiError, clearSessionCookie, nowIso });
+// POST·DELETE /api/push/devices — 이 기기에서 폰 알림 받기·끄기(push.mjs)
+registerPushRoutes(app, { db, requireUser, success, ApiError, nowIso });
+const deliverPush = createPushDelivery({ db, url: EXPO_PUSH_ENDPOINT, accessToken: EXPO_ACCESS_TOKEN });
 
 app.patch("/api/profile/room", requireUser, async (req, res) => {
   if (!req.body || Object.keys(req.body).length !== 1 || !Object.hasOwn(req.body, "config")) {
@@ -1983,7 +1994,10 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
   };
   const postReference = db.collection("posts").doc(postId);
   const parentReference = parentId ? postReference.collection("replies").doc(parentId) : null;
+  // 폰 알림으로도 보낼 알림. transaction 이 다시 돌면 처음부터 다시 모읍니다.
+  let pushes = [];
   await db.runTransaction(async (transaction) => {
+    pushes = [];
     const [snapshot, parentSnapshot, quotaSnapshot] = await Promise.all([
       transaction.get(postReference),
       parentReference ? transaction.get(parentReference) : Promise.resolve(null),
@@ -2007,7 +2021,7 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
       corrections: kind === "correction" ? (current.corrections || 0) + 1 : current.corrections || 0,
       updatedAt: timestamp,
     });
-    putNotification(transaction, {
+    const postNotification = putNotification(transaction, {
       type: kind === "correction" ? "post_correction" : "post_reply",
       recipientId: current.authorId,
       actorId: req.auth.uid,
@@ -2018,8 +2032,9 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
       excerpt: text,
       createdAt: timestamp,
     });
+    if (postNotification) pushes.push({ notification: postNotification });
     if (parentAuthorId && parentAuthorId !== current.authorId) {
-      putNotification(transaction, {
+      const parentNotification = putNotification(transaction, {
         type: "comment_reply",
         recipientId: parentAuthorId,
         actorId: req.auth.uid,
@@ -2030,8 +2045,10 @@ app.post("/api/posts/:postId/replies", requireUser, async (req, res) => {
         excerpt: text,
         createdAt: timestamp,
       });
+      if (parentNotification) pushes.push({ notification: parentNotification });
     }
   });
+  await deliverPush(pushes, { actorName: req.auth.profile.name, requestId: req.requestId });
   return success(
     res,
     req,
@@ -2358,7 +2375,9 @@ app.post("/api/conversations/:conversationId/accept", requireUser, async (req, r
   const id = docId(req.params.conversationId, "conversationId");
   const reference = db.collection("conversations").doc(id);
   const notificationEventId = crypto.randomUUID();
+  let pushes = [];
   const conversation = await db.runTransaction(async (transaction) => {
+    pushes = [];
     const snapshot = await transaction.get(reference);
     if (!snapshot.exists) throw new ApiError(404, "CONVERSATION_NOT_FOUND", "대화를 찾을 수 없습니다.");
     const data = snapshot.data();
@@ -2383,7 +2402,7 @@ app.post("/api/conversations/:conversationId/accept", requireUser, async (req, r
       sourceId: id,
     });
     if (!(data.mutedBy || []).includes(data.requestSenderId)) {
-      putNotification(transaction, {
+      const accepted = putNotification(transaction, {
         type: "request_accepted",
         recipientId: data.requestSenderId,
         actorId: req.auth.uid,
@@ -2392,9 +2411,11 @@ app.post("/api/conversations/:conversationId/accept", requireUser, async (req, r
         eventId: notificationEventId,
         createdAt: timestamp,
       });
+      if (accepted) pushes.push({ notification: accepted });
     }
     return { ...data, ...patch };
   });
+  await deliverPush(pushes, { actorName: req.auth.profile.name, requestId: req.requestId });
   return success(res, req, await conversationView(conversation, req.auth.uid, true));
 });
 
@@ -2621,7 +2642,9 @@ async function createMessage(req, res, conversationId) {
     : "message-" + crypto.randomUUID();
   const conversationReference = db.collection("conversations").doc(id);
   const messageReference = conversationReference.collection("messages").doc(clientMessageId);
+  let pushes = [];
   const result = await db.runTransaction(async (transaction) => {
+    pushes = [];
     const conversationSnapshot = await transaction.get(conversationReference);
     if (!conversationSnapshot.exists) throw new ApiError(404, "CONVERSATION_NOT_FOUND", "대화를 찾을 수 없습니다.");
     const conversation = conversationSnapshot.data();
@@ -2709,8 +2732,8 @@ async function createMessage(req, res, conversationId) {
       /* 처음 말을 걸 때는 "요청", 이미 열린 대화면 "새 메시지".
          sourceId 를 대화 id 로 둡니다 — 문서 id 가 type+수신자+보낸이+sourceId 라
          같은 대화의 메시지가 한 줄로 모입니다. 20통을 보내도 알림은 하나이고
-         가장 최근 내용으로 갱신됩니다. */
-      putNotification(transaction, {
+         가장 최근 내용으로 갱신됩니다. 폰 알림은 메시지마다 갑니다(대화 알림을 끈 사람에게는 둘 다 가지 않음). */
+      const notification = putNotification(transaction, {
         type: conversationStatus(conversation) === "pending" ? "message_request" : "message",
         recipientId,
         actorId: req.auth.uid,
@@ -2720,6 +2743,7 @@ async function createMessage(req, res, conversationId) {
         excerpt: text,
         createdAt: timestamp,
       });
+      if (notification) pushes.push({ notification, messageType: type });
     }
 
     transaction.update(conversationReference, {
@@ -2738,6 +2762,8 @@ async function createMessage(req, res, conversationId) {
     });
     return { message, created: true };
   });
+  // 같은 요청의 재시도(created: false)에는 다시 보내지 않습니다.
+  if (result.created) await deliverPush(pushes, { actorName: req.auth.profile.name, requestId: req.requestId });
   return success(res, req, { conversationId: id, message: result.message }, result.created ? 201 : 200);
 }
 
@@ -2810,10 +2836,22 @@ app.get("/api/admin/reports", requireUser, requireAdmin, async (req, res) => {
     .filter((row) => (status === "all" ? true : status === "open" ? row.status === "received" : row.status !== "received"))
     .sort((left, right) => String(right.submittedAt).localeCompare(String(left.submittedAt)));
   // 예전 신고의 targetId 는 검증 없이 저장됐습니다. "a/b" 하나로 목록 전체가 500 이 되지 않게 거릅니다.
+  const validId = (id) => isDocumentId(id, { min: 1 });
+  // 글 신고는 무엇을 신고했는지 보이게 글 내용과 글쓴이를 함께 냅니다(사진·음성은 크기가 커서 읽지 않습니다).
+  const postIds = [...new Set(rows.filter((row) => row.targetType === "post" && validId(row.targetId)).map((row) => row.targetId))];
+  const postSnapshots = postIds.length
+    ? await db.getAll(...postIds.map((postId) => db.collection("posts").doc(postId)), { fieldMask: ["authorId", "text", "createdAt"] })
+    : [];
+  const posts = new Map(postSnapshots.filter((snapshot) => snapshot.exists).map((snapshot) => [snapshot.id, snapshot.data()]));
   const profiles = await profilesByIds(
-    [...rows.map((r) => r.reporterId), ...rows.map((r) => r.targetId)].filter((id) => isDocumentId(id, { min: 1 })),
+    [...rows.map((r) => r.reporterId), ...rows.map((r) => r.targetId), ...[...posts.values()].map((post) => post.authorId)].filter(validId),
   );
   const named = (id) => (profiles.get(id) ? { id, name: profiles.get(id).name, handle: profiles.get(id).handle } : { id, name: null, handle: null });
+  // 지워진 글은 null 입니다(글쓴이가 지웠거나 탈퇴).
+  const postView = (postId) => {
+    const post = posts.get(postId);
+    return post ? { id: postId, text: String(post.text || "").slice(0, 1000), createdAt: post.createdAt, author: named(post.authorId) } : null;
+  };
   return success(
     res,
     req,
@@ -2827,6 +2865,7 @@ app.get("/api/admin/reports", requireUser, requireAdmin, async (req, res) => {
       resolution: row.resolution || "",
       reporter: named(row.reporterId),
       target: named(row.targetId),
+      ...(row.targetType === "post" ? { post: postView(row.targetId) } : {}),
     })),
     200,
     { pagination: { total: rows.length, nextCursor: null } },

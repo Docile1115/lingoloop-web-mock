@@ -209,6 +209,10 @@ function seedWorld(db) {
   put(`homes/${UID}/photos/frame`, { image: "data:image/jpeg;base64,AAAA", caption: "me" });
   put(`homes/${UID}/stamps/amy`, { authorId: "amy", gift: "flower", note: "hello", day: DAY });
   put(`homeFavorites/${UID}/items/amy`, { ownerId: "amy", createdAt: AT });
+  // 폰 알림 기기(push.mjs). 문서 id 가 토큰 해시라 uid 로 찾아 지웁니다. 에이미의 기기는 남습니다.
+  put("pushTokens/device-leaver-phone", { id: "device-leaver-phone", token: "ExponentPushToken[leaver-phone-01]", uid: UID, platform: "ios", locale: "ko", updatedAt: AT });
+  put("pushTokens/device-leaver-tablet", { id: "device-leaver-tablet", token: "ExponentPushToken[leaver-tablet-1]", uid: UID, platform: "android", locale: "ja", updatedAt: AT });
+  put("pushTokens/device-amy", { id: "device-amy", token: "ExponentPushToken[amy-phone-0001]", uid: "amy", platform: "android", locale: "en", updatedAt: AT });
   notify({ type: "home_entry", recipientId: UID, actorId: "amy", sourceId: "e1-amy", homeOwnerId: UID, excerpt: "hi leaver" });
   notify({ type: "home_reply", recipientId: "amy", actorId: UID, sourceId: "e1-amy", homeOwnerId: UID, excerpt: "thanks" });
   // 내 집에서 다른 사람끼리 생긴 알림(벤이 에이미의 글에 하트). 집이 사라지면 갈 곳이 없습니다.
@@ -398,6 +402,7 @@ function assertCleanWorld(db, { reports, othersDailyMatch }) {
     "homes/amy", "homes/amy/entries/e1-ben", "homes/amy/entries/e1-ben/hearts/amy", "homes/amy/entries/e3-cat",
     "homes/amy/stamps/ben", "homes/amy/photos/frame", "homes/cat/entries/e2-cat", "homeFavorites/amy/items/ben",
     "corrections/amy/items/fix-by-ben", "corrections/ben/items/fix-by-amy",
+    "pushTokens/device-amy",
     ...keptNotifications,
   ]) {
     assert.ok(db.rows.has(path), "kept: " + path);

@@ -59,10 +59,12 @@ API 성공 응답에는 다음 메타데이터가 포함됩니다.
 
 - 음성 대화(보이스룸, WebRTC/SFU). Phase 1 범위에서 제외했습니다.
 - 전화번호·신분증 인증. 현재는 소셜 공급자가 확인한 계정 정보만 사용
-- OS 모바일 푸시 알림, 네이티브 앱 스토어 출시. Expo iOS·Android 코드는 구현되어 있으나 배포 웹과 별도로 앱 빌드·심사 필요
+- OS 모바일 푸시 알림의 실제 발송. 서버(`/api/push/devices`, Expo 푸시 서비스로 발송)와 새 앱(`apps/timotalk`) 코드는 있으나,
+  계정 소유자가 Expo(EAS) 프로젝트를 만들고 Apple 푸시 키(APNs)와 Firebase Android 설정(FCM)을 연결해야 실제로 울림
+- 네이티브 앱 스토어 출시. Expo iOS·Android 코드는 구현되어 있으나 배포 웹과 별도로 앱 빌드·심사 필요
 - 실시간 동시 입장·다른 사용자와 이동 동기화. 방 안 이동·가구 상호작용은 각 방문자의 로컬 세션에서 동작하며, 친구 집은 비동기 방문 방식임
 - 결제, VIP 권한, 광고 보상. 초기 제품 정책에 따라 의도적으로 제외
-- 운영자용 신고 심사 화면, 자동 제재, 이의제기·긴급 대응 워크플로
+- 자동 제재, 이의제기·긴급 대응 워크플로. 신고 검토 화면은 새 앱(`apps/timotalk`)의 나 > 신고 검토에 있음(`ADMIN_UIDS` 만)
 - WebSocket 기반 실시간 전달. 현재 대화 화면은 주기적으로 새 메시지를 조회
 - 정교한 스팸·스캠 탐지, 기기 지문, 다단계 rate limit과 콘텐츠 모더레이션
 - Gemini 인증 키가 없는 개발 환경에서는 번역·대화 지원 API가 가짜 결과 대신 `503`을 반환
@@ -212,7 +214,8 @@ homeQuotas/{uid}
 | `GET` | `/api/countries` | 프로필에서 고를 수 있는 국가 목록 |
 | `GET` | `/api/blocks` | 내가 차단한 사용자 목록 |
 | `POST/DELETE` | `/api/partners/{id}/block` | 차단·차단 해제 |
-| `GET/PATCH` | `/api/admin/reports` | 운영자용 신고 목록·처리 (ADMIN_UIDS 만) |
+| `GET/PATCH` | `/api/admin/reports` | 운영자용 신고 목록·처리 (ADMIN_UIDS 만). 글 신고는 글 내용과 글쓴이(`post`)를 함께 줌 |
+| `POST/DELETE` | `/api/push/devices` | 이 기기에서 폰 알림 받기·끄기. 본문 `{ token, platform, locale }` (Expo 푸시 토큰) |
 | `GET/POST` | `/api/reports` | 내 신고 내역 조회·신고 접수 |
 | `GET` | `/api/account/verification` | 이메일·전화·신원 인증 상태 조회 |
 | `GET` | `/api/search?q=...` | 사용자·게시물 검색 |
@@ -297,6 +300,8 @@ npm run dev
 | `AI_TRANSLATION_DAILY_LIMIT` | 아니요 | 사용자당 번역 일일 한도. 기본값 `100` |
 | `AI_SUPPORT_DAILY_LIMIT` | 아니요 | 사용자당 대화 지원 일일 한도. 기본값 `30` |
 | `ADMIN_UIDS` | 아니요 | 신고 처리 화면을 볼 사람의 uid. 쉼표로 구분 |
+| `EXPO_PUSH_URL` | 아니요 | 폰 알림을 보낼 곳. 기본값 Expo 푸시 서비스 `https://exp.host/--/api/v2/push/send` |
+| `EXPO_ACCESS_TOKEN` | 아니요 | Expo 프로젝트에서 푸시 보안(토큰 필요)을 켰을 때만. Secret Manager로 주입 |
 | `PORT` | 아니요 | Cloud Run이 주입하며 기본값 `8080` |
 
 ### 웹 서비스
