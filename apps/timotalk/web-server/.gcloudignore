@@ -1,0 +1,5 @@
+# gcloud run deploy --source 가 올리는 파일. dist/ 는 git 에서는 빼지만(apps/timotalk/.gitignore) 이미지에는 들어가야 합니다.
+# 이 파일이 있으면 gcloud 는 .gitignore 를 읽지 않습니다.
+.gcloudignore
+# 맨 위의 node_modules 만 뺍니다. dist/assets/node_modules/ 아래 그림(화면 이동 아이콘)은 올려야 합니다.
+/node_modules/

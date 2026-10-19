@@ -20,6 +20,8 @@ env:
   GCP_BUILD_SERVICE_ACCOUNT: ${{ vars.GCP_BUILD_SERVICE_ACCOUNT }}
   API_SERVICE: lingoloop-api
   WEB_SERVICE: lingoloop-web
+  # 새 앱(apps/timotalk)의 베타 웹. 서비스가 만들어진 뒤부터 배포합니다(아래 deploy-timotalk-beta).
+  BETA_SERVICE: timotalk-beta
 
 jobs:
   verify:
@@ -194,3 +196,101 @@ jobs:
             }
           '
           echo "url=$WEB_URL" >> "$GITHUB_OUTPUT"
+
+  # 새 앱 웹 베타. 운영 웹·API 배포가 끝난 뒤 따로 돌아서, 베타가 실패해도 운영 배포는 그대로 성공으로 남습니다.
+  # 서비스(실행 계정·API 주소·비밀·검색엔진 차단)는 처음 한 번 사람이 만듭니다(apps/timotalk/README.md "베타 웹").
+  # 아직 없으면 건너뜁니다.
+  deploy-timotalk-beta:
+    name: Deploy TimoTalk beta web
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out verified commit
+        uses: actions/checkout@v7
+
+      - name: Authenticate to Google Cloud without a key
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          request_reason: github-actions:${{ github.repository }}@${{ github.sha }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Check that the beta service exists
+        id: beta
+        shell: bash
+        run: |
+          if gcloud run services describe "$BETA_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --format='value(metadata.name)' > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$BETA_SERVICE does not exist yet, so the beta web was not deployed."
+          fi
+
+      - name: Use Node.js 22
+        if: steps.beta.outputs.exists == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/timotalk/package-lock.json
+
+      # 웹 빌드는 여기서 만들어 이미지 폴더에 넣습니다. 공용 번역 사전(app/lib/i18n)이 그 폴더 밖에 있어서입니다.
+      - name: Build the web app
+        if: steps.beta.outputs.exists == 'true'
+        shell: bash
+        run: |
+          npm --prefix apps/timotalk ci
+          npm --prefix apps/timotalk run typecheck
+          npm --prefix apps/timotalk run export:web
+          rm -rf apps/timotalk/web-server/dist
+          cp -r apps/timotalk/dist apps/timotalk/web-server/dist
+
+      - name: Deploy beta web
+        if: steps.beta.outputs.exists == 'true'
+        shell: bash
+        run: |
+          gcloud run deploy "$BETA_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --source=apps/timotalk/web-server \
+            --build-service-account="$GCP_BUILD_SERVICE_ACCOUNT" \
+            --quiet
+
+      - name: Check beta through its API proxy
+        if: steps.beta.outputs.exists == 'true'
+        shell: bash
+        run: |
+          BETA_URL="$(gcloud run services describe "$BETA_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --format='value(status.url)')"
+          test -n "$BETA_URL"
+          # 화면 주소가 index.html 로 오고 검색엔진 차단 머리글이 붙는지. 응답을 받아 둔 뒤 검사합니다
+          # (pipefail 에서 grep -q 가 먼저 끝나 curl 을 끊으면 단계가 실패로 보일 수 있습니다).
+          PAGE="$(curl --fail --show-error --silent \
+            --retry 8 --retry-all-errors --retry-delay 5 \
+            "$BETA_URL/chat/check")"
+          grep -q '<div id="root">' <<< "$PAGE"
+          HEADERS="$(curl --fail --show-error --silent --head "$BETA_URL/")"
+          grep -qi '^x-robots-tag: noindex' <<< "$HEADERS"
+          HEALTH_JSON="$(curl --fail --show-error --silent \
+            --retry 8 --retry-all-errors --retry-delay 5 \
+            "$BETA_URL/api/health")"
+          HEALTH_JSON="$HEALTH_JSON" node --input-type=module -e '
+            const health = JSON.parse(process.env.HEALTH_JSON);
+            if (health?.data?.status !== "ok" || health?.meta?.mock !== false || health?.meta?.persistent !== true) {
+              console.error("Unexpected beta health response", health);
+              process.exit(1);
+            }
+          '
+          echo "Beta web: $BETA_URL"
