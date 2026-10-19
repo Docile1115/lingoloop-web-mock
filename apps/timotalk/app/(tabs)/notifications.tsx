@@ -1,13 +1,11 @@
 /**
- * 알림. 누르면 읽음으로 바꾸고 그 일이 있었던 곳으로 갑니다.
- *  - 메시지 요청 → 요청함, 요청 수락·새 메시지 → 그 대화방
- *  - 마음·팔로우(예전 웹의 기능) → 그 사람의 프로필
- *  - 글·댓글·교정 → 커뮤니티(글 화면은 커뮤니티를 열 때 붙입니다), 마이룸 알림 → 마이룸을 열 때 붙입니다
+ * 알림. 누르면 읽음으로 바꾸고 그 일이 있었던 곳으로 갑니다(갈 곳은 features/notifications/target.ts — 폰 알림과 같은 규칙).
  * 문구는 웹과 같은 사전 키를 씁니다.
  */
 import { Pressable, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useNotifications, type AppNotification } from "@/features/notifications/store";
+import { notificationHref } from "@/features/notifications/target";
 import { t } from "@/lib/i18n";
 import { relativeTime } from "@/lib/time";
 import { useTheme } from "@/theme/theme";
@@ -59,29 +57,9 @@ export default function Notifications() {
 
   const open = (notification: AppNotification) => {
     void markRead(notification);
-    switch (notification.type) {
-      case "message_request":
-        router.push("/chats?box=requests");
-        return;
-      case "request_accepted":
-      case "message":
-        if (notification.conversationId) router.push({ pathname: "/chat/[id]", params: { id: notification.conversationId } });
-        return;
-      case "partner_like":
-      case "follow":
-        if (notification.actor) router.push({ pathname: "/people/[id]", params: { id: notification.actor.id } });
-        return;
-      case "post_like":
-      case "post_reply":
-      case "post_correction":
-      case "comment_reply":
-        if (notification.postId) router.push({ pathname: "/community/[postId]", params: { postId: notification.postId } });
-        else router.push("/community");
-        return;
-      default:
-        // 마이룸 알림은 마이룸을 열 때 이어 붙입니다. 지금은 읽음으로만 바꿉니다.
-        return;
-    }
+    // 마이룸 알림은 갈 곳이 없어 읽음으로만 바꿉니다.
+    const href = notificationHref({ ...notification, actorId: notification.actor?.id });
+    if (href) router.push(href);
   };
 
   return (

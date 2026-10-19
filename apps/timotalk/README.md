@@ -19,6 +19,8 @@
 - 대화에서 문장 고쳐 주기, 노트(받은 교정·저장한 표현)와 복습
 - 커뮤니티: 글 목록(내가 고쳐 줄 수 있는 글을 맨 위에), 글쓰기(쓴 말·교정 부탁·공개 범위·사진),
   글 화면(문장 골라 고쳐 주기·댓글과 답글·좋아요·내 글 지우기·글 신고)
+- 폰 알림(앱만): 새 메시지·요청·교정. 나 > 알림에서 켜고 끄고, 누르면 그 대화·글이 열립니다(아래 "폰 알림 설정")
+- 신고 검토(운영자만): 나 > 운영 > 신고 검토. 처리 전·처리함으로 나눠 보고 조치함·문제없음과 메모를 남깁니다
 
 ## 구조
 
@@ -65,3 +67,17 @@ npm run bundle      # iOS·Android 번들이 만들어지는지
 ```
 
 린트와 번역 검사는 저장소 루트에서 돌립니다(`npm run lint`, `npm test`).
+
+## 폰 알림 설정 (계정 소유자 작업)
+
+코드는 들어 있지만, 아래를 마치기 전에는 앱의 "폰 알림"이 "이 버전의 앱에서는 아직 쓸 수 없어요"로 꺼져 있습니다.
+알림은 Expo 푸시 서비스가 Apple·Google 로 넘겨 줍니다(서버: `backend/push.mjs`).
+
+1. Expo 계정으로 EAS 프로젝트를 만듭니다: 이 폴더에서 `npx eas-cli init`. `app.json` 에 `extra.eas.projectId` 가 들어갑니다.
+2. iOS: Apple 개발자 계정에서 푸시 키(APNs, .p8)를 만들어 `npx eas-cli credentials` 로 올립니다.
+3. Android: Firebase 프로젝트에 Android 앱(`com.lingoloop.app`)을 더하고 `google-services.json` 을 받아
+   `app.json` 의 `android.googleServicesFile` 로 지정합니다. FCM V1 서비스 계정 키를 `npx eas-cli credentials` 로 올립니다.
+4. (선택) Expo 프로젝트에서 푸시 보안을 켰다면 서버에 `EXPO_ACCESS_TOKEN` 을 넣습니다.
+5. 실제 기기용으로 다시 빌드합니다(시뮬레이터·Expo Go 에서는 푸시 토큰을 받을 수 없습니다).
+
+로컬에서는 API 의 `EXPO_PUSH_URL` 을 가짜 서버로 돌려 무엇이 보내지는지 확인할 수 있습니다.
