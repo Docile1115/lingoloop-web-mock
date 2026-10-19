@@ -1,9 +1,11 @@
 /**
- * 나: 내 프로필 요약과 설정 목록(화면 언어 · 받는 메시지 · 차단한 사람 · 계정).
+ * 나: 내 프로필 요약과 설정 목록(화면 언어 · 받는 메시지 · 차단한 사람 · 폰 알림 · 계정).
+ * 운영자(서버 ADMIN_UIDS)에게는 신고 검토 줄이 더 보입니다.
  */
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 import { useRouter } from "expo-router";
+import { PushSetting } from "@/features/notifications/PushSetting";
 import { changeLocale, LOCALE_LABEL, LOCALES, t, useLocale } from "@/lib/i18n";
 import { useSession, useMe } from "@/lib/session";
 import { languageName, learningSummary, placeName } from "@/lib/words";
@@ -23,7 +25,7 @@ export default function Me() {
   const { c } = useTheme();
   const router = useRouter();
   const me = useMe();
-  const { signOut } = useSession();
+  const { signOut, isAdmin } = useSession();
   const { locale } = useLocale();
   const [askSignOut, setAskSignOut] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -97,6 +99,14 @@ export default function Me() {
           <ListRow icon="chat" title={t("받는 메시지")} detail={t("누가 나에게 대화를 걸 수 있는지 정해요.")} onPress={() => router.push("/me/messages")} />
           <ListRow icon="shield" title={t("차단한 사람")} detail={t("차단을 풀거나 확인해요.")} onPress={() => router.push("/me/blocked")} />
         </ListGroup>
+
+        <PushSetting />
+
+        {isAdmin ? (
+          <ListGroup title={t("운영")}>
+            <ListRow icon="flag" title={t("신고 검토")} detail={t("접수된 신고를 보고 처리해요.")} onPress={() => router.push("/me/reports")} />
+          </ListGroup>
+        ) : null}
 
         <ListGroup title={t("계정")}>
           <ListRow icon="logout" title={t("로그아웃")} onPress={() => setAskSignOut(true)} trailing={null} />

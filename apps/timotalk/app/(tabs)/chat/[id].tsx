@@ -21,6 +21,7 @@ import { canSpeak, speak, stopSpeaking } from "@/features/chat/speak";
 import { MessageBubble, type Translation as BubbleTranslation } from "@/features/chat/MessageBubble";
 import { useExchangeSession } from "@/features/chat/useExchangeSession";
 import { useMessages, type ChatMessage } from "@/features/chat/useMessages";
+import { usePushNudge } from "@/features/notifications/PushNudge";
 import { api, failureText } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { useMe } from "@/lib/session";
@@ -88,6 +89,8 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
 
   const onFetched = useCallback(() => markRead(conversation.id), [conversation.id, markRead]);
   const { messages, status, error, fetchMessages, send, resend } = useMessages(conversation.id, me.id, onFetched);
+  // 처음 보낸 뒤 한 번 "상대가 답하면 알려 드릴까요?"(앱만)
+  const pushNudge = usePushNudge();
   const session = useExchangeSession(conversation.id, practiceName, teachName);
 
   const [draft, setDraft] = useState("");
@@ -174,6 +177,7 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
     setCoach(null);
     const ok = await send(text);
     if (!ok) showToast(t("보내지 못했어요."), "error");
+    else void pushNudge.afterSend();
     setSending(false);
   };
 
@@ -356,9 +360,11 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
         onChangeText={setDraft}
         onKeyPress={onKeyPress}
         onSubmit={() => void submit()}
-        onSendMedia={(payload) => {
+        onSendMedia={async (payload) => {
           setCoach(null);
-          return send(payload);
+          const ok = await send(payload);
+          if (ok) void pushNudge.afterSend();
+          return ok;
         }}
         placeholder={
           incoming
@@ -390,6 +396,7 @@ function ChatRoom({ conversation }: { conversation: Conversation }) {
         />
       ) : null}
       <ThreadMenu conversation={conversation} open={menuOpen} onClose={() => setMenuOpen(false)} onGone={leaveRoom} />
+      {pushNudge.dialog}
     </KeyboardAvoidingView>
   );
 }

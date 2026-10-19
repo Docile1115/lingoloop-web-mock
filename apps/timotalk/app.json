@@ -55,7 +55,14 @@
           "microphonePermission": "Allow microphone access so you can record voice messages."
         }
       ],
-      "expo-system-ui"
+      "expo-system-ui",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#00C853"
+        }
+      ]
     ],
     "locales": {
       "ko": "./locales/ko.json",
