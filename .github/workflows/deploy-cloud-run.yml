@@ -132,6 +132,27 @@ jobs:
             --region="$GCP_REGION" \
             --format='value(metadata.name)'
 
+      # 운영 웹은 새 앱(apps/timotalk)입니다. 웹 빌드는 여기서 만들어 이미지 폴더에 넣습니다 — 공용 번역 사전
+      # (app/lib/i18n)이 그 폴더 밖에 있어 Cloud Build 안에서는 빌드할 수 없습니다. 서버는 apps/timotalk/web-server/serve.mjs,
+      # 설정은 서비스에 이미 있는 LINGOLOOP_API_URL·PROXY_SHARED_SECRET 를 그대로 씁니다(옛 웹과 같은 이름).
+      # API 배포보다 먼저 빌드합니다 — 빌드가 실패하면 아무것도 바꾸지 않고 멈춥니다.
+      # 되돌리기: 옛 웹의 마지막 버전으로 트래픽을 돌리고 이 변경을 되돌립니다(apps/timotalk/README.md "교체와 되돌리기").
+      - name: Use Node.js 22 for the web build
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/timotalk/package-lock.json
+
+      - name: Build the web app
+        shell: bash
+        run: |
+          npm --prefix apps/timotalk ci
+          npm --prefix apps/timotalk run typecheck
+          npm --prefix apps/timotalk run export:web
+          rm -rf apps/timotalk/web-server/dist
+          cp -r apps/timotalk/dist apps/timotalk/web-server/dist
+
       - name: Deploy API
         shell: bash
         run: |
@@ -162,7 +183,7 @@ jobs:
           gcloud run deploy "$WEB_SERVICE" \
             --project="$GCP_PROJECT_ID" \
             --region="$GCP_REGION" \
-            --source=. \
+            --source=apps/timotalk/web-server \
             --build-service-account="$GCP_BUILD_SERVICE_ACCOUNT" \
             --quiet
 
@@ -175,9 +196,16 @@ jobs:
             --region="$GCP_REGION" \
             --format='value(status.url)')"
           test -n "$WEB_URL"
-          curl --fail --show-error --silent \
+          # 새 앱 화면이 나오는지, 운영에는 검색엔진 차단이 붙지 않았는지(베타 설정이 섞이지 않게) 확인합니다.
+          PAGE="$(curl --fail --show-error --silent \
             --retry 8 --retry-all-errors --retry-delay 5 \
-            "$WEB_URL/" > /dev/null
+            "$WEB_URL/")"
+          grep -q '/_expo/static/js/web/' <<< "$PAGE"
+          HEADERS="$(curl --fail --show-error --silent --head "$WEB_URL/")"
+          if grep -qi '^x-robots-tag:' <<< "$HEADERS"; then
+            echo "Production web must not send X-Robots-Tag" >&2
+            exit 1
+          fi
           HEALTH_JSON="$(curl --fail --show-error --silent \
             --retry 8 --retry-all-errors --retry-delay 5 \
             "$WEB_URL/api/health")"

@@ -316,7 +316,7 @@ npm run dev
 
 현재 구성은 두 개의 Cloud Run 서비스로 배포합니다.
 
-- `lingoloop-web`: 루트 `Dockerfile`
+- `lingoloop-web`: 새 앱 웹(`apps/timotalk/web-server/Dockerfile`, 2026-10 교체). 옛 웹(루트 `Dockerfile`)은 되돌리기용으로 정리 전까지 저장소에 남깁니다
 - `lingoloop-api`: `backend/Dockerfile`
 - `timotalk-beta`: 새 앱 웹 베타(`apps/timotalk/web-server/Dockerfile`). 같은 API·데이터를 쓰며 교체 전까지만 둡니다.
   처음 만드는 방법은 `apps/timotalk/README.md` 의 "베타 웹"
@@ -379,7 +379,7 @@ curl.exe https://YOUR_WEB_URL/api/health
 2. 타입 검사, 린트, 웹 빌드·계약 테스트와 API 테스트
 3. GitHub OIDC로 `lingoloop-github-deployer` 계정의 단기 권한 발급
 4. 전용 `lingoloop-build` 계정으로 API 소스 빌드·배포
-5. API 상태가 정상이면 웹 소스 빌드·배포
+5. 새 앱 웹을 빌드(API 배포 전에 — 실패하면 아무것도 바꾸지 않음)하고, API 상태가 정상이면 웹 배포
 6. 웹 프록시를 통해 Firestore·Identity Platform·Vertex AI 연결과 `mock: false` 확인
 7. `timotalk-beta` 서비스가 있으면 새 앱 웹을 빌드해 배포하고 베타 주소의 화면·`/api/health` 확인(실패해도 1~6에는 영향 없음)
 
