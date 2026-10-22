@@ -69,7 +69,7 @@ npm run bundle      # iOS·Android 번들이 만들어지는지
 
 린트와 번역 검사는 저장소 루트에서 돌립니다(`npm run lint`, `npm test`).
 
-## 베타 웹 (Cloud Run `timotalk-beta`)
+## 운영 웹과 베타 웹 (Cloud Run `lingoloop-web` · `timotalk-beta`)
 
 옛 웹(`lingoloop-web`)은 그대로 두고, 같은 API·데이터에 붙은 새 웹을 따로 띄웁니다. 확인이 끝나면 같은 이미지를
 `lingoloop-web` 에 올려 운영 주소를 한 번에 바꿉니다(주소·로그인 허용 도메인·쿠키가 그대로라 로그인이 유지됩니다).
@@ -97,6 +97,21 @@ gcloud run deploy timotalk-beta --project=lingoloop-prod-20260823 --region=asia-
 그다음 베타 주소(`https://timotalk-beta-254296987362.asia-northeast1.run.app`)를 API 의 `APP_ORIGIN` 과
 Identity Platform 의 승인 도메인에 더해야 로그인과 쓰기 요청이 통과합니다. 교체 뒤에는 베타 서비스를 지우고
 두 목록에서도 뺍니다.
+
+### 교체와 되돌리기
+
+운영 웹(`lingoloop-web`)도 같은 이미지입니다. 운영 배포가 API 배포 전에 웹을 빌드하고, `apps/timotalk/web-server` 를
+`lingoloop-web` 에 올립니다. 서비스에 이미 있는 `LINGOLOOP_API_URL`·`PROXY_SHARED_SECRET` 를 그대로 쓰고
+`TIMOTALK_NOINDEX` 는 두지 않습니다(배포 확인이 운영에 검색엔진 차단이 붙으면 실패로 봅니다).
+주소·로그인 허용 도메인·API 허용 주소·세션 쿠키가 그대로라 로그인한 사람은 로그인된 채로 새 화면을 봅니다.
+
+문제가 생기면 옛 웹의 마지막 버전으로 트래픽을 돌립니다(1분 안쪽). 그다음 교체 변경을 되돌려야 다음 배포가 다시 새 웹을 올리지 않습니다.
+
+```bash
+gcloud run services update-traffic lingoloop-web --project=lingoloop-prod-20260823 --region=asia-northeast1 --to-revisions=<옛 웹의 마지막 버전>=100
+```
+
+다시 새 웹으로 돌아올 때는 `--to-latest` 로 최신 버전에 트래픽을 돌려줍니다.
 
 ## 폰 알림 설정 (계정 소유자 작업)
 
