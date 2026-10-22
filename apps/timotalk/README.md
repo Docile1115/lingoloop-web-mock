@@ -30,6 +30,7 @@ src/theme/           디자인 토큰(A안 색·글자·간격)과 밝게/어둡
 src/ui/              공통 부품(Text·Button·Avatar·Card·메뉴·상태 표시·알림)
 src/lib/             서버 호출(api.ts)·로그인 상태(session.tsx)·소셜 로그인(auth/)·언어(i18n.tsx)·시간·낱말
 src/features/        기능별 데이터와 화면 조각(today·chat·chats·people·notes·community 등)
+web-server/          운영용 웹 서버(웹 빌드 + /api 프록시)와 Cloud Run 이미지. 아래 "베타 웹"
 ```
 
 - 번역 사전은 웹·옛 앱과 같은 `app/lib/i18n` 을 씁니다(`@shared/...`). 화면 문구는 모두 `t("한국어 원문")` 이고,
@@ -67,6 +68,35 @@ npm run bundle      # iOS·Android 번들이 만들어지는지
 ```
 
 린트와 번역 검사는 저장소 루트에서 돌립니다(`npm run lint`, `npm test`).
+
+## 베타 웹 (Cloud Run `timotalk-beta`)
+
+옛 웹(`lingoloop-web`)은 그대로 두고, 같은 API·데이터에 붙은 새 웹을 따로 띄웁니다. 확인이 끝나면 같은 이미지를
+`lingoloop-web` 에 올려 운영 주소를 한 번에 바꿉니다(주소·로그인 허용 도메인·쿠키가 그대로라 로그인이 유지됩니다).
+
+- `web-server/serve.mjs`: 패키지 없는 Node 서버. 웹 빌드(`dist/`)를 내보내고, 화면 주소는 모두 `index.html` 로,
+  `/api` 는 운영 API 로 넘깁니다(옛 웹 프록시 `worker/index.ts` 와 같은 비밀 머리글·접속 IP 규칙).
+  해시가 든 파일은 1년 캐시, `index.html` 은 캐시하지 않고, 글자 파일은 br·gzip 으로 줄여 보냅니다.
+  `TIMOTALK_NOINDEX=true` 면 검색엔진 차단(베타). 테스트: 저장소 루트 `tests/timotalk-web-server.test.mjs`.
+- `web-server/Dockerfile`: `serve.mjs` 와 `dist/` 만 담습니다. 웹 빌드는 이미지 밖에서 만들어 `web-server/dist` 로
+  복사합니다 — 공용 번역 사전(`app/lib/i18n`)이 이 폴더 밖에 있어 Cloud Build 안에서는 빌드할 수 없습니다.
+- 배포: `main` 에 머지되면 운영 배포(`deploy-cloud-run.yml`)의 마지막 작업 `deploy-timotalk-beta` 가 웹을 빌드해 올립니다.
+  서비스가 아직 없으면 건너뜁니다. 실패해도 운영 웹·API 배포는 이미 끝난 뒤라 영향이 없습니다.
+
+처음 한 번은 사람이 서비스를 만듭니다(공개 접근과 실행 계정·비밀을 정하는 일이라 배포 계정에는 맡기지 않습니다).
+실행 계정과 비밀은 옛 웹과 같은 것을 씁니다.
+
+```bash
+npm --prefix apps/timotalk run export:web && rm -rf apps/timotalk/web-server/dist && cp -r apps/timotalk/dist apps/timotalk/web-server/dist
+```
+
+```bash
+gcloud run deploy timotalk-beta --project=lingoloop-prod-20260823 --region=asia-northeast1 --source=apps/timotalk/web-server --build-service-account=projects/lingoloop-prod-20260823/serviceAccounts/lingoloop-build@lingoloop-prod-20260823.iam.gserviceaccount.com --service-account=lingoloop-web-runtime@lingoloop-prod-20260823.iam.gserviceaccount.com --set-env-vars=LINGOLOOP_API_URL=https://lingoloop-api-7cjxlcmgsa-an.a.run.app,TIMOTALK_NOINDEX=true --set-secrets=PROXY_SHARED_SECRET=lingoloop-proxy-shared-secret:latest --min-instances=0 --max-instances=2 --allow-unauthenticated
+```
+
+그다음 베타 주소(`https://timotalk-beta-254296987362.asia-northeast1.run.app`)를 API 의 `APP_ORIGIN` 과
+Identity Platform 의 승인 도메인에 더해야 로그인과 쓰기 요청이 통과합니다. 교체 뒤에는 베타 서비스를 지우고
+두 목록에서도 뺍니다.
 
 ## 폰 알림 설정 (계정 소유자 작업)
 
