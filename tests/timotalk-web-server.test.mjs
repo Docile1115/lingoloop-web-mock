@@ -106,13 +106,13 @@ test("없는 파일과 dist 밖의 파일은 404 이고, 읽기 말고는 받지
   assert.equal((await fetch(base + "/%2e%2e/serve.mjs")).status, 404);
   assert.equal((await fetch(base + "/%2e%2e%2f%2e%2e%2fpackage.json")).status, 404);
   assert.equal((await fetch(base + "/", { method: "POST" })).status, 405);
-  // 베타가 아니면 검색엔진 차단 머리글이 없고 robots.txt 도 없습니다.
+  // 운영(noindex 없음)에는 검색엔진 차단 머리글도 robots.txt 도 없습니다.
   const page = await fetch(base + "/");
   assert.equal(page.headers.get("x-robots-tag"), null);
   assert.equal((await fetch(base + "/robots.txt")).status, 404);
 });
 
-test("베타(noindex)는 모든 응답에 검색엔진 차단 머리글을 달고 robots.txt 로 막는다", async (t) => {
+test("검색엔진 차단(noindex)을 켜면 모든 응답에 차단 머리글을 달고 robots.txt 로 막는다", async (t) => {
   const base = await listen(t, createWebServer({ root: await makeDist(t), noindex: true }));
   assert.equal((await fetch(base + "/chat/1")).headers.get("x-robots-tag"), "noindex, nofollow");
   const robots = await fetch(base + "/robots.txt");
@@ -129,7 +129,7 @@ test("/api 는 비밀 머리글과 Cloud Run 이 덧붙인 접속 IP 를 붙여 
     method: "POST",
     headers: {
       "content-type": "application/json",
-      origin: "https://timotalk-beta.example",
+      origin: "https://app.example",
       cookie: "lingoloop_session=old",
       "x-lingoloop-proxy": "forged",
       "x-lingoloop-client-ip": "6.6.6.6",
@@ -149,7 +149,7 @@ test("/api 는 비밀 머리글과 Cloud Run 이 덧붙인 접속 IP 를 붙여 
   assert.equal(forwarded.headers["x-lingoloop-proxy"], SECRET);
   assert.equal(forwarded.headers["x-lingoloop-client-ip"], "203.0.113.7");
   assert.equal(forwarded.headers["x-forwarded-for"], undefined);
-  assert.equal(forwarded.headers.origin, "https://timotalk-beta.example");
+  assert.equal(forwarded.headers.origin, "https://app.example");
   assert.equal(forwarded.headers.cookie, "lingoloop_session=old");
   assert.equal(forwarded.headers["x-forwarded-proto"], "https");
   assert.match(forwarded.headers["x-forwarded-host"], /^127\.0\.0\.1:\d+$/);
