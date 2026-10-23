@@ -1,5 +1,5 @@
 /**
- * 새 앱(apps/timotalk)의 웹 서버. Cloud Run 에서 돕니다(베타 timotalk-beta, 교체 뒤에는 lingoloop-web).
+ * 새 앱(apps/timotalk)의 웹 서버. 운영 웹(Cloud Run lingoloop-web)에서 돕니다.
  *
  *  - 정적 파일: `expo export --platform web` 결과(dist/). 이름에 해시가 든 파일(_expo/static, assets)은 1년 캐시하고,
  *    index.html 은 캐시하지 않습니다 — 새로 배포하면 다음에 열 때 바로 새 화면이 나옵니다.
@@ -7,7 +7,7 @@
  *  - /api 는 운영 API 로 넘깁니다. 옛 웹의 프록시(worker/index.ts)와 같은 규칙입니다:
  *    공유 비밀(x-lingoloop-proxy)과 접속 IP(x-lingoloop-client-ip)를 붙이고, 요청이 보낸 같은 이름의 머리글은 버립니다.
  *    세션은 API 가 주는 httpOnly 쿠키라 이 주소의 /api 로만 오가고, 여러 개의 Set-Cookie 도 그대로 넘깁니다.
- *  - TIMOTALK_NOINDEX=true(베타)면 검색엔진에 잡히지 않게 합니다(X-Robots-Tag, robots.txt).
+ *  - TIMOTALK_NOINDEX=true 면 검색엔진에 잡히지 않게 합니다(X-Robots-Tag, robots.txt). 운영에는 두지 않습니다.
  *  - 글자 파일(js·html·json·css·svg)은 브라우저가 받을 수 있으면 br·gzip 으로 줄여 보냅니다. 처음 한 번 줄여 메모리에 둡니다
  *    (배포한 파일은 컨테이너가 사는 동안 바뀌지 않습니다).
  *

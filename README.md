@@ -318,8 +318,6 @@ npm run dev
 
 - `lingoloop-web`: 새 앱 웹(`apps/timotalk/web-server/Dockerfile`, 2026-10 교체). 옛 웹(루트 `Dockerfile`)은 되돌리기용으로 정리 전까지 저장소에 남깁니다
 - `lingoloop-api`: `backend/Dockerfile`
-- `timotalk-beta`: 새 앱 웹 베타(`apps/timotalk/web-server/Dockerfile`). 같은 API·데이터를 쓰며 교체 전까지만 둡니다.
-  처음 만드는 방법은 `apps/timotalk/README.md` 의 "베타 웹"
 
 최초 환경에서는 다음 리소스가 필요합니다.
 
@@ -381,7 +379,6 @@ curl.exe https://YOUR_WEB_URL/api/health
 4. 전용 `lingoloop-build` 계정으로 API 소스 빌드·배포
 5. 새 앱 웹을 빌드(API 배포 전에 — 실패하면 아무것도 바꾸지 않음)하고, API 상태가 정상이면 웹 배포
 6. 웹 프록시를 통해 Firestore·Identity Platform·Vertex AI 연결과 `mock: false` 확인
-7. `timotalk-beta` 서비스가 있으면 새 앱 웹을 빌드해 배포하고 베타 주소의 화면·`/api/health` 확인(실패해도 1~6에는 영향 없음)
 
 동시에 여러 커밋이 들어와도 운영 배포는 하나씩 실행되므로 API만 바뀐 중간 상태를 피합니다. 장기 서비스 계정 JSON 키나 애플리케이션 비밀은 GitHub에 저장하지 않으며, 실제 비밀은 기존 Cloud Run의 Secret Manager 참조를 유지합니다. 수동 재배포가 필요하면 GitHub Actions의 `Deploy production to Cloud Run`에서 `Run workflow`를 실행하되 `main`을 선택합니다.
 
